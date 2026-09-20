@@ -60,6 +60,10 @@ costs one more question and nothing else.
 uv run ${CLAUDE_PLUGIN_ROOT}/scripts/murmur_init.py apply
 ```
 
+If the person said "just use the defaults" or "set it up, I will adjust later",
+skip the questions and run `apply --defaults`: every unanswered question takes
+its default, and the report says which ones.
+
 It prints a JSON report, one line per file, with an action:
 
 - `wrote`: the file was not there, now it is.

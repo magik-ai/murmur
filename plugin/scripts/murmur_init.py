@@ -326,11 +326,19 @@ def add_pointer(root: Path, rel: Path, base: str, report: list[dict]) -> None:
     report.append({"path": str(rel), "action": "appended", "note": "pointer added"})
 
 
-def cmd_apply(root: Path) -> int:
+def cmd_apply(root: Path, use_defaults: bool = False) -> int:
     config = load_config(root)
-    missing = [q["id"] for q in questions_for(root) if not config.get(q["id"])]
+    questions = questions_for(root)
+    missing = [q["id"] for q in questions if not config.get(q["id"])]
+    if missing and use_defaults:
+        for q in questions:
+            if q["id"] in missing:
+                default = q["default"]
+                config[q["id"]] = default.split(",") if q.get("multiple") else default
+        missing = []
     if missing:
-        print(json.dumps({"status": "setup-required", "missing": missing}))
+        print(json.dumps({"status": "setup-required", "missing": missing,
+                          "hint": "answer them, or run apply --defaults"}))
         return 1
     templates = templates_dir()
     law = (templates / "CLAUDE.md").read_text(encoding="utf-8")
@@ -373,14 +381,16 @@ def main() -> int:
     answer = subs.add_parser("answer", help="store one answer")
     answer.add_argument("--id", required=True)
     answer.add_argument("--value", required=True)
-    subs.add_parser("apply", help="write the files and print a report")
+    apply = subs.add_parser("apply", help="write the files and print a report")
+    apply.add_argument("--defaults", action="store_true",
+                       help="fill every unanswered question with its default first")
     args = parser.parse_args()
     root = repo_root()
     if args.command == "questions":
         return cmd_questions(root)
     if args.command == "answer":
         return cmd_answer(root, args.id, args.value)
-    return cmd_apply(root)
+    return cmd_apply(root, use_defaults=args.defaults)
 
 
 if __name__ == "__main__":
