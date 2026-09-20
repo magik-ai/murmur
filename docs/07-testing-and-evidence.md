@@ -1,6 +1,9 @@
 # Testing and evidence
 
-## Tests are a budget, not a virtue
+## Spend tests where they prove the most
+
+More tests are not automatically better. Every check has a price, and you pay
+it over and over.
 
 Every check costs the time to write it, the time it takes on every change
 afterwards, and the time spent repairing it when it breaks for reasons
@@ -113,6 +116,10 @@ whole team can open them.
 
 Not chat, which scrolls away, and not only the pull request, which most of
 the team will never open.
+
+If your tracker is GitHub issues, that means a comment on the issue that the
+pull request closes. Drag the screenshots into that same comment, so the
+picture and the explanation stay together.
 
 ## Screenshots are evidence, never measurement
 

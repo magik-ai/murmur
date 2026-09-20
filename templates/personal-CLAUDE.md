@@ -33,8 +33,8 @@ that repository. Everything committed to it is English, like every repository.
 - **Before creating or pushing a work branch**: `hq claim <branch>`. A refused
   claim means the branch is someone else's: message them, never work around it.
   Release it when the pull request merges. **Never touch a branch another agent
-  has claimed**: no merges into it, no rebases, no pushes, and a pre-push guard
-  enforces that.
+  has claimed**: no merges into it, no rebases, no pushes. The claims guard, a
+  pre-push hook shipped with the head office tool, enforces that.
 - **Commit identity**: in an agent worktree set the git author to
   `<name> (agent) <mail-alias>`. Squash merges keep main under my name; the
   branch history shows whose slice each commit is.
@@ -83,28 +83,18 @@ run); repository-scoped bugs and tech debt may stay as repository issues.
 
 ## Self-hosted CI: an accelerator, never a merge authority
 
-Our machines verify a pull request faster than hosted runners. That is all they
-do, and the boundary is not negotiable while it stands.
-
-- **The hosted, protected checks are the authority.** A local run publishes no
-  status, so a local green resolves no protected check. Arm auto-merge and let
-  the queue decide. A local green never justifies an admin override.
-- **Verify the merge result, not the branch.** Build main plus the candidate,
-  one at a time: a green A and a green B are not a green A plus B. A verdict
-  goes stale when the base moves, and a stale green is not a green.
-- **If a local verdict disagrees with the hosted one for the same commit, the
-  hosted verdict wins**, loudly. It answers "hosted runs are slow", never "the
-  host is down": when the host is down, so is the head office.
-
-Making a local runner a delivery path is a separate decision, and it is mine.
+Our own machines only make a pull request verify faster: the hosted, protected
+checks stay the authority, and a local green never justifies an admin override
+or a bypassed gate. The boundary and the reasoning behind it are in
+[`docs/06-ci-and-merge.md`](../docs/06-ci-and-merge.md). Making a local runner
+a delivery path is a separate decision, and it is mine.
 
 ## Surviving the janitor
 
-A janitor buries dead worktrees and stale board cards on a timer; live workers
-are never touched. **Only committed and pushed work is safe**: an open pull
-request protects a worktree indefinitely, uncommitted tracked changes buy a
-delay, untracked scratch protects nothing. **Finish loudly**: durable output
-goes to the pull request, the issue or the report, never only a worktree.
+A janitor buries dead worktrees and stale board cards on a timer, so only
+committed and pushed work is safe, and durable output goes to the pull request,
+the issue or the report rather than into a worktree. The full rules are in
+[`docs/05-coordination-and-identity.md`](../docs/05-coordination-and-identity.md).
 
 ## Production access
 
@@ -124,26 +114,17 @@ for me. Prefer fixing forward through the repository over hand-editing.
 ## How to write to me
 
 I work in `<OWNER_TIMEZONE>`, so every time you write for me is in my time zone,
-marked as such on first use; logs and CI are UTC, convert them for me. I am a
+marked as such on first use. Logs and CI are UTC, so convert them for me. I am a
 product person, not a programmer, and anything for my eyes has to land the first
-time. These are checks, not preferences.
+time. Three rules cover most of it.
 
 1. **Meaning first**: what happened, what it means, what needs deciding.
-2. **One idea per sentence, about fifteen words.** No nested clauses.
-3. **No names from the code in the prose.** Functions, flags, files, branches
-   and hashes live at the end, in a block for engineers.
-4. **Every term explained on first use**, or replaced by an everyday word.
-5. **Numbers rounded and compared**: "it was ten seconds, now it is none". One
-   figure per sentence; precision goes in the engineers' table.
-6. **No metaphors from the codebase.** Say what the mechanism does.
-7. **Lists: one or two sentences per item. Tables: five columns, eight words.**
-8. **Length**: a chat status under 120 words, a tracker description under half a
-   screen plus its engineering block; longer opens with "In short".
-9. **One shape for anything long**: what happened, what it means, what comes
-   next, a table of numbers, then the engineering block.
-10. **Read it back as me.** A sentence that needs the code to parse gets
-    rewritten in words, or moved to the engineering block.
+2. **One idea per sentence, about fifteen words**, and no names from the code in
+   the prose. Functions, flags, files, branches and hashes go in a closing block
+   for engineers.
+   This holds in chat, reports, pull requests, the tracker, documents and
+   product copy.
 
-**Never write an em-dash.** Use a comma, a colon, a full stop or parentheses.
-This holds in chat, reports, pull requests, the tracker, documents and product
-copy. Pick one house style rule a machine can check, and enforce it.
+The full set of checks, with a good and a bad example each, is in
+[`docs/09-writing-for-humans.md`](../docs/09-writing-for-humans.md). Read it
+once, then treat the three rules above as the reminder.

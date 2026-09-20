@@ -12,8 +12,9 @@ glance, which means two rules:
      "merge queue notes" is not. The link text IS the memory; opening the file
      is for the detail.
   2. When a section passes roughly thirty lines, it moves into a sub-index file
-     and leaves one link behind with a count. An index nobody finishes reading
-     is an index nobody reads.
+     and leaves one link behind with a count. An index longer than a screen
+     stops being read to the end, and the entries at the bottom stop being
+     found.
 Optional: a leading emoji pair per line makes the list scannable by shape. Use
 it consistently or not at all.
 -->

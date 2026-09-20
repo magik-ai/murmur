@@ -41,10 +41,9 @@ An agent left alone stops noticing that it has stopped. It waits on something,
 the something never arrives, and no one is there to see the silence.
 
 The fix is a clock. Wake every fifteen to twenty minutes and run the same
-checklist, skipping nothing: read mail without consuming it, check every
-running lane and act on its state, check anything queued for merge, check the
-last deploy, read any watcher output, move tickets with the work, and write
-one line in the journal.
+checklist, skipping nothing. The checklist itself is kept in one place only,
+section 3 of
+[`plugin/skills/night-mode/SKILL.md`](../plugin/skills/night-mode/SKILL.md).
 
 Two properties matter more than the contents. The checklist is identical every
 time, so nothing depends on judgment at four in the morning. And it writes one
@@ -142,8 +141,14 @@ and the stale copy is the one somebody follows at three in the morning.
 ## Adopt it in a day
 
 1. Run one short daytime rehearsal first: one ticket, two hours, you nearby.
-2. Write the heartbeat checklist once and paste it into whatever wakes the
-   agent.
+2. Copy the heartbeat checklist out of the night-mode skill into whatever
+   wakes the agent.
 3. Open a journal file and require one line per tick, even a quiet one.
 4. Decide up front which of the three finishes each scope item is aiming at.
-5. Before the first real overnight run, move the alarm out of your session.
+5. Optional, when you have a machine or a scheduler outside your session: move
+   the alarm there before the first real overnight run.
+
+
+## Pick the heartbeat mode on purpose
+
+There are four ways to be woken up during a run: an alarm inside the session, a headless lane on a farm, a schedule outside the session, or nothing at all. The first is the easiest and the most fragile, because it dies when the window closes or the machine sleeps. Say which one you are using before the first tick and write it down. The skill lists the four and when each fits.

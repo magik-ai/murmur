@@ -9,6 +9,8 @@ left in a brief is read as an instruction to invent one.
 
 # Unattended run: `<date>`
 
+Heartbeat mode: <alarm | lane | schedule | none>  (see the night-mode skill for what each means)
+
 ## Mandate
 
 Drive the scope below to a defined finish before `<TIME>` in `<OWNER_TIMEZONE>`.
@@ -40,10 +42,10 @@ a timer created inside a session dies with the session, and that is the most
 common way an unattended run quietly stops at two in the morning.
 
 ```
-HEARTBEAT (<name>, unattended run, <INTERVAL> tick). Checklist, no skipping:
+HEARTBEAT (<name>, unattended run, <interval> tick). Checklist, no skipping:
 (1) Identity and mail: refresh presence, peek the inbox without consuming it,
     answer anything addressed to me.
-(2) Workers: for every worker still running, read its state. Review verdict
+(2) Lanes: for every worker still running, read its state. Review verdict
     clean -> arm the merge if the merge law allows. Verdict red -> start the
     next fix round and pass the verdict in. Fix round finished -> start the
     next review round.
@@ -53,9 +55,11 @@ HEARTBEAT (<name>, unattended run, <INTERVAL> tick). Checklist, no skipping:
     the failing step read, not guessed.
 (5) Watchers: read any watcher output and act on the events in it.
 (6) <TRACKER>: move issues with the work, comment when something material
-    happened.
-(7) Append one line to the night journal, even when the answer is "quiet".
-Heavy work runs on <FARM>, never on the machine hosting this session.
+    happened. If this session cannot write to the tracker, leave the update in
+    the night journal for the orchestrator to post.
+(7) Append one line to the night journal, even if the answer is "quiet".
+Heavy work runs on <FARM> when there is one, never on the machine hosting this
+session. With no farm, run it here, one job at a time.
 Never merge red, never bypass the queue, never mutate production unasked.
 ```
 

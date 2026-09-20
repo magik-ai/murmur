@@ -18,9 +18,6 @@ you would out loud to a colleague, not the way a log line reports a value.
 **Always give enough context to decide fast.** The reader was not watching
 you work. Say what a thing is before you refer to it by name.
 
-**Never write an em-dash.** Use a comma, a colon, a full stop, or parentheses.
-A small rule with an outsized effect on readability, covered on its own below.
-
 ## Ten checks
 
 Each check pairs one bad line with one good line, so the difference is
@@ -28,7 +25,7 @@ concrete rather than abstract.
 
 1. **Meaning first.** Open with what happened and what needs deciding.
    Bad: "I started by checking the logs, then traced the request path..."
-   Good: "Some learners were logged out mid-session. Found and fixed."
+   Good: "Some users were logged out mid-session. Found and fixed."
 
 2. **One idea per sentence, short.** No nested clauses, no chains of commas.
    Bad: "The server, which had been holding the connection open longer than
@@ -51,9 +48,12 @@ concrete rather than abstract.
    Bad: "Latency dropped from 8,342ms to 412ms, a 95.06% reduction."
    Good: "It used to take eight seconds. Now it takes less than one."
 
-6. **No metaphors from the codebase.** Words like gate, seam, or latch mean
-   something only to someone who has read the source.
-   Bad: "We added a gate before the checkout latch opens."
+6. **Define your terms once, and avoid metaphors from the codebase.** A word
+   like seam or latch means something only to someone who has read the source.
+   When a term really is needed, define it in one place and link to it. This
+   handbook keeps its own short list in
+   [start here](00-start-here.md#words-this-handbook-uses).
+   Bad: "We added a latch before the checkout seam opens."
    Good: "We added a check that runs before payment is allowed to start."
 
 7. **Short list items.** One or two sentences each, never a hidden paragraph.
@@ -107,9 +107,9 @@ everything above:
 
 ## A rule is only as good as its enforcement
 
-The no-em-dash rule above is worth a second look for a different reason: it is
-a small, arbitrary-looking house style choice, and choices like it are only
-worth adopting when something other than memory checks them. A rule that
+A house style rule (say, no TODO comment without a link to an issue, or no
+sentence over thirty words in a status) is only worth adopting when something
+other than memory checks it. A rule that
 depends on every writer remembering it by hand gets broken quietly and often.
 
 The fix is mechanical: a short script scans every document and interface
@@ -124,8 +124,7 @@ you are also willing to write the few lines of script that enforce it.
 1. Put the four rules and the fixed five-part shape at the top of your law
    file or your writing guide, with one good/bad example each.
 2. Pick your single most annoying style violation and write a small script
-   that fails a check when it appears, the same way the no-em-dash example
-   does.
+   that fails a check when it appears, and wire it into CI.
 3. Take one recent report or ticket you wrote and rewrite its opening two
    sentences using rule one: meaning first, no process narration.
 4. Add the "opinion before asking" habit to how you phrase every decision

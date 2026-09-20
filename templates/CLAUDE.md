@@ -7,26 +7,32 @@ A law nobody enforces teaches agents that laws are optional.
 You are operating in `<ORG>/<REPO>`. The product is **<PRODUCT>**; use that form
 in product prose.
 
-This file is the single source of truth for **how work happens**.
-`ARCHITECTURE.md` describes what is live on `main`; `AGENTS.md` provides product
-and agent orientation; `docs/adr/` records technical decisions.
+This file is the single source of truth for **how work happens**. Every other
+document named below is optional. `ARCHITECTURE.md`, if you keep one, describes
+what is live on `main`. `AGENTS.md`, if you keep one, gives product and agent
+orientation. `docs/adr/`, if you keep one, records technical decisions.
 
 ## TL;DR: boot contract
+
+<!-- Only line 1 is required. DELETE any line here whose document you do not
+     actually keep. A boot list that names a missing file breaks on the first
+     read, and an agent that cannot find item 2 stops trusting items 3 to 5. -->
 
 Read these in order, and nothing else at boot:
 
 1. [`CLAUDE.md`](CLAUDE.md): process law.
-2. [`ARCHITECTURE.md`](ARCHITECTURE.md): current deployed architecture.
-3. [`AGENTS.md`](AGENTS.md): product, customer, and agent orientation.
-4. [`docs/INDEX.md`](docs/INDEX.md): route to the task-specific reference.
+2. `ARCHITECTURE.md`, if you keep one: current deployed architecture.
+3. `AGENTS.md`, if you keep one: product, customer, and agent orientation.
+4. `docs/INDEX.md`, if you keep one: route to the task-specific reference.
 5. `<DOC>` before `<KIND OF WORK>`: one or two entries at most.
 
-Anything else is on demand through `docs/INDEX.md`. Do not load historical plans
-or archived design records at boot. A boot contract that grows stops being read.
+Anything else is loaded on demand, through the index if you keep one. Do not
+load historical plans or archived design records at boot. A boot contract that
+grows stops being read.
 
 **Knowledge base:** per-domain orientation (truth maps, invariants, measured
-numbers, debug method, defect history) lives in `docs/knowledge/`, indexed in
-`docs/INDEX.md`. Before working a subject that has a file there, read it first.
+numbers, debug method, defect history) lives in `docs/knowledge/`, if you keep
+one. Before working a subject that has a file there, read it first.
 
 ## Team
 
@@ -35,11 +41,12 @@ Law lives in one file; people live in this table. Keep it short and current.
 | Name | Role | Owns | Reviews |
 |---|---|---|---|
 | `<OWNER>` | product owner | what we build, product acceptance | anything user visible |
-| `<CTO>` | technical owner | architecture, guidelines, infrastructure | architecture-shaped changes |
+| `<CTO>`, if you have one | technical owner | architecture, guidelines, infrastructure | architecture-shaped changes |
+| `<CONDUCTOR>`, if you have one | release manager | the queue, CI health, deploys | holds the merge veto |
 | `<NAME>` | `<ROLE>` | `<AREA>` | `<WHAT>` |
 
 "Owner" in this file means `<OWNER>` unless stated otherwise. Lane assignments
-and merge coordination: `docs/process/TEAM_LANES.md`.
+and merge coordination live in `docs/process/TEAM_LANES.md`, if you keep one.
 
 ## Communication rules
 
@@ -49,11 +56,9 @@ Every report, PR body, issue, and message an agent writes follows four rules:
 - **Speak as a person**, not a parameter-spilling machine.
 - **Always give enough context to make a fast decision.** The reader was not
   watching you work; say what a thing is before referring to it.
-- **Never write an em-dash. Use a comma, a colon, a full stop or parentheses.**
-  This holds everywhere: chat, reports, pull requests, the tracker, documents,
-  release notes and product copy. Pick one house style rule a machine can check,
-  enforce it in CI, and sweep the copy instead of adding exceptions. (Ours is
-  the em-dash; yours can be any rule you will actually enforce.)
+- **Pick one house style rule a machine can check**, enforce it in CI, and
+  sweep the copy instead of adding exceptions. Any rule you will actually
+  enforce works; a rule nobody checks is not a rule.
 
 ### Writing to a person
 
@@ -103,18 +108,19 @@ consumer, not before.
 
 ### The pattern catalog
 
-`docs/architecture/PATTERNS.md` is the closed catalog of mechanisms this
-repository already uses. First inspect the repository and reuse a registered
-pattern.
+`docs/architecture/PATTERNS.md`, if you keep one, is the closed catalog of
+mechanisms this repository already uses. First inspect the repository and reuse
+a registered pattern.
 
 - A reasonable extension of an approved mechanism, in the same complexity class,
   proceeds without approval.
 - If an urgent extension may or may not fit, record it in
-  `docs/architecture/PATTERN_FLAGS.md` and proceed; `<CTO>` reviews
-  asynchronously. The flags file is the pressure valve that keeps the catalog
-  honest instead of ignored.
+  `docs/architecture/PATTERN_FLAGS.md`, if you keep one, and proceed. `<CTO>`,
+  if you have one, reviews asynchronously. The flags file is the pressure valve
+  that keeps the catalog honest instead of ignored.
 - A definite new communication pattern, architectural mechanism, or complexity
-  increase needs `<CTO>` approval, landing as a catalog entry plus an ADR.
+  increase needs approval from `<CTO>`, if you have one, landing as a catalog
+  entry plus an ADR.
 - **Waiver:** until `<VERSION>` an owner waiver is in effect. Record the case in
   the flags file and proceed; the review happens asynchronously instead of
   blocking. State here when the waiver ends.
@@ -127,17 +133,17 @@ until the owner looks. The owner reviews a picture or a live link, never a diff.
 
 ### Testing standard
 
-`docs/TESTING.md` is the executable contract. Put each check at the lowest tier
-that proves it. Use real collaborators and fake only true provider or transport
-boundaries, asserting on those fakes. Service and flow tests are the mass;
-end-to-end journeys are the thin tip. Every feature gets an edge-case pass;
+`docs/TESTING.md`, if you keep one, is the executable contract. Put each check
+at the lowest tier that proves it. Use real collaborators and fake only true
+provider or transport boundaries, asserting on those fakes. Service and flow
+tests are the mass; end-to-end journeys are the thin tip. Every feature gets an edge-case pass;
 every widget gets a missing-state pass with all states designed, tested, or
 explicitly waived.
 
 ### Freeze state
 
-No feature freeze is active unless the owner or `<CTO>` explicitly declares one
-here, in this file, not in a side document. Never infer a freeze from a plan.
+No feature freeze is active unless the owner declares one here, in this file,
+not in a side document. Never infer a freeze from a plan.
 
 ## 0. Core contract
 
@@ -146,7 +152,8 @@ here, in this file, not in a side document. Never infer a freeze from a plan.
 - Nothing lands directly on `main`.
 - The agent drives the batch end to end. Stop only for a real blocker, red CI
   not caused by the batch, or an action requiring explicit approval.
-- The `hold` label is the veto: it must always block a merge.
+- The `hold` label is the veto: it must always block a merge. Anyone may add
+  the hold label. Only the owner removes it.
 
 ## 1. Repo and contract map
 
@@ -174,13 +181,13 @@ code. It starts with three artifacts, in order:
 1. **The tracker.** The work gets a project with milestones and large, coherent
    issues: one per major chunk. The tracker is updated as work moves.
 2. **Design doc.** Before implementation, a design record lands in
-   `docs/design/<slug>.md`: the intent, the boundaries, the mechanism, the
-   risks, and what is explicitly out of scope. Architecture-shaped decisions
-   also get their ADR.
+   `docs/design/<slug>.md`, if you keep such a directory: the intent, the
+   boundaries, the mechanism, the risks, and what is explicitly out of scope.
+   Architecture-shaped decisions also get their ADR.
 3. **Design doc review.** The doc is reviewed before code: an independent
-   reviewer (not the author) attacks it, `<CTO>` reviews anything
-   architecture-shaped, the owner reviews anything product-shaped. Findings are
-   resolved in the doc. Only then do lanes spawn.
+   reviewer (not the author) attacks it, `<CTO>`, if you have one, reviews
+   anything architecture-shaped, and the owner reviews anything product-shaped.
+   Findings are resolved in the doc. Only then do lanes spawn.
 
 Small batches (a fix, one screen, one contract change) skip this protocol and go
 straight to the Golden Workflow.
@@ -226,24 +233,27 @@ GitHub issues; the tracker is where the work itself is tracked.
 1. Branch from fresh `main` in a dedicated worktree. Never reuse a merged
    branch.
 2. Implement one coherent batch and commit each reviewable slice.
-3. Keep docs current, in the same PR: a key API or data contract, or a major
-   architecture decision, updates `ARCHITECTURE.md` plus an ADR; adding, moving
-   or retiring a document updates `docs/INDEX.md`. **Before merge, check
-   `docs/knowledge/`**: if the batch changes how a subsystem actually behaves
-   (mechanism, capacity, cost, timing, procedure), the matching domain file is
-   updated in this PR.
+3. Keep docs current, in the same PR, for whichever of these you keep: a key
+   API or data contract, or a major architecture decision, updates
+   `ARCHITECTURE.md` plus an ADR; adding, moving or retiring a document updates
+   `docs/INDEX.md`. **Before merge, check `docs/knowledge/`**: if the batch
+   changes how a subsystem actually behaves (mechanism, capacity, cost, timing,
+   procedure), the matching domain file is updated in this PR.
 4. Add a `RELEASE_NOTES.d/<category>-<slug>.md` note for user-visible impact;
    otherwise state "no user-visible change" in the PR.
 5. Run the affected lint, tests, build, and contract checks locally.
 6. Merge `origin/main` while developing when it moves; rerun affected checks.
 7. Open the PR using `.github/PULL_REQUEST_TEMPLATE.md`: the only PR template.
 8. Run an adversarial review pass (a second agent, ideally a different model or
-   vendor) on the exact head commit. Use the deeper pass for auth, security,
-   migrations, durability, or encrypted user content.
+   vendor) on the exact head commit. It ends in one line, `VERDICT <sha> CLEAN`
+   or `VERDICT <sha> RED`. Use the deeper pass for auth, security, migrations,
+   durability, or encrypted user content.
 9. Fix every in-scope finding in the same PR. File a scoped issue for real
    out-of-scope work.
-10. Use auto-merge only after all required gates pass. Never bypass them with an
-    admin override. Confirm the host reports the PR merged before cleanup.
+10. Green checks qualify a change for merging; only the owner's explicit signal
+    merges it, and auto-merge is armed only after that signal. Never bypass a
+    required gate with an admin override. Confirm the host reports the PR
+    merged before cleanup.
 
 ## 3. Commits
 
@@ -344,7 +354,7 @@ owned PR unfinished.
 
 ADRs: `NNNN-type-kebab-title.md`. Standard docs keep their established uppercase
 form; content files and directories are kebab-case; code follows its language.
-Full conventions: `docs/process/NAMING.md`.
+Full conventions live in `docs/process/NAMING.md`, if you keep one.
 
 ## 9. Gotchas
 

@@ -30,8 +30,7 @@
 
 ## Checklist
 - [ ] Branched off fresh `main`; this PR is one coherent batch.
-- [ ] House style rule respected in the code, the docs and this PR body (for us:
-      no em-dash anywhere; use a comma, a colon, a full stop or parentheses).
+- [ ] House style rule respected in the code, the docs and this PR body (for us:).
 - [ ] Lint clean and tests green locally; any pre-existing flake is named here.
 - [ ] Tests sit at the lowest tier that proves the behavior, with stable
       locators, and any coverage exception is documented.

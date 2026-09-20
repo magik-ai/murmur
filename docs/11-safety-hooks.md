@@ -17,10 +17,10 @@ is about to do. If that matches something forbidden, it exits non-zero and
 prints two things: one line saying why, and the command that does the job
 properly.
 
-The remedy line is the part people leave out, and it is the part that works. A
-bare block makes an agent creative, and a creative agent finds another route
-to the same forbidden place. A block that names the correct command turns the
-agent around in one step.
+The remedy line is the part people leave out, and it is the part that works.
+An agent that is refused without being told what to do instead will try
+another route to the same file. A refusal that names the correct command turns
+the agent around in one step.
 
 Three properties make a hook worth having. It is fast, because it runs on
 every matching call. It is silent on success, because a hook that prints on
@@ -44,25 +44,30 @@ One rule travels with this hook. Never hand-resolve a merge conflict inside a
 generated file. Regenerate it on the updated base instead, because a
 hand-merged generated file is a file that matches neither source.
 
-## A minimal hook
+## The hook and its list
 
-```bash
-#!/usr/bin/env bash
-# Blocks hand-edits of generated files. A non-zero exit stops the tool call.
-set -euo pipefail
+The script itself is
+[`plugin/hooks/block-generated-edits.sh`](../plugin/hooks/block-generated-edits.sh),
+and the same copy sits in
+[`templates/hooks/`](../templates/hooks/block-generated-edits.sh) for a
+repository that does not install the plugin. Keep one copy of it, not two
+that drift.
 
-path=$(cat | python3 -c 'import sys,json; print(json.load(sys.stdin).get("tool_input",{}).get("file_path",""))' 2>/dev/null) || path=""
-[ -n "$path" ] || exit 0
+The script holds no paths. It reads `.claude/generated-files.txt` in the
+repository it runs in, one protected path per line:
 
-case "$path" in
-  */contracts/*.json|*/generated/*|*/GENERATED_INVENTORY.md)
-    echo "BLOCKED: $path is a generated file. Never hand-edit it." >&2
-    echo "Regenerate instead: <your generate command>" >&2
-    exit 2
-    ;;
-esac
-exit 0
 ```
+docs/contracts/openapi.json  npm run generate:api
+src/clients/api/generated/*  npm run generate:api
+```
+
+Everything up to the first space is the glob. The rest of the line is the
+command that regenerates that file, and it is what the agent is shown when an
+edit is refused. Blank lines and lines starting with `#` are ignored. A glob
+that does not begin with `/` or `*` matches any path ending that way, so
+entries can be written relative to the repository root whatever the checkout
+is called. With no list file the hook exits quietly and blocks nothing, so
+installing it never surprises anyone.
 
 Register it to run before the tools that write files, matching on edit and
 write calls. That registration is a few lines of configuration in your
@@ -138,8 +143,9 @@ appearance of a value as exposure, and rotate.
 
 ## Adopt it in a day
 
-1. List the generated files in your repository and put them behind the hook
-   above, with your own glob list.
+1. List the generated files in your repository in
+   `.claude/generated-files.txt`, each with the command that regenerates it,
+   and put the hook above in front of them.
 2. Make sure every block prints the remedy command, not just the refusal.
 3. Write the production sentence into your law file: read-only by default,
    each mutation approved for that action alone.

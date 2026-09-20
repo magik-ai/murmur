@@ -14,12 +14,17 @@
 # workers still race, the loser renumbers, and a CI check should catch a
 # duplicate number or a split migration history before it reaches main.
 #
-#   scripts/next_number.sh            # every kind, scanning main only (fast)
-#   scripts/next_number.sh adr        # one kind
-#   scripts/next_number.sh --all      # also scan every OPEN pull request (slower)
+#   scripts/next_number.sh              # every kind: main plus every open PR
+#   scripts/next_number.sh adr          # one kind
+#   scripts/next_number.sh --main-only  # skip the pull request scan (faster)
+#
+# Scanning the open pull requests is the DEFAULT, because that is the scan that
+# prevents the collision. Use --main-only when you are offline or in a hurry,
+# and expect to renumber if another lane claimed the same number today.
 #
 # The open-pull-request scan needs the `gh` command line tool, authenticated.
-# Without it, the script still works against main and says so.
+# Without it the script falls back to main only and says so, because a silent
+# fallback hands out a number somebody else has already taken.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -38,13 +43,14 @@ KINDS=(
 
 BASE_REF="${BASE_REF:-origin/main}"
 
-scan_prs=0
+scan_prs=1
 want="all"
 for arg in "$@"; do
   case "$arg" in
-    --all) scan_prs=1 ;;
+    --main-only) scan_prs=0 ;;
+    --all) scan_prs=1 ;;  # accepted for compatibility: this is the default
     --help | -h)
-      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) want="$arg" ;;
@@ -57,7 +63,7 @@ if [ "$scan_prs" = "1" ] && ! command -v gh >/dev/null 2>&1; then
 fi
 
 # Highest NNNN currently claimed for one path regex, on the base branch and,
-# with --all, on every open pull request's changed files.
+# unless --main-only was passed, on every open pull request's changed files.
 _max_number() {
   local path_re="$1"
   {

@@ -46,7 +46,8 @@ find the same defect.
 ## The hold label is the veto
 
 One label on a change blocks its merge absolutely. No override, no exception,
-no "but everything is green".
+no "but everything is green". Anyone may add the hold label. Only the owner
+removes it.
 
 It exists because green and ready are different states. A change can pass
 every check and still be wrong to land now: the owner has not seen the visual
@@ -130,10 +131,12 @@ repository.
 
 ## Adopt it in a day
 
-1. Turn on a merge queue, so what is tested is the combination, not the
-   branch.
-2. Add a turnstile that refuses a queue entry whose branch run is not green on
-   the exact head commit.
-3. Create one veto label with no exceptions and write it into your law file.
-4. Set an alarm for a red run on your main branch, with the four steps above
-   next to it.
+1. Create one veto label with no exceptions and write it into your law file.
+   Anyone may add it, only the owner removes it.
+2. Set an alarm for a red run on your main branch, with the four repair steps
+   above next to it.
+3. If your host offers a merge queue, turn it on, so what is tested is the
+   combination and not the branch.
+4. If you run a merge queue, add the check that refuses an entry not green on
+   its exact head. It is a small workflow job, and it can wait until the queue
+   has actually accepted something it should not have.

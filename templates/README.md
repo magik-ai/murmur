@@ -12,6 +12,6 @@ Fill-in files. Replace every `<PLACEHOLDER>`.
 | knowledge/README.md, knowledge/_domain.md | one knowledge file per domain | docs/knowledge/README.md |
 | RELEASE_NOTES.d/README.md | one note per change | RELEASE_NOTES.d/README.md |
 | memory/MEMORY.md, memory/_fact.md | index + one fact per file | the auto-memory directory |
-| briefs/night-mode.md, briefs/lane.md, briefs/gate.md | unattended run, lane, adversarial review | the night-mode and fleet skills |
-| hooks/block-generated-edits.sh, hooks/settings.json | generated-file guard | .claude/hooks |
+| briefs/night-mode.md, briefs/lane.md, briefs/review.md | unattended run, lane, adversarial review | the night-mode and fleet skills |
+| hooks/block-generated-edits.sh, hooks/generated-files.example.txt, hooks/settings.json | generated-file guard, its path list, its registration | .claude/hooks |
 | scripts/next_number.sh | reserve ADR and migration numbers across open PRs | scripts/next_number.sh |

@@ -45,8 +45,13 @@ something out of scope means filing it, not fixing it.
 
 ## Path manifest (your territory)
 
-You own exactly these paths. They are disjoint from every other live lane, and a
-pre-push guard blocks a push that touches anything outside them.
+You own exactly these paths. They are disjoint from every other live lane.
+
+Staying inside them is the **manifest guard**. In version one that guard is a
+convention rather than a hook: the orchestrator diffs your branch against this
+list before assembling anything, so a path you do not own is something you will
+be asked to explain. Diff your own changed paths against the list before you
+open the pull request.
 
 ```
 <path/or/glob>

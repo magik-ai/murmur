@@ -83,13 +83,14 @@ One label, one word from <OWNER>, and a change does not merge. No override,
 no exception, no "but everything is green". Green and ready are different
 states, and the veto is how a person says stop without arguing with a robot.
 
-Keep it dumb on purpose. A veto with conditions is a veto people reason their
-way around.
+**Anyone may add the hold label. Only the owner removes it.** Keep it dumb on
+purpose. A veto with conditions is a veto people reason their way around.
 
-**Never merge without <OWNER>'s word when that is the standing rule.** A
-quiet channel is not consent. A green pipeline is not consent. If the rule
-this evening is "nothing lands without my yes", you do not lift it at 3am
-because the work looks finished.
+**Green checks qualify a change for merging; only the owner's explicit signal
+merges it, and auto-merge is armed only after that signal.** A quiet channel
+is not consent. A green pipeline is not consent. If the rule this evening is
+"nothing lands without my yes", you do not lift it at 3am because the work
+looks finished.
 
 ## 5. Ejections and flakes
 
@@ -180,8 +181,8 @@ want to take.
 - Production changes need <OWNER>'s approval for that exact action. Reading
   is free, changing is not.
 - Never print a secret value. Names and hashes only.
-- A self-hosted CI farm is an accelerator, never an authority. A locally
-  green result is speed, not permission, and a verdict goes stale the moment
-  the base moves.
+- A self-hosted CI farm is an accelerator, never an authority: a local green
+  is speed, not permission. The boundary and the reasons for it are in the
+  handbook chapter on CI and merge, `docs/06-ci-and-merge.md`.
 - Stash is shared across worktrees on one machine. Never pop one blindly from
   a script.

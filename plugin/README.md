@@ -14,8 +14,8 @@ text stays in the handbook under `docs/`.
 From this repository, inside Claude Code:
 
 ```
-/plugin marketplace add <ORG>/<REPO>
-/plugin install team@agents-are-a-team
+/plugin marketplace add magik-ai/murmur
+/plugin install murmur@murmur
 ```
 
 The marketplace file sits at the repository root, so the first command needs
@@ -33,8 +33,11 @@ also be called by name.
 | `night-mode` | "night mode", "unattended run", "have it done by morning", "finish this while I sleep" | Driving the current scope to a defined finish with nobody watching: a frozen scope, a heartbeat checklist, decide alone and log every contested call, three allowed resting states, one report in the morning. |
 | `conductor` | "release manager", "keep the queue moving", "conductor", "ride this to production" | Owning the delivery road: queue watching that does not burn the shared API budget, the conveyor from green to deployed, ejection forensics, trains, freezes, the hold veto, and watching production after a wave. |
 
-The three skills use `<OWNER>`, `<TRACKER>` and `<FARM>` as placeholders. Edit
-them to your own names, or leave them: an agent reads them as roles.
+All three skills use `<OWNER>` for the person who owns the product.
+`orchestrate` and `night-mode` also use `<TRACKER>` for wherever work is
+tracked, and `night-mode` uses `<FARM>` for a machine that runs headless
+workers. Edit them to your own names, or leave them: an agent reads them as
+roles.
 
 ## Hooks
 
@@ -69,8 +72,8 @@ Prints the short version of the team's laws as session context at startup,
 resume, clear and compact: one batch one branch one pull request, nothing
 lands on the main branch directly, claim before you touch, identity is per
 session, never bypass a required check with admin rights, never merge red,
-never switch off a shipped capability as a fix, the twice rule, write to a
-person, and no em-dash.
+never switch off a shipped capability as a fix, the twice rule, and write to a
+person.
 
 A repository can replace that text wholesale: write your own short version to
 `.claude/team-laws.md` and the hook injects it verbatim instead. Keep it

@@ -1,7 +1,14 @@
 {
-  "name": "agents-are-a-team",
-  "owner": { "name": "magik-ai" },
+  "name": "murmur",
+  "owner": {
+    "name": "magik-ai"
+  },
   "plugins": [
-    { "name": "team", "source": "./plugin", "description": "Orchestration, night mode and safety hooks for running coding agents as a team", "version": "0.0.1" }
+    {
+      "name": "murmur",
+      "source": "./plugin",
+      "description": "Orchestration, night mode and safety hooks for running coding agents as a team",
+      "version": "0.0.1"
+    }
   ]
 }

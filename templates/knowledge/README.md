@@ -24,7 +24,8 @@ produces it; anyone may open a pull request with a correction.
   limits) plus practical techniques and "before you trust X, check Y" habits.
   Each entry is a `### one-line claim` heading followed by the evidence, the
   date it was measured, and a link to the pull request, decision record or
-  incident behind it. A number with no date and no link is a rumour.
+  incident behind it. A number with no date and no link cannot be checked, so
+  nobody should act on it.
 - **Subject orientation.** Scope, then a truth map, then the laws and
   invariants, then how to investigate, then the defect-class history, then
   pointers. This is the map that makes a stranger productive in the subject in

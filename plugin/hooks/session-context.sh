@@ -51,7 +51,6 @@ occurrence. A lesson that stays in chat is a lesson lost.
 **Write to a person.** Meaning first, one idea per sentence, no names from the
 code in the prose. Names, paths and links go in a block at the end.
 
-**Never write an em-dash.** Use a comma, a colon, a full stop or parentheses.
 Everywhere: chat, pull requests, issues, documents and product copy.
 LAWS
 )

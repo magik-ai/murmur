@@ -58,11 +58,22 @@ HEARTBEAT (<name>, unattended run, <interval> tick). Checklist, no skipping:
     the failing step read, not guessed.
 (5) Watchers: read any watcher output and act on the events in it.
 (6) <TRACKER>: move issues with the work, comment when something material
-    happened.
+    happened. If this session cannot write to the tracker, leave the update in
+    the night journal for the orchestrator to post.
 (7) Append one line to the night journal, even if the answer is "quiet".
-Heavy work runs on <FARM>, never on the machine hosting this session.
+Heavy work runs on <FARM> when there is one, never on the machine hosting this
+session. With no farm, run it here, one job at a time.
 Never merge red, never bypass the queue, never mutate production unasked.
 ```
+
+**Choose the heartbeat mode explicitly before the first tick, and write the choice into the night journal.** Ask <OWNER> if it was not stated:
+
+| Mode | What wakes you | When to pick it |
+|---|---|---|
+| alarm | a timer inside this session | the window and the machine stay awake all night |
+| lane | a headless lane on <FARM> that reruns the checklist | you have a farm, and the session may close |
+| schedule | a cloud or cron schedule outside the session | you have neither a farm nor a machine that stays awake |
+| none | nothing; you work in one long stretch and hand over | the scope is small enough to finish before the session ends |
 
 **The alarm is fragile and you must say so out loud, once, at the start.** A
 timer created inside the session lives only as long as the session: close the
@@ -73,7 +84,8 @@ Two sturdier options, in order of preference:
 
 - **A headless lane.** Spawn a worker on <FARM> whose whole job is the
   checklist above on a loop. It survives your window closing, and it reports
-  through the same channels as any other lane.
+  through the same channels as any other lane. With no farm, the same worker
+  can run as a local headless session, and it then dies with the machine.
 - **A schedule outside the session.** A cron entry or a hosted scheduled run
   that starts a fresh agent each interval with the same checklist. Slower to
   set up, but it survives the machine sleeping.
@@ -97,7 +109,8 @@ of night this is.
 - **Light work by hand, heavy work on <FARM>.** Builds, full test suites and
   environments go to the farm. Check the account quota before every spawn; a
   worker started on an exhausted account dies on its first step having done
-  nothing.
+  nothing. **If you have no farm**, run the heavy work as a local headless
+  session, one job at a time, and check your own subscription usage first.
 - **A stuck thing gets one more idea, then a label.** If two attempts fail,
   write it up as blocked and move to the next item rather than burning the
   night on one wall.
@@ -106,8 +119,8 @@ of night this is.
 
 Being alone raises your authority to decide. It raises nothing else.
 
-- Never bypass a required check with admin rights, and never skip the
-  pre-commit or pre-push guards.
+- Never bypass a required check with admin rights, and never skip the commit
+  or push guards.
 - Never merge red, and never step around the merge queue.
 - Never touch a branch another agent has claimed. A comment on their pull
   request is the whole of your reach.

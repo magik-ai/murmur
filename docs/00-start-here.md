@@ -57,7 +57,7 @@ here" is a sign to stop, not an invitation.
 **Conductor (or release manager).** Owns the queue: what gets merged, in what
 order, and what gets held back. Holds the single veto that can stop a merge
 regardless of how green everything looks. Does not implement features and does
-not resolve product questions; it enforces the gate.
+not resolve product questions. It enforces the rules that decide what lands.
 
 A team may also name extra approvers, for example a technical owner who signs
 off on architecture decisions. Those people are approvers on top of the four

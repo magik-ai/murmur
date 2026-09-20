@@ -60,9 +60,9 @@ delete it only when the mechanism behind it is gone.
   calendar before the branches, and check what changed between yesterday and
   today outside the repository. Prevent it by never writing an absolute date
   into a fixture: express the time relative to the moment the test runs (a fixed
-  offset from now), or freeze the clock explicitly in the test. A fixture with a
-  hard-coded future date is a bomb with the fuse already lit, and the blast
-  radius is every open PR at once.
+  offset from now), or freeze the clock explicitly in the test. A fixture with
+  a hard-coded future date will fail on a day nobody chose, and it fails on
+  every open pull request at the same time.
 
 - A fix is pushed to a pull request that is already sitting in the merge queue,
   the push succeeds, the checks go green, the PR merges, and the fix is simply

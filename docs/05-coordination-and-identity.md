@@ -139,7 +139,8 @@ there, ask the sweeper what its next pass would take.
    first thing each session does.
 2. Put claims on branches, even if version one is a file agents append to by
    hand.
-3. Install the pre-push guard, so a script enforces the claim rather than
-   everyone remembering it.
+3. Install the claims guard if you run the head office tool, so a script
+   enforces the claim rather than everyone remembering it. Otherwise write the
+   claim as the first line of the pull request body, where anyone can see it.
 4. Set the per-agent git author in every working copy, and confirm
    squash-merge is on.

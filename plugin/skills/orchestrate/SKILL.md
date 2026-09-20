@@ -55,6 +55,9 @@ check warns, re-register in THIS session before spawning.
 - **Machine capacity.** Check load, memory and worker count right before
   spawning (`fleet capacity`). If it says block or warn, spawn fewer, or wait.
   Never force past it unless <OWNER> asks for exactly that.
+- **If you have no farm.** Run each lane as a local headless session instead.
+  Check your own subscription usage before starting, and keep the number of
+  concurrent lanes to what this machine can actually hold.
 
 ## 3. Split by lane, with a path manifest
 
@@ -101,6 +104,9 @@ fleet spawn --project <name> --lane <lane> --model <tier> \
     --by <codename> --task "<brief>"
 ```
 
+**If you have no farm**, start the lane as a local headless session with the
+same brief, model and lane name. Everything below is unchanged.
+
 - A good brief states the concrete task and the acceptance criteria. If the
   harness already injects workflow, isolation and port rules, do not repeat
   them. A long brief goes to a file on the worker's machine, passed by path.
@@ -138,8 +144,10 @@ no lane opens a pull request.** You assemble the lane branches into one
 integration branch, open one pull request, and merge on <OWNER>'s word.
 Implementation happens on the workers; assembly and merge stay with you.
 
-- Overlapping territories are refused at start, before a worker spawns, and a
-  pre push guard blocks a worker touching a file outside its own territory.
+- Overlapping territories are refused at start, before a worker spawns. Staying
+  inside a territory is the **manifest guard**, which in version one is your
+  review of the diff rather than a hook: before assembling, diff each lane's
+  branch against its declared paths.
 - Each lane commits under its own author, so the assembled history shows whose
   slice each commit is.
 - **A merge conflict at assemble is the collision detector, not an error to
@@ -182,9 +190,10 @@ Then do your own part:
 
 ## 10. Landing work
 
-- **Merge only on <OWNER>'s explicit signal.** Green checks are not a signal.
-  Auto merge is armed only after the gates that actually prove the change are
-  green, and for visual or behavioral changes only after real evidence exists.
+- **Green checks qualify a change for merging; only the owner's explicit signal
+  merges it, and auto-merge is armed only after that signal.** For a visual or
+  behavioral change the signal comes after real evidence exists, never after a
+  green board alone.
 - A merge to the main branch is a production deployment within minutes. During
   a multi lane wave, watch production directly. More than one real incident
   has surfaced while every check was green.
@@ -196,7 +205,9 @@ Then do your own part:
 ## 11. Surviving the janitor
 
 A farm runs a janitor that buries finished workers and their worktrees on a
-timer. Live lanes are never touched; everything else has a clock on it.
+timer. Live lanes are never touched; everything else has a clock on it. If you
+have no farm, nothing sweeps for you, and the rule below still holds, because a
+closed window takes an uncommitted worktree with it.
 
 - **Only committed and pushed work is safe.** An open pull request protects a
   worktree indefinitely, tracked but uncommitted changes buy a delay, and

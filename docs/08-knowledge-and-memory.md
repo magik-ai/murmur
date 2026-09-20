@@ -75,9 +75,9 @@ Pick whichever shape fits, or mix them when a domain genuinely needs both.
 Knowledge lands in the same change that created it, not in a separate cleanup
 pass later. If a change alters how a subsystem behaves, cost, or is timed, the
 matching knowledge file updates in the same reviewed change. A knowledge file
-that has drifted from reality is worse than an empty one: whoever notices the
-drift fixes or deletes the stale line on the spot, in whatever change
-uncovered it.
+that has drifted from reality does more damage than an empty one, because a
+reader believes it. Whoever notices the drift fixes or deletes the stale line
+on the spot, in whatever change uncovered it.
 
 ## The memory index
 
