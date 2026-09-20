@@ -208,8 +208,10 @@ NAME_LINES = {
 CLAIM_LINES = {
     "private-github-repo": "Claims live in a private coordination repository. Claim a"
     " branch there before you create or push it, and release it when the PR merges.",
-    "this-machine": "Claims live on this machine, under `.murmur/claims/`. Claim a"
-    " branch before you create or push it, and release it when the PR merges.",
+    "this-machine": "There is no shared claims store yet: one session works on one"
+    " branch at a time, the branch name is the claim, and a second session on the"
+    " same branch is a mistake. Add a private coordination repository when two"
+    " sessions or two machines need to share this repository.",
 }
 FARM_LINES = {
     "yes": "Heavy and parallel runs belong on the separate agent machine.",
