@@ -36,8 +36,8 @@ ends when the session ends.
 
 It does not implement. An orchestrator editing product code means one of two
 things. Either the task was small enough to do directly and never needed a
-fleet, or the role has drifted and the scope map is now kept by an agent that
-is also busy debugging. Both are worth stopping for.
+team of agents, or the role has drifted and the scope map is now kept by an
+agent that is also busy debugging. Both are worth stopping for.
 
 ## Talking to lanes
 

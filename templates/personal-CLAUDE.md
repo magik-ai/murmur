@@ -38,8 +38,7 @@ that repository. Everything committed to it is English, like every repository.
 - **Commit identity**: in an agent worktree set the git author to
   `<name> (agent) <mail-alias>`. Squash merges keep main under my name; the
   branch history shows whose slice each commit is.
-- **Mail** goes agent to agent, not through me: send, read, and list live
-  sessions with `hq msg`, `hq inbox` and `hq who`.
+- **Mail** goes agent to agent, not through me: `hq msg`, `hq inbox`, `hq who`.
 - **Reading mail consumes it.** `hq inbox` moves a read cursor, per name per
   machine, so what it prints is gone from every later call by that name there.
   An afternoon of mail was once lost to a watcher that polled and discarded it.
@@ -60,25 +59,25 @@ run); repository-scoped bugs and tech debt may stay as repository issues.
 - **Taking a task means the task exists in the tracker.** Born in chat means
   create the issue first. Status moves with the work: in progress at start,
   the pull request linked when it opens, done on merge.
-- **Who is on it is visible on the issue.** I stay the assignee. The agent doing
+- **Who is on it is visible on the issue.** I stay the assignee; the agent doing
   the work carries its own label from an `Agent` label group, one per code name.
-  Taking a task means your label, a comment saying who took it and when, and a
+  Taking a task means that label, a comment naming who took it and when, and a
   claim on the branch.
 - **Three resting states.** An issue with your label is yours until it rests in
   exactly one of: **Done** (merged, verified, acceptance comment posted), **In
   Review** (nothing left for an agent, my exact next step named in the last
   comment), **Backlog** (not being worked, the last comment says what landed and
   what picking it up means). In progress with no worker, no pull request and no
-  comment for a day is the failure this rule ends. Before signing off, walk
-  every issue with your label and leave each in one of the three.
+  comment for a day is the failure this rule ends. Before signing off, leave
+  every issue with your label in one of the three.
 - **Acceptance evidence goes into the issue**, not my chat and not a document my
   teammates cannot open: root cause, fix, regression test, link. Screenshots
   upload as tracker attachments. Chat to me is a status plus a link.
-- **Project-level status updates are owner-only. Never post one.**
+- **Project-level status updates are owner-only: never post one.**
 - **Large granularity**: a chunk someone could own for a day or more, and big
   work gets its own project with milestones. The backlog grows from my signal.
-- Everything in the tracker is English, in the simple English below. The tracker
-  id goes into the branch name and the pull request title.
+- Everything in the tracker is English, in the simple English below, and the
+  tracker id goes into the branch name and the pull request title.
 - A headless worker usually cannot write to the tracker: its orchestrator does
   it, from the worker's final report.
 
@@ -120,8 +119,7 @@ for me. Prefer fixing forward through the repository over hand-editing.
   the encrypted secret path.
 - A failed deploy usually means the new process never became healthy while the
   old one kept serving: read the previous instance's logs before guessing.
-- When a safety mechanism blocks you, assume it is right until proved otherwise.
-  In practice it usually was.
+- When a safety mechanism blocks you, assume it is right until proved wrong.
 
 ## How to write to me
 
@@ -130,8 +128,7 @@ marked as such on first use; logs and CI are UTC, convert them for me. I am a
 product person, not a programmer, and anything for my eyes has to land the first
 time. These are checks, not preferences.
 
-1. **Meaning first**: what happened, what it means for the user, what needs
-   deciding. No preamble, no process.
+1. **Meaning first**: what happened, what it means, what needs deciding.
 2. **One idea per sentence, about fifteen words.** No nested clauses.
 3. **No names from the code in the prose.** Functions, flags, files, branches
    and hashes live at the end, in a block for engineers.
@@ -142,10 +139,10 @@ time. These are checks, not preferences.
 7. **Lists: one or two sentences per item. Tables: five columns, eight words.**
 8. **Length**: a chat status under 120 words, a tracker description under half a
    screen plus its engineering block; longer opens with "In short".
-9. **One shape for anything long**: what happened, what it means, what to decide
-   or what comes next, a table of numbers, then the engineering block.
-10. **Read it back as me before sending.** A sentence that needs the code to
-    parse gets rewritten in words or moved to the engineering block.
+9. **One shape for anything long**: what happened, what it means, what comes
+   next, a table of numbers, then the engineering block.
+10. **Read it back as me.** A sentence that needs the code to parse gets
+    rewritten in words, or moved to the engineering block.
 
 **Never write an em-dash.** Use a comma, a colon, a full stop or parentheses.
 This holds in chat, reports, pull requests, the tracker, documents and product

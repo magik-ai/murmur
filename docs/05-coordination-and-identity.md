@@ -24,7 +24,7 @@ transcript belongs to another session, because memory is shared and names are
 not. An agent with no name asks for one. Asking is the handshake: it shows the
 owner this session knows the protocol.
 
-**The incident behind it:** on a fleet's first day, a fresh session read a
+**The incident behind it:** on a team's first day, a fresh session read a
 code name out of shared project memory and adopted it. Two agents then
 answered to one name, and mail for either could reach the wrong one.
 
@@ -50,25 +50,24 @@ right. Re-register in this session instead.
 
 ## Branch claims
 
-Claim a work branch before creating or pushing it.
-
-A claim is a small file in the head office repository, one per branch. Plain
+Claim a work branch before creating or pushing it. A claim is a small file in
+the head office repository, one per branch. Plain
 git makes it safe: **the push is the compare-and-swap.** Two agents claiming
 one branch at the same moment cannot both win, because the second push is
 rejected for being behind, and the loser sees the winner's name.
 
 A **pre-push guard** in every working copy enforces the claim, refusing a push
 to a branch somebody else holds. It fails open with a loud warning when the
-head office is unreachable, so an outage never blocks hands-on work. It fails
-closed when the pusher's own identity cannot be resolved, because signing the
+head office is unreachable, so an outage never blocks hands-on work, and fails
+closed when the pusher's identity cannot be resolved, because signing the
 wrong name is worse than not pushing.
 
-**A refused claim means write to whoever holds it.** It never means find
-another route to the same branch. No merges into it, no rebases of it, no
+**A refused claim means write to whoever holds it.** It never means finding
+another route to that branch. No merges into it, no rebases of it, no
 pushes. That branch is somebody's live work, and working around the claim is
 the exact failure the claim prevents.
 
-Release the claim when the change merges.
+Release the claim on merge.
 
 ## Commit authorship
 
@@ -86,7 +85,7 @@ Agents talk without routing every sentence through the owner. Mail does that:
 a message to one agent or a broadcast to all, and an inbox each agent reads.
 
 The trap is the read cursor. **Reading consumes.** The marker moves per name
-per machine, so mail printed once is gone from every later read by any process
+per machine, so mail printed once is gone from every later read by a process
 signing as that name there. Four rules follow.
 
 - A watcher or a script never reads the inbox normally. It peeks, or reads the
@@ -115,16 +114,16 @@ than inventing a side channel.
 
 ## Finish loudly, because a janitor is coming
 
-A fleet accumulates dead working copies and stale board entries, so something
-sweeps them. Assume that sweeper runs on a timer.
+A team of agents accumulates dead working copies and stale board entries, so
+something sweeps them. Assume that sweeper runs on a timer.
 
 Only **committed and pushed** work is safe. An open change for review protects
-its working copy indefinitely. Tracked but uncommitted edits usually buy a
-delay. **Untracked scratch protects nothing**, and scratch is exactly where an
-agent tends to leave its findings.
+its working copy indefinitely. Tracked but uncommitted edits buy a delay.
+**Untracked scratch protects nothing**, and scratch is where an agent tends to
+leave its findings.
 
 So finish loudly. Durable output goes to the change, the issue, or the report,
-never only into a working copy. Before trusting that last night's work is
+never only to a working copy. Before trusting that last night's work is
 there, ask the sweeper what its next pass would take.
 
 ## Adopt it in a day

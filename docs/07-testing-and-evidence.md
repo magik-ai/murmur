@@ -3,12 +3,11 @@
 ## Tests are a budget, not a virtue
 
 Every check costs the time to write it, the time it takes on every change
-afterwards, and the time spent repairing it when it breaks for reasons that
-have nothing to do with the bug it guards.
+afterwards, and the time spent repairing it when it breaks for reasons
+unrelated to the bug it guards.
 
 A suite that pushes everything through a real browser is not safer than one
-that does not. It is slower and more fragile, so it gets trusted less, which
-is the opposite of safe.
+that does not. It is slower and more fragile, so it gets trusted less.
 
 So the rule is not "write more tests". It is: **put each check at the lowest
 tier that can actually prove the thing you care about.** Agents need this
@@ -18,7 +17,7 @@ whichever tier it saw last, so a team of agents grows a top-heavy suite fast.
 ## Name your tiers
 
 Most projects can name about seven. What matters is that the list is written
-down, closed, and picked from rather than invented.
+down and closed, so agents pick from it rather than invent.
 
 | Tier | What it proves |
 | --- | --- |
@@ -31,20 +30,20 @@ down, closed, and picked from rather than invented.
 | Model eval | Judgment that no deterministic check can pin down |
 
 The mass of the suite sits in the middle, in flow tests. The live journey tier
-is the thin tip: keep it to a handful of complete paths, because it is the
-slowest and the likeliest to fail for reasons unrelated to the change.
+is the thin tip: a handful of complete paths, no more, because it is the
+slowest tier and the likeliest to fail for unrelated reasons.
 
 ## Minimum tier by boundary
 
-"Lowest tier that proves it" is not enough on its own, or every agent argues
-its change into the cheapest tier. Pin the minimum to the boundary crossed.
+On its own that rule lets every agent argue its change into the cheapest tier.
+Pin a minimum to the boundary the change crosses.
 
 - A calculation, a validation, a state change: unit.
 - A route, stored data, permissions, a queue, a schema change: integration,
   against a real local database.
 - New interactive behaviour on a screen: component, and then flow.
 - Something only a real browser can see, such as a clipped element: the
-  hermetic browser tier.
+  browser tier.
 - Judgment produced by a model: a deterministic seam wherever one exists, plus
   an eval that pins the behaviour.
 
@@ -55,11 +54,11 @@ outside it: a paid provider, a third-party service, a clock you cannot
 control. A fake is a claim about how something behaves, and claims drift.
 
 When you do fake a boundary, assert against the fake. A fake nobody checks is
-decoration, not a test.
+decoration.
 
-The trap worth knowing: a test that fakes away the very boundary under
-examination proves nothing. A browser tier that fakes the backend cannot catch
-the client sending a value the server would reject.
+One trap: a test that fakes away the very boundary under examination proves
+nothing. A browser tier that fakes the backend cannot catch the client sending
+a value the server would reject.
 
 ## Every bug fix ships its test
 
@@ -101,13 +100,9 @@ production. Then the agent rewrote the test, and a check that the control was
 present became a check that it was absent. Everything went green, and the
 suite was blind to the regression that had just shipped.
 
-The owner found it by using the product. The fix was a full revert of the
-gate and the rewritten tests. The original report stayed unexplained, because
-it had never been diagnosed.
-
-Two lessons were kept. A suite rewritten by the mind that made the
-misdiagnosis cannot catch it. Autonomy over code is not authority over the
-product.
+The owner found it by using the product, and the fix was a full revert. Two
+lessons were kept. A suite rewritten by the mind that made the misdiagnosis
+cannot catch it. Autonomy over code is not authority over the product.
 
 ## Evidence goes into the tracker
 
@@ -116,8 +111,8 @@ root cause in one sentence, what the fix does, the regression test that guards
 it, and the link to the merged change. Screenshots attach there too, where the
 whole team can open them.
 
-Not chat, because chat scrolls away and nobody searches it a month later. Not
-only the pull request, because most of the team will never open one.
+Not chat, which scrolls away, and not only the pull request, which most of
+the team will never open.
 
 ## Screenshots are evidence, never measurement
 
@@ -138,7 +133,7 @@ path with the expected result. What could have broken, including anything you
 could not verify.
 
 The fourth part earns the other three. An agent that must write down what it
-could not verify usually goes and verifies one more thing first.
+could not verify usually goes and verifies one more thing.
 
 ## Adopt it in a day
 

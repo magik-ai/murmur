@@ -58,10 +58,10 @@ around.
 ## A self-hosted CI farm is an accelerator, never an authority
 
 Hosted runners queue up, and waiting a quarter of an hour per change is a real
-cost. Running the same tiers on your own machines (<FARM>) is a fair answer,
-and the part worth reproducing is the speculative combination: one candidate
-at a time on top of the current main branch, because branch-green plus
-branch-green is still not combination-green.
+cost. Running the same tiers on your own machines (<FARM>) is a fair answer.
+The part worth reproducing is the speculative combination: one candidate at a
+time on the current main branch, because branch-green plus branch-green is
+still not combination-green.
 
 Three rules hold the boundary around it.
 
@@ -85,8 +85,8 @@ two systems reporting one context in parallel.
 On a project that ships from its main branch, a merge reaches production in
 minutes. Two rules follow.
 
-**Merge only complete, releasable states.** Not "the risky half, the rest
-tomorrow". Whatever lands is what customers get.
+**Merge only complete, releasable states.** Whatever lands is what customers
+get.
 
 **Green checks are not health.** Checks prove the invariants somebody thought
 to write down. During a wave of merges, watch production directly. More than

@@ -1,0 +1,16 @@
+{
+  "//": "Template: copy to .claude/settings.json in your repo, alongside .claude/hooks/block-generated-edits.sh. This file is committed, so the guard applies to every agent and every person who opens the repo, not only to whoever set it up. The matcher lists every file-writing tool your harness offers: a tool missing from this list is an open door.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-generated-edits.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
