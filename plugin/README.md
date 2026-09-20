@@ -22,6 +22,10 @@ The marketplace file sits at the repository root, so the first command needs
 nothing but the repository name. Restart the session, or start a new one, so
 the session-start hook runs.
 
+## Start here
+
+Run `/murmur:init` in the repository you want to set up. It asks seven questions, one at a time, each with a default, and writes the contract, the tracker rules, the pull request template, the lessons file and the guard list. It never overwrites a file you already have: a differing file is written alongside as `.murmur-new`. Run it again later and it asks only what is new. Then `/murmur:doctor` checks the setup and says which optional pieces (a head office, an agent machine) are not set up yet.
+
 ## Skills
 
 Each skill loads on its own when the work matches the description, and can
