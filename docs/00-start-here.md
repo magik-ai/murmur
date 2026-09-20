@@ -2,9 +2,10 @@
 
 ## The thesis
 
-Running one coding agent is a terminal problem. You type a prompt, you watch it
-work, you read the diff. Running ten of them at once is not the same problem
-made bigger. It is a different problem: an organization problem.
+Running one coding agent is easy to manage. You type a prompt, you watch it
+work, you read the diff. Running ten of them at once is not the same job made
+bigger. It is a different job. You are running a team now, and a team needs
+the things teams have always needed.
 
 The moment a second agent starts touching the same repository, you need
 everything a team of humans needs. You need to know who owns which piece of
@@ -24,6 +25,9 @@ of tools that make many agents behave like a team instead of like ten people
 shouting into the same room. None of it requires a specific vendor's agent.
 Most of it is just discipline that happens to be enforced by a script instead
 of by memory, because memory is the first thing that fails under load.
+
+This handbook assumes GitHub for issues, pull requests and the merge queue.
+Another host works, but you will need to map the steps onto it yourself.
 
 ## The four roles
 
@@ -55,6 +59,10 @@ order, and what gets held back. Holds the single veto that can stop a merge
 regardless of how green everything looks. Does not implement features and does
 not resolve product questions; it enforces the gate.
 
+A team may also name extra approvers, for example a technical owner who signs
+off on architecture decisions. Those people are approvers on top of the four
+roles, not a fifth role.
+
 ## Law lives in one file
 
 Every project running this method has exactly one file that states how work
@@ -67,6 +75,9 @@ that goes stale is the one somebody follows by accident. If you find yourself
 about to write "as the law file already says" followed by a paraphrase, stop
 and link instead. A rule that exists in one place can be trusted the moment you
 find it. A rule that exists in three places can be trusted in none of them.
+
+The repository law template repeats the writing rules on purpose, because an
+agent reads that file at boot before it can follow a link.
 
 ## Week one, in order
 
@@ -98,3 +109,33 @@ Read the golden workflow chapter for the gate-by-gate shape of a single
 change. Read the parallel lanes chapter before running more than one agent at
 once. Read the coordination and identity chapter before two agents need to
 know about each other at all.
+
+## Words this handbook uses
+
+Seven words carry a specific meaning here. Every other chapter uses them as
+defined below.
+
+**Gate.** One numbered step in the workflow a change passes through, from
+branching to merging. The full list is in
+[the golden workflow chapter](02-golden-workflow.md).
+
+**Review verdict.** The one-line answer an adversarial reviewer gives about
+one exact commit: `VERDICT <sha> CLEAN` or `VERDICT <sha> RED`. The commit
+hash is part of the verdict, because a verdict about an older commit says
+nothing about this one.
+
+**Turnstile.** The check in front of a merge queue that refuses an entry whose
+own branch run is not green on that exact commit.
+
+**Lane.** One agent doing one unit of work, start to finish, inside a fixed
+list of paths it is allowed to touch.
+
+**Spine file.** A file that most changes want to touch, such as a composition
+root, a generated interface, or a shared registry. One lane holds it at a
+time.
+
+**Head office.** The small shared store that answers who is running, who holds
+which branch, and what mail is waiting. It lives in a repository of its own.
+
+**Farm.** A machine you own that runs headless agents. It is optional, and
+every rule here works without one.

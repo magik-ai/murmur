@@ -51,16 +51,23 @@ right. Re-register in this session instead.
 ## Branch claims
 
 Claim a work branch before creating or pushing it. A claim is a small file in
-the head office repository, one per branch. Plain
-git makes it safe: **the push is the compare-and-swap.** Two agents claiming
-one branch at the same moment cannot both win, because the second push is
-rejected for being behind, and the loser sees the winner's name.
+the head office repository, one per branch. Plain git makes it safe. Two
+agents cannot both win the same claim, because each of them writes the file
+and pushes it, and the second push is rejected for being behind. The loser
+reads the winner's name and picks another branch.
 
-A **pre-push guard** in every working copy enforces the claim, refusing a push
-to a branch somebody else holds. It fails open with a loud warning when the
+The **claims guard** enforces the claim in every working copy. It is a
+pre-push hook that refuses a push to a branch somebody else holds, and it
+ships with the head office tool. It fails open with a loud warning when the
 head office is unreachable, so an outage never blocks hands-on work, and fails
 closed when the pusher's identity cannot be resolved, because signing the
 wrong name is worse than not pushing.
+
+Do not confuse it with the **manifest guard**, which is a different check with
+a different job: it confirms that a lane touched only the paths it was given.
+In version one that one is a convention, not a hook. The orchestrator reads
+the diff before assembling the work. The claims guard answers who owns a
+branch, the manifest guard answers which files a lane may touch.
 
 **A refused claim means write to whoever holds it.** It never means finding
 another route to that branch. No merges into it, no rebases of it, no

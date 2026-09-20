@@ -71,8 +71,9 @@ this is the highest leverage gate in the list.
 Two details make it real. The review names the exact commit it read, because a
 review of an older commit is not a review of this change. And it ends in a
 verdict, clean or not clean, rather than in observations a lane can read
-generously. Use a deeper pass for authentication, security, migrations,
-durability, or encrypted user content.
+generously. The verdict is one line, `VERDICT <sha> CLEAN` or
+`VERDICT <sha> RED`, and nothing else on that line. Use a deeper pass for
+authentication, security, migrations, durability, or encrypted user content.
 
 ### 9. Fix every in-scope finding in the same change
 
@@ -83,8 +84,9 @@ found it is rarely the right person to decide it.
 
 ### 10. Arm auto-merge only after every gate has passed
 
-Arm it last, then confirm the host reports the change merged, and only then
-remove the worktree.
+Green checks qualify a change for merging; only the owner's explicit signal
+merges it, and auto-merge is armed only after that signal. Arm it last, then
+confirm the host reports the change merged, and only then remove the worktree.
 
 **The incident behind it.** A lane armed auto-merge the moment it opened the
 pull request, out of habit, while the adversarial review was still running. The
@@ -96,6 +98,48 @@ trigger.
 Never bypass a gate with an administrator override. That power exists for
 repairing a broken repository, not for being in a hurry. Each use makes the
 gates below it advisory.
+
+## One change, start to finish, with commands
+
+The ten gates above say why. This is what they look like at a terminal, for a
+single change on GitHub. Replace the names in angle brackets.
+
+```bash
+# Gate 1: branch from the current tip, in a working copy of its own.
+git fetch origin
+git worktree add ../<name> -b <branch> origin/main
+cd ../<name>
+
+# Gate 2: make the change, then commit each reviewable slice.
+# The commit subject is "Type: subject": a capitalized type, an imperative
+# verb, no full stop at the end.
+git add <the files you changed>
+git commit -m "Fix: keep the upload control visible before the first save"
+
+# Gates 3 to 6: documents updated, a release note added or declared, the
+# affected checks run locally, and the main branch merged in if it moved.
+git merge origin/main
+
+# Gate 7: push and open the pull request with the repository template.
+git push -u origin <branch>
+gh pr create --title "<ID>: <what changed>" \
+             --body-file .github/PULL_REQUEST_TEMPLATE.md
+
+# Gate 8: hand the exact head commit to the reviewer.
+git rev-parse HEAD
+
+# Gate 9: fix every in-scope finding here, then push again.
+
+# Gate 10: wait for the owner's signal, then arm auto-merge.
+gh pr merge <N> --auto --squash
+
+# After the host reports it merged, remove the working copy.
+git worktree remove ../<name>
+```
+
+Fill the pull request body with the template's own sections rather than
+posting it blank. Most hosts open an editor with the template already loaded,
+so `--body-file` is only needed when you are scripting it.
 
 ## The pull request template, section by section
 

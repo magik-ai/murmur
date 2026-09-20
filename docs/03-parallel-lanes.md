@@ -60,9 +60,11 @@ lines.
 
 Anything numbered sequentially (decision records, schema migrations) collides
 when lanes run in parallel. Reserving a number by looking at `main` is not enough. The number another lane
-claimed an hour ago sits in an open pull request, invisible to your tree. The
-reservation script scans `main` and every open pull request, and each lane
-reserves at batch start.
+claimed an hour ago sits in an open pull request, invisible to your tree. So
+the reservation script scans `main` and every open pull request by default,
+and each lane reserves at batch start. There is a `--main-only` flag for the
+case where the host cannot be reached, and it prints a warning saying an
+in-flight claim can be missed.
 
 **The incident behind it.** A lane renumbered a migration to dodge a collision,
 which is a rename plus an edit inside the file. The rename was staged carrying
@@ -132,6 +134,8 @@ at first.
 2. List your spine files by name, and mark them one-lane-at-a-time in the law
    file (see [`templates/CLAUDE.md`](../templates/CLAUDE.md), worktrees).
 3. Convert your most conflict-prone shared list into one file per change.
-4. Make number reservation scan open pull requests, not just `main`.
+4. Copy [`templates/scripts/next_number.sh`](../templates/scripts/next_number.sh),
+   which scans open pull requests as well as `main`, and point it at your own
+   numbered paths.
 5. Next time two lanes touch one file, diff the merge against both parents by
    identifier before looking at the checks.

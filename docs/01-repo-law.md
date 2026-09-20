@@ -57,8 +57,9 @@ blocker, a check failing for a reason its own change did not cause, and an
 action that needs explicit approval.
 
 Then the veto. A `hold` label on a pull request always blocks the merge, no
-matter how green everything looks. The conductor owns that label, and the
-automation treats it as absolute rather than as a warning.
+matter how green everything looks. Anyone may add the hold label. Only the
+owner removes it. The automation treats it as absolute rather than as a
+warning.
 
 ## Commits
 
@@ -139,7 +140,8 @@ kebab-case, code follows its language. Link out for anything longer.
    everything else is loaded on demand.
 3. Delete every rule you are not willing to enforce. A law nobody enforces
    teaches agents that laws are optional.
-4. Replace the stack-specific block with your own laws, and name the check that
-   proves each one.
-5. Grep your other documents for duplicated rules, and replace each copy with a
-   link.
+4. Optional, when you already have a pile of documents: grep them for rules
+   that repeat the law file, and replace each copy with a link.
+
+The stack-specific block can wait for week two. Getting one honest law file in
+place matters more than finishing it.
