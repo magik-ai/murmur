@@ -56,6 +56,57 @@ LAWS
 )
 fi
 
+# Second block: what this repository answered at init. Skills and docs speak of
+# <OWNER>, <TRACKER> and <FARM>; this block says what those words mean here.
+config="${CLAUDE_PROJECT_DIR:-.}/.murmur/config.toml"
+repo_block=$(python3 - "$config" <<'REPO'
+import sys, pathlib
+path = pathlib.Path(sys.argv[1])
+if not path.is_file():
+    print("\n**This repository has not run murmur init yet.** Run `/murmur:init` to"
+          " answer seven questions and write the contract. Until then <OWNER> means"
+          " the person who gave you your name, <TRACKER> means the pull request, and"
+          " there is no <FARM>.")
+    sys.exit(0)
+try:
+    import tomllib
+    cfg = tomllib.loads(path.read_text(encoding="utf-8"))
+except Exception as exc:  # a parse or read failure is reported, never a crashed session
+    print(f"\n**Note:** `.murmur/config.toml` could not be read ({exc}). Run `/murmur:doctor`.")
+    sys.exit(0)
+tracker = cfg.get("tracker", "github-issues")
+farm = cfg.get("farm", "not-yet")
+coord = cfg.get("coordination", "this-machine")
+never = cfg.get("never_without_owner", [])
+lines = ["", "# This repository (from `.murmur/config.toml`)", ""]
+lines.append(f"- Repository `{cfg.get('repo', '?')}`, work starts from and merges into"
+             f" `{cfg.get('base_branch', 'main')}`.")
+lines.append("- <OWNER> is the person who runs this repository: the human who gave you"
+             " your name this session. The contract is `.murmur/contract.md`.")
+if tracker == "none":
+    lines.append("- <TRACKER>: there is none. The pull request is the record; how it is"
+                 " kept is in `.claude/tracker.md`.")
+else:
+    lines.append(f"- <TRACKER> is {tracker}. Taking a task, linking the pull request,"
+                 " posting evidence and the three resting states: `.claude/tracker.md`.")
+if farm == "yes":
+    lines.append("- <FARM>: yes, a separate machine runs agents. Heavy work goes there,"
+                 " never on the machine hosting this session.")
+else:
+    lines.append("- <FARM>: none yet. Every worker runs on this machine, so keep the"
+                 " number of parallel lanes small.")
+if coord == "private-github-repo":
+    lines.append("- Branch claims live in a private GitHub repository through the `hq`"
+                 " command. Claim before you push; a refused claim is someone else's branch.")
+else:
+    lines.append("- Branch claims: this machine only. One session works on one branch at"
+                 " a time, and the branch name is the claim.")
+if never:
+    lines.append("- Never without <OWNER>: " + ", ".join(str(n) for n in never) + ".")
+print("\n".join(lines))
+REPO
+)
+
 python3 -c "
 import json, sys
 print(json.dumps({'hookSpecificOutput': {
@@ -64,4 +115,5 @@ print(json.dumps({'hookSpecificOutput': {
 }}))
 " <<EOF
 $context
+$repo_block
 EOF

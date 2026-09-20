@@ -113,7 +113,13 @@ know about each other at all.
 ## Words this handbook uses
 
 Seven words carry a specific meaning here. Every other chapter uses them as
-defined below.
+defined below. Three more are placeholders, written in angle brackets:
+`<OWNER>` is the person who runs the repository and names the agents,
+`<TRACKER>` is wherever that team tracks work, and `<FARM>` is the machine
+that runs agents when there is one. The init skill records the answers in
+`.murmur/config.toml`, and the plugin's session hook reads them back at the
+start of every session, so the handbook and the skills stay generic while each
+agent knows what the three words mean in this repository.
 
 **Gate.** One numbered step in the workflow a change passes through, from
 branching to merging. The full list is in

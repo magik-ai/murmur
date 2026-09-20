@@ -83,6 +83,15 @@ A repository can replace that text wholesale: write your own short version to
 `.claude/team-laws.md` and the hook injects it verbatim instead. Keep it
 short. It is paid for at the start of every session.
 
+After the laws the hook adds a second block, read from `.murmur/config.toml`:
+which repository this is, which branch work merges into, where work is tracked,
+whether there is a farm, and where branch claims live. The skills and the
+handbook speak of `<OWNER>`, `<TRACKER>` and `<FARM>`; this block is what
+turns those three words into this repository's answers, so a skill never has
+to be edited per repository. Before init has run, the block says so and tells
+the agent to run `/murmur:init`. A config file that cannot be read produces one
+note and never a failed session.
+
 ## Layout
 
 ```
