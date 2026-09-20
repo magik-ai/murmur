@@ -2,7 +2,7 @@
 
 Run dozens of coding agents (Claude Code, Codex) as a team: named agents with per-session identity, branch claims and mail between them, a remote farm that spawns and cleans up after them, a merge discipline that keeps main green, and the written laws that let it run overnight without you.
 
-**Status: private pilot. Not ready for strangers yet.** The plan is in [PLAN.md](PLAN.md).
+**Status: private pilot. Not ready for strangers yet.** The plan is in [internal/PLAN.md](internal/PLAN.md).
 
 ## What is inside
 
