@@ -1,0 +1,6 @@
+{
+  "name": "team",
+  "description": "Orchestration, night mode and safety hooks for running coding agents as a team",
+  "version": "0.0.1",
+  "author": { "name": "magik-ai" }
+}
