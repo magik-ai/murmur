@@ -1,6 +1,7 @@
 # Generated files, one glob per line.
 #
-# Copy this file to .claude/generated-files.txt in your repository and edit it.
+# This file lives at .claude/generated-files.txt in your repository (the init
+# skill puts it there; copy it by hand otherwise) and it is yours to edit.
 # The plugin's PreToolUse guard reads it and blocks any edit to a matching
 # path, so a generated artifact can only change by being regenerated.
 #
