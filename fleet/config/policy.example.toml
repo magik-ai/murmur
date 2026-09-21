@@ -1,0 +1,68 @@
+# Capacity policy for the fleet. Copy to ~/.config/fleet/policy.toml and tune.
+# The spawn guard BLOCKS a new agent if any hard limit is exceeded.
+#
+# Numbers are measured, not guessed: a codex worker idles at ~0.15GB, a vite build
+# peaks at ~1.3GB / 1.5 cores for ~8s. ~20 agents fit in 25GB with a 6GB floor and
+# 16GB swap. Past that the real limit is the subscription's usage pool, not the box.
+[limits]
+ram_min_gb   = 6     # hard: block spawns when free RAM drops below this
+max_agents   = 20    # hard: never run more concurrent agents than this
+gpu_temp_max = 87    # hard: block if GPU hotter than this (C) — 5070 Ti throttles ~88-90
+cpu_temp_max = 92    # hard: block if CPU hotter than this (C) — 9800X3D throttles ~95
+
+warn_ram_gb   = 8    # soft: dashboard + orchestrator warn below this (above the hard floor)
+warn_agents   = 15
+warn_gpu_temp = 82   # normal under load 65-83; amber above
+warn_cpu_temp = 85   # normal under load 60-85; amber above
+
+# ── Power modes: hand CPU back to Windows when you use the PC ──────────────────
+# `fleet mode auto|full|soft|balanced|hard`. The farm's agents live in a systemd
+# --user slice we cap live (no root, no restart). cpu_quota_pct = share of the WHOLE
+# machine; cpu_weight = scheduler share when not capped (100 = default, lower = yields);
+# allow_spawn = accept new agents. `auto` uses GPU load to pick full (idle) vs soft (gaming).
+[mode]
+auto_enter_gpu = 25   # GPU util % that reads as "a game is running" -> throttle to soft
+auto_exit_gpu  = 10   # ...and below this...
+auto_exit_hold = 60   # ...for this many seconds -> back to full (hysteresis, no yo-yo)
+
+[mode.full]     # farm takes everything (default when idle)
+cpu_quota_pct = 0     # 0 here means "uncapped" (a real 0% would freeze it)
+cpu_weight    = 100
+allow_spawn   = true
+[mode.soft]     # yields to a foreground game but KEEPS working — what auto picks
+cpu_quota_pct = 50
+cpu_weight    = 40
+allow_spawn   = true
+[mode.balanced] # existing agents crawl, no new ones
+cpu_quota_pct = 35
+cpu_weight    = 20
+allow_spawn   = false
+[mode.hard]     # near-frozen; for a game that wants every frame
+cpu_quota_pct = 20
+cpu_weight    = 10
+allow_spawn   = false
+
+# ── Commit identity for spawned lanes ─────────────────────────────────────────
+# Each lane commits as its own author so a reviewer can tell the agents apart.
+# `{agent}` is the lane's code name (`--by`, falling back to the lane name).
+# Both keys are optional: with no table at all a lane commits as "<name> (agent)"
+# <name@agents.local>. That address is deliberate rather than left to git. A box
+# with no user.email configured would otherwise fail a lane's first commit with
+# "unable to auto-detect email address", which reads as a broken agent; a box
+# that has one would quietly re-author every lane commit as the operator.
+# Set email_format if your deployment wants its own shape (and see MIGRATION.md
+# if this farm was committing under a real address before).
+[identity]
+author_format = "{agent} (agent)"
+# email_format = "you+{agent}@example.com"
+
+# ── Head office (agent-hq), optional ──────────────────────────────────────────
+# A cross-agent coordination layer: one claim per branch, a pre-push guard that refuses
+# a branch claimed by somebody else, and unread mail folded into a lane's first prompt.
+# It needs the `hq` CLI on PATH first: no binary, no head office, whatever this says.
+# With the binary present, `enabled = false` is the only way to switch it off. Delete the
+# table and every spawn warns and keeps it ON, because a farm that has always run head
+# office must not lose its claims and its mail to an upgrade. An off fleet installs no
+# claims hook and adds no AGENT-HQ paragraph to a brief.
+[hq]
+enabled = true

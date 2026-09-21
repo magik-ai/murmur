@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Prove hq cannot sign one agent's work with another agent's name.
+
+Two sessions share a machine: A registers as perseptolis, B then registers as
+bauhaus-3, and a third session never registers. Before the session-scoped
+identity files, A's mail went out headed `from bauhaus-3` — the last `hello`
+won, silently. Run against any hq: `bin/hq-selftest [path-to-hq]`.
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HQ = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).with_name("hq"))
+SOURCE = HQ.read_text().replace('if __name__ == "__main__":', "if False:")
+
+
+def session(key):
+    """Import hq as the given session would see it."""
+    module = type(sys)("hq")
+    for variable in ("HQ_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "TERM_SESSION_ID", "TMUX_PANE"):
+        os.environ.pop(variable, None)
+    if key:
+        os.environ["HQ_SESSION_ID"] = key
+    exec(compile(SOURCE, str(HQ), "exec"), module.__dict__)
+    return module
+
+
+def register(module, name, key):
+    """What `hq hello` writes locally, without the GitHub round-trip."""
+    module.STATE.mkdir(exist_ok=True)
+    if key and hasattr(module, "SESSION_DIR"):
+        module.SESSION_DIR.mkdir(parents=True, exist_ok=True)
+        (module.SESSION_DIR / key).write_text(name + "\n")
+    module.IDENTITY_FILE.write_text(name + "\n")
+    if hasattr(module, "IDENTITY_OWNER_FILE"):
+        module.IDENTITY_OWNER_FILE.write_text((key or "") + "\n")
+
+
+def main():
+    home = tempfile.mkdtemp()
+    os.environ["HOME"] = home
+    os.environ.pop("HQ_AGENT", None)
+    # Outside any repo, so a stray `git config hq.agent` cannot answer for us.
+    os.chdir(tempfile.mkdtemp())
+
+    register(session("AAA"), "perseptolis", "AAA")
+    register(session("BBB"), "bauhaus-3", "BBB")
+
+    failures = []
+    mine = session("AAA").identity()
+    if mine != "perseptolis":
+        failures.append(
+            f"a registered session was renamed by its neighbour: expected "
+            f"'perseptolis', got {mine!r}"
+        )
+    stranger = session("CCC").identity()
+    if stranger is not None:
+        failures.append(
+            f"an unregistered session inherited a name it never claimed: {stranger!r}"
+        )
+
+    # Second shape of the same bug: `git config hq.agent` reads per-worktree but
+    # is written to .git/config, which every linked worktree of the clone shares.
+    # One neighbour setting it must not rename a session that said hello.
+    checkout = tempfile.mkdtemp()
+    subprocess.run(["git", "init", "--quiet", checkout], check=True)
+    subprocess.run(["git", "-C", checkout, "config", "hq.agent", "neighbour"], check=True)
+    os.chdir(checkout)
+    in_checkout = session("AAA").identity()
+    if in_checkout != "perseptolis":
+        failures.append(
+            f"a clone-wide git config outranked a registered session: expected "
+            f"'perseptolis', got {in_checkout!r}"
+        )
+    shutil.rmtree(checkout, ignore_errors=True)
+
+    # Third shape, found on 2026-09-16: a session that said `hq bye` has no file of
+    # its own any more, so the next command falls through to shared state. Reading
+    # under a stale name is harmless; ACTING under it is not, and a second `hq bye`
+    # signed a different live agent off the board. Resolution may still answer, but
+    # require_identity must refuse anything that is not this session's own name.
+    after_bye = tempfile.mkdtemp()
+    subprocess.run(["git", "init", "--quiet", after_bye], check=True)
+    subprocess.run(["git", "-C", after_bye, "config", "hq.agent", "neighbour"], check=True)
+    os.chdir(after_bye)
+    module = session("AAA")
+    (module.SESSION_DIR / "AAA").unlink(missing_ok=True)
+    if hasattr(module, "identity_source"):
+        name, source = module.identity_source()
+        if (name, source) != ("neighbour", "clone config"):
+            failures.append(
+                "after bye, the source of a shared name is not reported: expected "
+                f"('neighbour', 'clone config'), got {(name, source)!r}"
+            )
+    else:
+        failures.append("hq cannot say where a name came from: no identity_source()")
+    try:
+        signed = module.require_identity()  # strict by default: must refuse shared state
+    except SystemExit as refusal:
+        signed = None
+        if "hello" not in str(refusal):
+            failures.append(f"the refusal does not say how to fix it: {refusal}")
+    if signed is not None:
+        failures.append(
+            f"a session with no name of its own acted as {signed!r} from shared state"
+        )
+    takes_strict = "strict" in module.require_identity.__code__.co_varnames
+    if takes_strict and module.require_identity(strict=False) != "neighbour":
+        failures.append("a read was refused where only writes should be")
+    shutil.rmtree(after_bye, ignore_errors=True)
+
+    shutil.rmtree(home, ignore_errors=True)
+    for failure in failures:
+        print(f"FAIL: {failure}")
+    if failures:
+        return 1
+    print("ok: a name survives a neighbour's hello and a clone-wide config, is never "
+          "inherited, and shared state can be read but never acted on")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

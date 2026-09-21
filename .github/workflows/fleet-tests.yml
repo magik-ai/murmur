@@ -1,0 +1,23 @@
+name: fleet tests
+
+on:
+  push:
+    branches: [main]
+    paths: ["fleet/**", ".github/workflows/fleet-tests.yml"]
+  pull_request:
+    paths: ["fleet/**", ".github/workflows/fleet-tests.yml"]
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: bash -n fleet/bin/fleet && bash -n fleet/install.sh && bash -n fleet/dashboard/run.sh
+      - name: Policy, identity, ports and the env file
+        run: bash fleet/tests/policy-test.sh fleet/bin/fleet
+      - name: Sensors and supervisor
+        run: |
+          cd fleet
+          python3 tests/sensors-test.py
+          python3 tests/supervisor-test.py lib/supervisor.py

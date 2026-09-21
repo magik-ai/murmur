@@ -1,0 +1,23 @@
+[Unit]
+Description=fleet merge-result CI queue
+After=default.target
+
+[Service]
+Type=simple
+Slice=fleet-ci.slice
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin
+# Operator overrides (FLEET_HOME, FLEET_DASH_BIND, tuning) live in one file rather than in
+# each unit. Read last, so it wins over the defaults above. The leading '-' makes it optional.
+EnvironmentFile=-%h/.config/fleet/env
+ExecStart=__PY__ __FLEET__/lib/ci.py daemon run
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.fleet/ci
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hq-cli"
+version = "0.1.0"
+description = "Coordination for a fleet of coding agents pushing under one GitHub login"
+readme = "README.md"
+# 3.11 is the floor because the config file is read with the standard
+# library's tomllib. The alternative was a second, hand-written parser
+# that disagreed with tomllib about malformed input - see src/hq/config.py.
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["agents", "coordination", "github", "git", "cli"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Version Control :: Git",
+]
+# No runtime dependencies on purpose. hq has to work on a machine where the
+# only reliable things are python, git and gh, so it uses nothing else.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+hq = "hq.cli:main"
+
+# [project.urls]
+# Set Source to the public home of this project before publishing it. Left out
+# on purpose rather than pointed at a private repo nobody outside can open.
+# Source = "https://github.com/<your-org>/agent-hq"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

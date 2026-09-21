@@ -49,7 +49,7 @@ password.
 | 4 vCPU, 8 GB, 80 GB | three to five lanes, front-end builds | CX33, about 6.50 euro a month | 48 dollars a month |
 | 8 vCPU, 16 GB | a full team with a merge queue and browser tests | CX43, about 12 euro a month | 96 dollars a month |
 
-Prices are September 2026 list prices and move; the ratio does not. Start at 4 vCPU and 8 GB:
+Prices are September 2026 list prices and move; the ratio does not. The fleet ships with limits for a big box (no new agent below 6 GB free); the installer sizes them to the machine it finds, and they stay yours to tune in `~/.config/fleet/policy.toml`. Start at 4 vCPU and 8 GB:
 a lane idles at a few hundred megabytes, but one front-end build peaks at 1.3 GB and 1.5
 cores, and two lanes building at once on a 4 GB box is how you meet the out-of-memory killer.
 

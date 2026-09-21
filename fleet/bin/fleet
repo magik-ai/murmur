@@ -1,0 +1,1932 @@
+#!/usr/bin/env bash
+# fleet — spawn & track headless Claude Code worker agents on this farm.
+# Project-agnostic. Runtime state lives in $FLEET_STATE, projects in $FLEET_CONFIG.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+FLEET_HOME="$(cd "$(dirname "$SELF")/.." && pwd)"
+export FLEET_STATE="${FLEET_STATE:-$HOME/.fleet}"
+export FLEET_CONFIG="${FLEET_CONFIG:-$HOME/.config/fleet}"
+
+# Operator overrides live in $FLEET_CONFIG/env, KEY=VALUE per line, systemd EnvironmentFile
+# syntax. Only FLEET_* keys are taken, and only when the caller did not set them, so an explicit
+# export on the command line still wins. Without this the sensors, the farm alias and the
+# dashboard bind were read by the dashboard alone, and `fleet mode auto` on a farm that had
+# written FLEET_NVIDIA_SMI there still ran blind.
+_load_env_file() {
+  local f="${FLEET_CONFIG}/env" line key value
+  [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue;; esac
+    case "$line" in *=*) ;; *) continue;; esac
+    key="${line%%=*}"; value="${line#*=}"
+    case "$key" in FLEET_[A-Z0-9_]*) ;; *) continue;; esac
+    case "$value" in
+      \"*\") value="${value#\"}"; value="${value%\"}";;
+      \'*\') value="${value#\'}"; value="${value%\'}";;
+    esac
+    [ -n "${!key:-}" ] || export "$key=$value"
+  done < "$f"
+}
+_load_env_file
+
+# Playwright's browsers ship without their OS libraries and the host has no passwordless sudo, so
+# the .debs are unpacked user-locally instead. Without this a lane's Chromium dies with
+# "libnspr4.so: cannot open shared object file" and the agent reports a farm limitation rather than
+# a result — three lanes lost their turn to exactly that.
+FLEET_PW_LIBS="$HOME/.local/pwdeps/root/usr/lib/x86_64-linux-gnu"
+if [ -d "$FLEET_PW_LIBS" ]; then
+  export LD_LIBRARY_PATH="$FLEET_PW_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+mkdir -p "$FLEET_STATE"/state "$FLEET_STATE"/logs "$FLEET_STATE"/worktrees "$FLEET_CONFIG"
+PY=python3
+CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
+CODEX_BIN="${CODEX_BIN:-/usr/bin/codex}"
+# Codex tiers by REASONING EFFORT on one model, where Claude tiers by model name.
+CODEX_DEFAULT_MODEL="${CODEX_DEFAULT_MODEL:-gpt-5.6-sol}"
+CODEX_DEFAULT_EFFORT="${CODEX_DEFAULT_EFFORT:-medium}"
+# Never let a stray API key divert billing off the subscription (both engines
+# run on their subscription: Claude OAuth, Codex "Logged in using ChatGPT").
+unset ANTHROPIC_API_KEY OPENAI_API_KEY 2>/dev/null || true
+
+_proj() { # $1 project, $2 field (dotted for a sub-table, e.g. `ports.vite_base`)
+  "$PY" - "$1" "$2" <<'PY'
+import sys, os
+proj, field = sys.argv[1], sys.argv[2]
+fp = os.path.expanduser(os.path.join(os.environ["FLEET_CONFIG"], "projects.toml"))
+d = {}
+if os.path.exists(fp):
+    try:
+        import tomllib
+        d = tomllib.load(open(fp, "rb"))
+    except Exception as exc:
+        print(f"invalid project registry {fp}: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+cur = d.get(proj, {}) or {}
+for key in field.split("."):
+    if not isinstance(cur, dict) or key not in cur:
+        cur = ""
+        break
+    cur = cur[key]
+print("" if cur is None or isinstance(cur, (dict, list)) else cur)
+PY
+}
+
+_metrics() { "$PY" "$FLEET_HOME/lib/metrics.py" "$@"; }
+
+# Read one value out of $FLEET_CONFIG/policy.toml by dotted key (e.g. `identity.author_format`).
+# Prints nothing when the file, the table or the key is absent, so every caller can fall back to
+# its own default. Booleans print as `true` / `false`.
+_policy() { # $1 dotted key
+  "$PY" - "$1" <<'PY'
+import os, sys
+fp = os.path.expanduser(os.path.join(os.environ["FLEET_CONFIG"], "policy.toml"))
+cur = {}
+if os.path.exists(fp):
+    try:
+        import tomllib
+        with open(fp, "rb") as handle:
+            cur = tomllib.load(handle)
+    except Exception as exc:
+        print(f"invalid policy file {fp}: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+for key in sys.argv[1].split("."):
+    if not isinstance(cur, dict) or key not in cur:
+        cur = ""
+        break
+    cur = cur[key]
+if isinstance(cur, bool):
+    cur = "true" if cur else "false"
+print("" if cur is None else cur)
+PY
+}
+
+
+# The author and email a lane's commits carry: prints "author<TAB>email" for one code name.
+# [identity] in policy.toml sets both shapes, `{agent}` standing for the code name. The email
+# default is NOT "leave git to it": a box with no global user.email would then fail the lane's
+# first commit with "unable to auto-detect email address", which reads as a broken agent, and a
+# farm that has one would silently re-author every lane commit as the operator.
+_commit_identity() { # $1 = code name
+  local author_fmt email_fmt
+  author_fmt="$(_policy identity.author_format)"
+  [ -n "$author_fmt" ] || author_fmt='{agent} (agent)'
+  email_fmt="$(_policy identity.email_format)"
+  [ -n "$email_fmt" ] || email_fmt='{agent}@agents.local'
+  printf '%s\t%s\n' "${author_fmt//\{agent\}/$1}" "${email_fmt//\{agent\}/$1}"
+}
+
+# Head office on or off for this spawn: prints 1 or 0. It needs the `hq` CLI on PATH, and then
+# [hq] enabled in policy.toml decides. An ABSENT table is not an answer, so it behaves as enabled
+# and says so once per spawn: a farm upgraded into this key would otherwise lose its claims, its
+# push guard and its mail silently. `enabled = false` is the only way to turn it off.
+_hq_gate() {
+  command -v hq >/dev/null 2>&1 || { echo 0; return 0; }
+  case "$(_policy hq.enabled)" in
+    true)  echo 1;;
+    false) echo 0;;
+    *)     echo 1
+           echo "hq: the \`hq\` CLI is on PATH and $FLEET_CONFIG/policy.toml has no [hq] table, so head office stays ON for this lane. Settle it with [hq] enabled = true (or false); see docs/MIGRATION.md." >&2;;
+  esac
+}
+
+# One code name -> ONE mark, forever. The registry WINS: an orchestrator that passes a
+# different --icon/--color on every spawn (which is exactly what happens) cannot scatter
+# its agents across a dozen emoji. Registered on first sight; change it deliberately with
+# `fleet identity <name> --icon E --color C`.
+_identity() { # $1=name [$2=icon] [$3=color]  ->  prints "icon<TAB>color"
+  "$PY" "$FLEET_HOME/lib/identity.py" resolve "$1" "${2:-}" "${3:-}"
+}
+
+cmd_identity() { # show or set the mark for a code name
+  "$PY" "$FLEET_HOME/lib/identity.py" cli "$@"
+}
+
+# Stop an agent's process container — new (systemd --user service in fleet.slice) or a
+# legacy tmux session still running from before the switch. Try both; ignore what's absent.
+_stop_agent() { # $1 = slug
+  systemctl --user stop "fleet-$1" 2>/dev/null || true
+  systemctl --user reset-failed "fleet-$1" 2>/dev/null || true
+  tmux kill-session -t "fleet-$1" 2>/dev/null || true
+}
+
+cmd_mode() { "$PY" "$FLEET_HOME/lib/mode.py" "$@"; }
+
+_capacity_json() { "$PY" "$FLEET_HOME/lib/metrics.py" | "$PY" -c 'import sys,json;print(json.dumps(json.load(sys.stdin)["capacity"]))'; }
+
+cmd_metrics() { _metrics --pretty; }
+
+cmd_capacity() {
+  local c; c=$(_capacity_json)
+  echo "$c" | "$PY" -c 'import sys,json;c=json.load(sys.stdin);print(("OK" if c["can_spawn"] else "BLOCK")+" ["+c["level"]+"] "+"; ".join(c["reasons"]))'
+}
+
+cmd_add_project() { # --name --repo owner/name [--path p] [--branch main] [--port-base N]
+  local name="" repo="" path="" branch="main" portbase="5200"
+  while [ $# -gt 0 ]; do case "$1" in
+    --name) name="$2"; shift 2;; --repo) repo="$2"; shift 2;;
+    --path) path="$2"; shift 2;; --branch) branch="$2"; shift 2;;
+    --port-base) portbase="$2"; shift 2;; *) echo "unknown $1"; return 1;; esac; done
+  [ -n "$name" ] && [ -n "$repo" ] || { echo "need --name and --repo owner/name"; return 1; }
+  path="${path:-$HOME/work/$name}"
+  if [ ! -d "$path/.git" ]; then
+    echo "cloning $repo -> $path"; git clone "https://github.com/$repo.git" "$path"
+  fi
+  local reg="$FLEET_CONFIG/projects.toml"
+  "$PY" - "$reg" "$name" "$repo" "$path" "$branch" "$portbase" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+import tomllib
+
+registry = Path(sys.argv[1])
+name, repo, path, branch, port_base = sys.argv[2:]
+try:
+    port_base = int(port_base)
+except ValueError:
+    print(f"invalid --port-base {port_base!r}: expected an integer", file=sys.stderr)
+    raise SystemExit(2)
+text = registry.read_text() if registry.exists() else ""
+try:
+    data = tomllib.loads(text)
+except tomllib.TOMLDecodeError as exc:
+    print(f"invalid project registry {registry}: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+wanted = {
+    "repo": repo, "path": path, "branch": branch, "port_base": port_base,
+}
+if name in data:
+    current = data[name]
+    comparable = {
+        "repo": str(current.get("repo", "")),
+        "path": os.path.expanduser(str(current.get("path", ""))),
+        "branch": str(current.get("branch") or "main"),
+        "port_base": int(current.get("port_base") or 5200),
+    }
+    if comparable == wanted:
+        print(f"project '{name}' already registered -> {path}")
+        raise SystemExit(0)
+    print(f"project '{name}' is already registered with different settings; "
+          "refusing to append a duplicate table", file=sys.stderr)
+    raise SystemExit(2)
+block = (
+    f"\n[{json.dumps(name)}]\n"
+    f"repo = {json.dumps(repo)}\n"
+    f"path = {json.dumps(path)}\n"
+    f"branch = {json.dumps(branch)}\n"
+    f"port_base = {port_base}\n"
+)
+registry.parent.mkdir(parents=True, exist_ok=True)
+fd, tmp_name = tempfile.mkstemp(prefix=registry.name + ".", dir=registry.parent)
+try:
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text.rstrip() + "\n" if text.strip() else "")
+        fh.write(block.lstrip("\n"))
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp_name, registry)
+finally:
+    try:
+        os.unlink(tmp_name)
+    except FileNotFoundError:
+        pass
+print(f"registered project '{name}' -> {path}")
+PY
+}
+
+cmd_projects() {
+  local reg="$FLEET_CONFIG/projects.toml"
+  "$PY" - "$reg" <<'PY'
+from pathlib import Path
+import sys
+import tomllib
+
+path = Path(sys.argv[1])
+if not path.exists():
+    print("(no projects; use: fleet add-project)")
+    raise SystemExit
+try:
+    data = tomllib.loads(path.read_text())
+except tomllib.TOMLDecodeError as exc:
+    print(f"invalid project registry {path}: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+print("\n".join(data) if data else "(no projects; use: fleet add-project)")
+PY
+}
+
+_rollback_spawn() { # called only by cmd_spawn's EXIT trap
+  local rc="$1" path="$2" branch="$3" wt="$4" hookdir="$5" slug="$6"
+  local hq_agent="$7" hq_claimed="$8" brief_owned="$9" brief_path="${10}"
+  local spill_path="${11}" log="${12}"
+  trap - EXIT
+  set +e
+  _stop_agent "$slug"
+  if [ "$hq_claimed" = "1" ] && command -v hq >/dev/null 2>&1; then
+    (cd "$wt" 2>/dev/null && HQ_AGENT="$hq_agent" hq release "$branch" >/dev/null 2>&1)
+  fi
+  git -C "$path" worktree remove --force "$wt" >/dev/null 2>&1
+  if [ -n "$hookdir" ] && [ "${hookdir#"$FLEET_STATE/hooks/"}" != "$hookdir" ]; then
+    rm -rf -- "$hookdir"
+  fi
+  git -C "$path" branch -D "$branch" >/dev/null 2>&1
+  rm -f -- "$FLEET_STATE/state/$slug.json"
+  if [ "$brief_owned" = "1" ] && [ -n "$brief_path" ]; then rm -f -- "$brief_path"; fi
+  [ -n "$spill_path" ] && rm -f -- "$spill_path"
+  if [ -n "$log" ]; then
+    local suffix
+    for suffix in sys task run.sh last err jsonl; do rm -f -- "$log.$suffix"; done
+  fi
+  exit "$rc"
+}
+
+cmd_spawn() {
+  local project="" lane="" model="" issue="" task="" brieffile="" force=0 by="" icon="" color="" engine="claude" effort="" paper=0
+  local restart="" donewhen="" issues="" after="" account="" account_dir=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --project) project="$2"; shift 2;; --lane) lane="$2"; shift 2;;
+    --engine) engine="$2"; shift 2;;
+    --model) model="$2"; shift 2;; --effort) effort="$2"; shift 2;;
+    --issue) issue="$2"; shift 2;;
+    --task) task="$2"; shift 2;; --brief-file) brieffile="$2"; shift 2;;
+    --by) by="$2"; shift 2;; --icon) icon="$2"; shift 2;; --color) color="$2"; shift 2;;
+    --paper) paper=1; shift;;
+    --restart) restart="$2"; shift 2;;      # until-pr|until-merged|until-file:<p>|never
+    --done-when) donewhen="$2"; shift 2;;   # pr-open|pr-merged|file:<p>|issue-closed:#N
+    --issues) issues="$2"; shift 2;;
+    --after) after="$2"; shift 2;;         # gate: defer until <lane>[:cond] delivers
+    --account) account="$2"; shift 2;;     # claude subscription account (name or `auto`)
+    --force) force=1; shift;; *) echo "unknown $1"; return 1;; esac; done
+  [ -n "$project" ] && [ -n "$lane" ] || { echo "usage: fleet spawn --project X --lane L [--engine claude|codex] [--model M] [--effort low|medium|high|xhigh] [--paper] [--restart until-pr|until-merged|until-file:<p>] [--done-when <contract>] [--issues a,b,c] [--after <lane>[:pr-merged|pr-open]] (--issue N | --task '..' | --brief-file f)"; return 1; }
+  # A policy file that does not parse must not read as "no policy". Every gate below would then
+  # take its own default in silence: no head office, the fallback commit identity, and limits
+  # that are not the ones the operator wrote. Refuse the spawn, in one line, before anything is
+  # created.
+  local policy_err
+  if ! policy_err="$(_policy limits.max_agents 2>&1 >/dev/null)"; then
+    echo "REFUSING to spawn: ${policy_err%%$'\n'*}"
+    return 2
+  fi
+  case "$engine" in
+    claude|codex) ;;
+    *) if [ "$("$PY" "$FLEET_HOME/lib/models.py" routable "$engine" 2>/dev/null)" != "yes" ]; then
+         echo "engine '$engine' is not a routable model."
+         echo "  it must be enabled AND pass a health check: fleet models enable $engine"
+         echo "  (see the catalog: fleet models)"; return 1
+       fi ;;
+  esac
+  # Claude tiers by MODEL (opus/sonnet/haiku). Codex tiers by REASONING EFFORT on one model.
+  if [ "$engine" = "claude" ]; then
+    [ -z "$model" ] && model="sonnet"
+    # A typo'd model dies minutes later inside the lane, where it reads as a broken agent.
+    case "$model" in sonnet|opus|haiku|fable|claude-*) ;; *)
+      echo "unknown claude model '$model' (sonnet|opus|haiku|fable or a full claude-* id)"; return 1;; esac
+    if [ -n "$effort" ]; then
+      case "$effort" in low|medium|high|xhigh) ;; *) echo "unknown effort '$effort' (low|medium|high|xhigh)"; return 1;; esac
+    fi
+    # No --account means `auto`: round-robin over every account with session and weekly headroom
+    # (lib/claude_accounts.py resolve_auto). Without this default a lane silently took the
+    # default account, the pool shared with the owner's own sessions, and died on its first
+    # step once that account hit its weekly limit. A name pins that account.
+    # Resolution fails loudly when the account has no credentials or nothing has headroom.
+    [ -z "$account" ] && account="auto"
+    account_dir="$("$PY" "$FLEET_HOME/lib/claude_accounts.py" dir "$account")" || return 1
+  elif [ "$engine" = "codex" ]; then
+    [ -n "$account" ] && { echo "--account is a claude-engine dial"; return 1; }
+    [ -z "$model" ] && model="$CODEX_DEFAULT_MODEL"
+    [ -z "$effort" ] && effort="$CODEX_DEFAULT_EFFORT"
+    case "$effort" in low|medium|high|xhigh) ;; *) echo "unknown effort '$effort' (low|medium|high|xhigh)"; return 1;; esac
+  fi
+
+  # One code name -> one mark. Registered on first sight; after that the REGISTRY WINS,
+  # so an orchestrator that passes a fresh emoji every spawn can't scatter its own agents.
+  if [ -n "$by" ]; then
+    local _id; _id="$(_identity "$by" "$icon" "$color")"
+    IFS=$'\t' read -r icon color <<< "$_id"
+  fi
+
+  # Train/DAG gate (P1-5): --after defers the spawn. Record a pending spec and STOP here —
+  # before any dashboard/capacity/worktree work — so a gated lane creates nothing until the
+  # daemon fires it when its dependency delivers. (Needs `fleet daemon` running, like --restart.)
+  if [ -n "$after" ]; then
+    local gbrief=""
+    if [ -n "$brieffile" ]; then gbrief="$brieffile"
+    elif [ -n "$task" ]; then mkdir -p "$FLEET_STATE/briefs"; gbrief="$FLEET_STATE/briefs/$lane.md"; printf '%s' "$task" > "$gbrief"; fi
+    if [ -z "$donewhen" ] && [ -n "$restart" ]; then
+      case "$restart" in until-pr) donewhen="pr-open";; until-merged) donewhen="pr-merged";; until-file:*) donewhen="file:${restart#until-file:}";; esac
+    fi
+    mkdir -p "$FLEET_STATE/pending"
+    brief_path="$gbrief" "$PY" - <<PY
+import json, os
+spec = {"lane": "$lane", "project": "$project", "after": "$after",
+        "engine": "$engine", "model": "$model", "effort": "$effort", "account": "$account",
+        "by": "$by", "icon": "$icon", "color": "$color", "paper": "$paper",
+        "restart": "$restart", "done_when": "$donewhen", "issues": "$issues",
+        "brief_path": os.environ.get("brief_path", "")}
+json.dump(spec, open(os.path.join(os.environ["FLEET_STATE"], "pending", "$lane.json"), "w"))
+PY
+    echo "gated  $lane — deferred until $after delivers (daemon fires it; \`fleet daemon status\` to watch)"
+    return 0
+  fi
+
+  # ensure the dashboard is up whenever we spawn — no boot task / sudo needed
+  "$FLEET_HOME/dashboard/run.sh" start >/dev/null 2>&1 || true
+
+  local cap; cap=$(_capacity_json)
+  local can; can=$(echo "$cap" | "$PY" -c 'import sys,json;print(json.load(sys.stdin)["can_spawn"])')
+  if [ "$can" != "True" ] && [ "$force" != "1" ]; then
+    echo "CAPACITY BLOCK: $(echo "$cap" | "$PY" -c 'import sys,json;print("; ".join(json.load(sys.stdin)["reasons"]))')"
+    echo "(override with --force)"; return 2
+  fi
+
+  # Power-mode gate: a manual balanced/hard game mode PAUSES new spawns (running agents keep
+  # going); soft / full / auto never block. --force overrides.
+  local spawnck; spawnck=$("$PY" "$FLEET_HOME/lib/mode.py" allow-spawn 2>/dev/null || echo 1)
+  if [ "${spawnck%%$'\t'*}" = "0" ] && [ "$force" != "1" ]; then
+    echo "MODE BLOCK: power mode '${spawnck#*$'\t'}' pauses new spawns (running agents keep going)."
+    echo "(override with --force, or release it: fleet mode auto)"; return 2
+  fi
+
+  local path branch_base portbase apibase e2ebase
+  path="$(_proj "$project" path)"; path="${path/#\~/$HOME}"
+  branch_base="${FLEET_SPAWN_BASE:-}"; [ -n "$branch_base" ] || branch_base="$(_proj "$project" branch)"
+  branch_base="${branch_base:-main}"
+  # Dev-server ports are the project's, not the harness's: a repo whose API lives on 8000 or whose
+  # e2e harness wants 4000 should not have to patch fleet. Each lane gets base+slot so two lanes
+  # of the same project never collide. [ports] in projects.toml overrides; the fallbacks are the
+  # numbers fleet used when they were hardcoded, so a registry without the table is unchanged.
+  portbase="$(_proj "$project" ports.vite_base)"
+  [ -n "$portbase" ] || portbase="$(_proj "$project" port_base)"
+  portbase="${portbase:-5200}"
+  apibase="$(_proj "$project" ports.api_base)"; apibase="${apibase:-8100}"
+  e2ebase="$(_proj "$project" ports.e2e_base)"; e2ebase="${e2ebase:-6100}"
+  [ -n "$path" ] && [ -d "$path/.git" ] || { echo "project '$project' not registered or missing (fleet add-project)"; return 1; }
+
+  # Resolve and validate the user-controlled text before creating any branch, worktree, hook, or
+  # claim. The summary writer below reads this from a file; it never splices it into Python source.
+  local tasktext="$task"
+  if [ -n "$brieffile" ]; then tasktext="$(cat "$brieffile")"; fi
+  if [ -z "$tasktext" ] && [ -n "$issue" ]; then tasktext="Implement GitHub issue #$issue for $project. Read it first: run 'gh issue view $issue'."; fi
+  [ -n "$tasktext" ] || { echo "need --task, --brief-file or --issue"; return 1; }
+
+  # slot number = active agents, for deterministic non-clashing ports
+  local slot; slot=$(_metrics | "$PY" -c 'import sys,json;print(json.load(sys.stdin)["agents"])')
+  local vite=$((portbase + slot)) uvicorn=$((apibase + slot)) e2e=$((e2ebase + slot))
+  local stamp slug branch wt
+  stamp=$(date +%H%M%S); slug="${lane}-${stamp}-$$"
+  branch="${FLEET_SPAWN_BRANCH:-fleet/${lane}-${stamp}}"
+  wt="$FLEET_STATE/worktrees/$project/$slug"
+
+  echo "fetch $project ..."; git -C "$path" fetch -q origin "$branch_base"
+  git -C "$path" worktree add -q -b "$branch" "$wt" "origin/$branch_base"
+  local hookdir="$FLEET_STATE/hooks/$slug" hq_agent="${by:-$lane}"
+  # Head office is one deployment's coordination layer, not part of the harness. It costs a
+  # branch claim, a pre-push guard and a paragraph in every brief, so it needs the `hq` binary
+  # on PATH. Only an explicit `enabled = false` switches it off: a farm that has been running
+  # head office since before this key existed has no [hq] table, and reading that silence as
+  # "off" would drop its claims and its mail without a word.
+  local hq_on=0
+  hq_on="$(_hq_gate)"
+  local brief_owned=0 brief_path="" spill_path="" log=""
+  FLEET_ROLLBACK_PATH="$path"
+  FLEET_ROLLBACK_BRANCH="$branch"
+  FLEET_ROLLBACK_WT="$wt"
+  FLEET_ROLLBACK_HOOKDIR="$hookdir"
+  FLEET_ROLLBACK_SLUG="$slug"
+  FLEET_ROLLBACK_HQ_AGENT="$hq_agent"
+  FLEET_ROLLBACK_HQ_CLAIMED=0
+  FLEET_ROLLBACK_BRIEF_OWNED=0
+  FLEET_ROLLBACK_BRIEF_PATH=""
+  FLEET_ROLLBACK_SPILL_PATH=""
+  FLEET_ROLLBACK_LOG=""
+  trap '_rollback_spawn "$?" "$FLEET_ROLLBACK_PATH" "$FLEET_ROLLBACK_BRANCH" \
+        "$FLEET_ROLLBACK_WT" "$FLEET_ROLLBACK_HOOKDIR" "$FLEET_ROLLBACK_SLUG" \
+        "$FLEET_ROLLBACK_HQ_AGENT" "$FLEET_ROLLBACK_HQ_CLAIMED" \
+        "$FLEET_ROLLBACK_BRIEF_OWNED" "$FLEET_ROLLBACK_BRIEF_PATH" \
+        "$FLEET_ROLLBACK_SPILL_PATH" "$FLEET_ROLLBACK_LOG"' EXIT
+
+  # Group lanes keep their own attribution and push guard.  Worktree config is essential:
+  # ordinary `git config` and hooks are shared by every worktree in the repository.
+  if [ -n "${FLEET_SPAWN_GIT_NAME:-}" ] || [ -n "${FLEET_SPAWN_GIT_EMAIL:-}" ]; then
+    git -C "$path" config extensions.worktreeConfig true
+    [ -n "${FLEET_SPAWN_GIT_NAME:-}" ] && git -C "$wt" config --worktree user.name "$FLEET_SPAWN_GIT_NAME"
+    [ -n "${FLEET_SPAWN_GIT_EMAIL:-}" ] && git -C "$wt" config --worktree user.email "$FLEET_SPAWN_GIT_EMAIL"
+  fi
+  # Every lane pushes as an attributable author and carries a per-worktree identity, so a
+  # reviewer can tell which agent wrote which commit. The shapes are deployment policy, not
+  # fleet's business: [identity] in policy.toml sets them, `{agent}` standing for the code name.
+  local author_fmt email_fmt identity
+  identity="$(_commit_identity "$hq_agent")"
+  IFS=$'\t' read -r author_fmt email_fmt <<< "$identity"
+  git -C "$path" config extensions.worktreeConfig true
+  [ -n "${FLEET_SPAWN_GIT_NAME:-}" ] || git -C "$wt" config --worktree user.name "$author_fmt"
+  if [ -z "${FLEET_SPAWN_GIT_EMAIL:-}" ] && [ -n "$email_fmt" ]; then
+    git -C "$wt" config --worktree user.email "$email_fmt"
+  fi
+  [ "$hq_on" = "1" ] && git -C "$wt" config --worktree hq.agent "$hq_agent"
+  mkdir -p "$hookdir/pre-push.d"
+  git -C "$wt" config --worktree core.hooksPath "$hookdir"
+  cat > "$hookdir/pre-push" <<'HOOK_DISPATCH'
+#!/usr/bin/env bash
+# Chained pre-push: every executable in pre-push.d gets the full hook input.
+input="$(cat)"
+for h in "$(dirname "$0")/pre-push.d"/*; do
+  [ -x "$h" ] || continue
+  # printf '%s\n' — NOT '%s'. Command substitution strips the trailing newline, and bash `read`
+  # returns non-zero on an unterminated final line, so a single-ref push (the common case) made
+  # every sub-hook's `while read` loop body never execute: the guard inspected nothing and passed.
+  printf '%s\n' "$input" | "$h" || exit 1
+done
+exit 0
+HOOK_DISPATCH
+  chmod +x "$hookdir/pre-push"
+  if [ "$hq_on" = "1" ]; then
+    cat > "$hookdir/pre-push.d/10-hq-claims" <<'HOOK_HQ'
+#!/usr/bin/env bash
+# agent-hq claims guard: refuse pushing to a branch claimed by another agent.
+hq_bin="$(command -v hq || echo "$HOME/.local/bin/hq")"
+[ -x "$hq_bin" ] || exit 0
+repo_url="$(git remote get-url origin 2>/dev/null)" || exit 0
+wt_agent="$(git config hq.agent 2>/dev/null || true)"
+export HQ_AGENT="${wt_agent:-${HQ_AGENT:-}}"
+[ -n "$HQ_AGENT" ] || unset HQ_AGENT
+while read -r _l _ls remote _rs; do
+  case "$remote" in refs/heads/*) "$hq_bin" check-push "$repo_url" "${remote#refs/heads/}" || exit 1 ;; esac
+done
+exit 0
+HOOK_HQ
+    chmod +x "$hookdir/pre-push.d/10-hq-claims"
+  fi
+  if [ -n "${FLEET_GROUP_NAME:-}" ] && [ -n "${FLEET_GROUP_LANE:-}" ]; then
+    printf '#!/usr/bin/env bash\nexport FLEET_STATE=%q FLEET_CONFIG=%q\nexec %q %q guard %q %q\n' \
+      "$FLEET_STATE" "$FLEET_CONFIG" "$PY" "$FLEET_HOME/lib/group.py" \
+      "$FLEET_GROUP_NAME" "$FLEET_GROUP_LANE" > "$hookdir/pre-push.d/20-group-guard"
+    chmod +x "$hookdir/pre-push.d/20-group-guard"
+  fi
+  if [ "$hq_on" = "1" ]; then
+    if (cd "$wt" && HQ_AGENT="$hq_agent" hq claim "$branch" --note "fleet lane $lane"); then
+      FLEET_ROLLBACK_HQ_CLAIMED=1
+    else
+      echo "hq: claim failed for $branch; the push hook will verify claims when HQ is reachable"
+    fi
+  fi
+
+  # system framing from template
+  local sys; sys="$(sed \
+    -e "s#{{PROJECT}}#$project#g" -e "s#{{LANE}}#$lane#g" -e "s#{{AGENT_ID}}#$slug#g" -e "s#{{MSG_INBOX}}#$FLEET_STATE/msg/$slug.md#g" \
+    -e "s#{{WORKTREE}}#$wt#g" -e "s#{{BRANCH}}#$branch#g" -e "s#{{BASE}}#$branch_base#g" \
+    -e "s#{{VITE}}#$vite#g" -e "s#{{UVICORN}}#$uvicorn#g" -e "s#{{E2E}}#$e2e#g" \
+    "$FLEET_HOME/lib/brief_template.md")"
+  if [ "${FLEET_SPAWN_NO_PR:-0}" = "1" ]; then
+    sys="$sys
+
+GROUP OVERRIDE — this lane belongs to an integration group. Commit and push only its assigned
+branch. Do NOT open a pull request and do NOT merge anything. The orchestrator alone assembles
+the group and opens its single integration PR."
+  fi
+
+  # Persist the brief so the supervisor can respawn this lane verbatim. A --brief-file lane
+  # keeps its path; a --task lane gets its text frozen to a stable per-lane file.
+  if [ -n "$brieffile" ]; then brief_path="$brieffile"
+  elif [ -n "$tasktext" ]; then
+    mkdir -p "$FLEET_STATE/briefs"; brief_path="$FLEET_STATE/briefs/$slug.md"
+    printf '%s' "$tasktext" > "$brief_path"
+    brief_owned=1
+  fi
+  FLEET_ROLLBACK_BRIEF_OWNED="$brief_owned"
+  FLEET_ROLLBACK_BRIEF_PATH="$brief_path"
+  # Default the outcome contract from the restart policy when the caller didn't set one.
+  if [ -z "$donewhen" ] && [ -n "$restart" ]; then
+    case "$restart" in until-pr) donewhen="pr-open";; until-merged) donewhen="pr-merged";;
+      until-file:*) donewhen="file:${restart#until-file:}";; esac
+  fi
+
+  # An explicit spawn of a lane clears any retire marker: retiring stops the DAEMON from respawning,
+  # so a human or orchestrator asking for the lane again is a deliberate revive. (The daemon never
+  # reaches this path for a retired lane — reconcile skips it — so it cannot clear its own marker.)
+  [ -n "$lane" ] && [ -n "$project" ] && rm -f "$FLEET_STATE/.retired/${project}__${lane}" 2>/dev/null
+
+  # write initial state
+  spawn_project="$project" spawn_lane="$lane" spawn_engine="$engine" spawn_model="$model" \
+  spawn_effort="$effort" spawn_issue="$issue" spawn_branch="$branch" spawn_worktree="$wt" \
+  spawn_by="$by" spawn_icon="$icon" spawn_color="$color" spawn_restart="$restart" \
+  spawn_donewhen="$donewhen" spawn_issues="$issues" spawn_brief_path="$brief_path" \
+  spawn_fleet_home="$FLEET_HOME" \
+  spawn_vite="$vite" spawn_uvicorn="$uvicorn" spawn_e2e="$e2e" \
+  "$PY" - "$slug" <<'PY'
+import json, os, time
+import sys
+
+get = lambda key: os.environ.get("spawn_" + key, "")
+brief_path = get("brief_path")
+try:
+    task_summary = open(brief_path, errors="replace").read(300)
+except OSError as exc:
+    print(f"cannot read persisted brief {brief_path}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+s = {"slug": sys.argv[1], "project": get("project"), "lane": get("lane"),
+     "engine": get("engine"), "model": get("model"), "effort": get("effort"),
+     "issue": get("issue"), "branch": get("branch"), "worktree": get("worktree"),
+     "spawned_by": get("by"), "by_icon": get("icon"), "by_color": get("color"),
+     "ports": {"vite": int(get("vite")), "uvicorn": int(get("uvicorn")),
+               "e2e": int(get("e2e"))},
+     "status": "starting", "started_at": int(time.time()), "task": task_summary,
+     "restart": get("restart"), "done_when": get("donewhen"), "issues": get("issues"),
+     "brief_path": brief_path, "respawn_count": 0}
+if os.environ.get("FLEET_GROUP_NAME"):
+    s["group"] = os.environ["FLEET_GROUP_NAME"]
+    s["group_lane"] = os.environ.get("FLEET_GROUP_LANE")
+json.dump(s, open(os.path.join(os.environ["FLEET_STATE"], "state", sys.argv[1] + ".json"), "w"))
+try:
+    sys.path.insert(0, os.path.join(get("fleet_home"), "lib"))
+    from events import append_event as _ae
+    _ae(sys.argv[1], s, "spawned", engine=get("engine"), by=get("by"))
+except Exception:
+    pass
+PY
+
+  # agent-hq (phase 2): the lane starts knowing who it is at HQ, and any unread
+  # coordination mail rides into THIS launch's prompt. The brief file persisted
+  # above stays clean, so a respawn never replays stale mail.
+  if [ "$hq_on" = "1" ]; then
+    sys="$sys"$'\n\n'"AGENT-HQ: you are '$hq_agent'. Check mail between tasks with 'hq inbox'; message peers with 'hq msg <agent|all> \"...\"'; your lane branch is already claimed for you - release is automatic on merge, and never push to a branch claimed by someone else."
+    local hq_mail
+    hq_mail="$(HQ_AGENT="$hq_agent" hq inbox 2>/dev/null || true)"
+    if [ -n "$hq_mail" ] && [ "$hq_mail" != "inbox empty" ]; then
+      # Cap it. The prompt goes to the engine as ONE argv string, and Linux caps a single argument
+      # at MAX_ARG_STRLEN (131072) - not at ARG_MAX. A busy night of broadcasts pushed the inbox
+      # past that on its own, and every new lane then died at exec with only a line in <slug>.err.
+      # The agent can always read the rest itself; brief_template already tells it to.
+      local mail_bytes mail_cap=24000
+      mail_bytes=$(printf '%s' "$hq_mail" | wc -c)
+      if [ "$mail_bytes" -gt "$mail_cap" ]; then
+        hq_mail="$(printf '%s' "$hq_mail" | tail -c "$mail_cap")"
+        hq_mail="[older mail truncated - ${mail_bytes} bytes total; run 'hq inbox' for the full set]"$'\n'"$hq_mail"
+      fi
+      tasktext="AGENT-HQ MAIL (coordination messages addressed to you - read before working):"$'\n'"$hq_mail"$'\n\n'"---"$'\n\n'"$tasktext"
+    fi
+  fi
+
+  log="$FLEET_STATE/logs/$slug"
+  FLEET_ROLLBACK_LOG="$log"
+  printf '%s' "$sys" > "$log.sys"
+  if [ "$engine" = "codex" ]; then
+    # Codex has no --append-system-prompt: fold the framing into the prompt itself.
+    { printf '%s\n\n---\n\nTASK\n\n' "$sys"; printf '%s' "$tasktext"; } > "$log.task"
+  else
+    printf '%s' "$tasktext" > "$log.task"
+  fi
+
+  # The prompt is passed as ONE argv string. Linux caps a single argument at MAX_ARG_STRLEN
+  # (131072 bytes); exceeding it makes exec fail with "Argument list too long" AFTER the worktree,
+  # the state record and the unit already exist - so the lane looks like it ran and did nothing.
+  # Spill the full text into fleet-owned state, outside the worktree, and hand the engine a
+  # pointer instead. `git clean` and `fleet salvage` can never delete or commit this file.
+  local task_bytes arg_limit=120000
+  task_bytes=$(wc -c < "$log.task")
+  if [ "$task_bytes" -gt "$arg_limit" ]; then
+    mkdir -p "$FLEET_STATE/briefs"
+    spill_path="$FLEET_STATE/briefs/$slug.prompt.md"
+    FLEET_ROLLBACK_SPILL_PATH="$spill_path"
+    mv "$log.task" "$spill_path"
+    { printf 'Your full instructions did not fit in the command line (%s bytes).\n' "$task_bytes"
+      printf 'READ THEM FIRST, in full, before doing anything else:\n\n'
+      printf '    %s\n\n' "$spill_path"
+      printf 'That file is the authoritative brief. Do not start work until you have read it.\n'
+    } > "$log.task"
+    echo "note: prompt was ${task_bytes} bytes (> ${arg_limit}); spilled to $spill_path"
+  fi
+  # Paper is opt-in per agent (--paper) and ONLY ever via the queue proxy: Paper's canvas is one
+  # global cursor, so agents that skip the queue pull each other's pages mid-write. A worker
+  # without --paper gets no MCP at all and builds from paper-exact.json.
+  local paper_cfg=""
+  [ "$paper" = "1" ] && paper_cfg="-c mcp_servers.paper.url='http://127.0.0.1:29979/mcp'"
+
+  # per-agent launcher: fixes PATH, pins the engine binary, streams -> raw log -> state parser
+  if [ "$engine" = "codex" ]; then
+    cat > "$log.run.sh" <<RUN
+#!/usr/bin/env bash
+export PATH="\$HOME/.local/bin:\$PATH"
+export FLEET_STATE="$FLEET_STATE"
+export FLEET_CONFIG="$FLEET_CONFIG"
+unset OPENAI_API_KEY
+cd "$wt" || exit 1
+# </dev/null is MANDATORY: codex exec otherwise blocks forever reading stdin.
+# --ignore-user-config: workers must NOT load ~/.codex/config.toml wholesale — a fleet of them
+# all connecting to Paper would dogpile a single-user desktop app and wedge it (it has, once).
+# Auth still comes from CODEX_HOME, so the subscription works. Paper is instead handed out one
+# agent at a time, explicitly, via --paper -> the queue proxy, which owns 29979 (see
+# contrib/paper/skills/paper).
+"$CODEX_BIN" exec --json --skip-git-repo-check --ignore-user-config \\
+  -m "$model" -c model_reasoning_effort="$effort" \\
+  $paper_cfg \\
+  --dangerously-bypass-approvals-and-sandbox \\
+  -o "$log.last" \\
+  "\$(cat "$log.task")" </dev/null \\
+  2>>"$log.err" | tee "$log.jsonl" | "$PY" "$FLEET_HOME/lib/parse_codex.py" "$slug"
+RUN
+  elif [ "$engine" = "claude" ]; then
+  local claude_env="" claude_flags=""
+  [ -n "$account_dir" ] && claude_env="export CLAUDE_CONFIG_DIR=\"$account_dir\""
+  [ -n "$effort" ] && [ "$engine" = "claude" ] && claude_flags="--effort $effort"
+
+    cat > "$log.run.sh" <<RUN
+#!/usr/bin/env bash
+export PATH="\$HOME/.local/bin:\$PATH"
+export FLEET_STATE="$FLEET_STATE"
+export FLEET_CONFIG="$FLEET_CONFIG"
+unset ANTHROPIC_API_KEY
+$claude_env
+cd "$wt" || exit 1
+"$CLAUDE_BIN" -p "\$(cat "$log.task")" \\
+  --model "$model" $claude_flags --output-format stream-json --verbose --include-partial-messages \\
+  --dangerously-skip-permissions --fallback-model sonnet \\
+  --append-system-prompt "\$(cat "$log.sys")" \\
+  2>>"$log.err" | tee "$log.jsonl" | "$PY" "$FLEET_HOME/lib/parse_stream.py" "$slug"
+RUN
+  else
+    # generic model CLI (qwen, …) — command + auth come from the catalog (lib/models.py). The
+    # subscription credential is read from a file, never argv/env-dump. {bin}/{task} substitution
+    # is done in python (launchcmd), not fragile bash. Output goes through the engine-agnostic
+    # parser so status/activity/events work for any CLI.
+    local _menv _msec _mcmd
+    _menv=$("$PY" "$FLEET_HOME/lib/models.py" field "$engine" auth_env)
+    _msec="$FLEET_STATE/secrets/$engine.key"
+    _mcmd=$("$PY" "$FLEET_HOME/lib/models.py" launchcmd "$engine" "$log.task")
+    cat > "$log.run.sh" <<RUN
+#!/usr/bin/env bash
+export PATH="\$HOME/.local/bin:\$PATH"
+export FLEET_STATE="$FLEET_STATE"
+export FLEET_CONFIG="$FLEET_CONFIG"
+cd "$wt" || exit 1
+[ -n "$_menv" ] && [ -f "$_msec" ] && export $_menv="\$(cat "$_msec")"
+$_mcmd </dev/null 2>>"$log.err" | tee "$log.jsonl" | "$PY" "$FLEET_HOME/lib/parse_generic.py" "$slug"
+RUN
+  fi
+  chmod +x "$log.run.sh"
+  # Run the agent as a transient systemd --user service inside fleet.slice. That places its
+  # whole process tree in a cgroup the user manager delegates to us, so `fleet mode` can cap
+  # its CPU LIVE for gaming WITHOUT root. tmux can't be used here: it double-forks and
+  # escapes the cgroup. CollectMode reaps the unit whether it finishes or fails.
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  systemd-run --user --slice=fleet.slice --unit="fleet-$slug" \
+    --setenv="FLEET_STATE=$FLEET_STATE" --setenv="FLEET_CONFIG=$FLEET_CONFIG" \
+    --property=CollectMode=inactive-or-failed \
+    -- bash "$log.run.sh" >/dev/null 2>&1
+  # A freshly-created slice starts uncapped — reassert the current power mode so an agent
+  # spawned mid-game is throttled at once, not only at the dashboard's next tick.
+  "$PY" "$FLEET_HOME/lib/mode.py" reapply >/dev/null 2>&1 || true
+
+  trap - EXIT
+  echo "spawned  $slug"
+  echo "  project=$project lane=$lane engine=$engine model=$model${effort:+ effort=$effort} branch=$branch"
+  echo "  ports  vite=$vite uvicorn=$uvicorn e2e=$e2e"
+  echo "  unit   fleet-$slug   |  log $log.jsonl"
+}
+
+cmd_events() {
+  # Tail the append-only event stream (P1-6): lane started/pr-opened/exited, delivered,
+  # respawned, dropped-scope. Stateless filtering — no subscriptions. See lib/events.py.
+  #   fleet events --follow --project myproj --lane my-lane
+  #   fleet events --since <unix_ts> --json
+  "$PY" "$FLEET_HOME/lib/events.py" "$@"
+}
+
+cmd_group() {
+  FLEET_BIN="$SELF" FLEET_HOME="$FLEET_HOME" "$PY" "$FLEET_HOME/lib/group.py" "$@"
+}
+
+cmd_ci() {
+  FLEET_HOME="$FLEET_HOME" "$PY" "$FLEET_HOME/lib/ci.py" "$@"
+}
+
+cmd_models() {
+  # The model catalog: what's available, its routing role, and per-model on/off + health.
+  # Flipping a model on fires a real test request (auth + limits) before any lane routes to it.
+  local sub="${1:-list}"; shift 2>/dev/null || true
+  case "$sub" in
+    list|"")
+      "$PY" - <<'PY'
+import json, os, sys
+sys.path.insert(0, os.path.join(os.environ.get("FLEET_HOME", os.path.expanduser("~/work/fleet")), "lib"))
+import models
+for m in models.listing():
+    on = "ON " if m["enabled"] else "off"
+    h = {"ok": "\u2713", "fail": "\u2717", "unchecked": "\u00b7"}.get(m["health"], "?")
+    print(f"  [{on}] {h} {m['id']:<8} {m['label']}")
+    print(f"           role: {m.get('role','')[:90]}")
+    print(f"           {m.get('quality','')}  |  {m.get('caps','')[:70]}")
+    if m["health"] == "fail":
+        print(f"           health: {m.get('health_detail','')[:90]}")
+    if m.get("limits"):
+        print(f"           limits: {m['limits']}")
+PY
+      ;;
+    enable)  echo "testing $1 …"; "$PY" "$FLEET_HOME/lib/models.py" enable "$1";;
+    disable) "$PY" "$FLEET_HOME/lib/models.py" disable "$1";;
+    test)    echo "testing $1 …"; "$PY" "$FLEET_HOME/lib/models.py" test "$1";;
+    auth)  # store a model's subscription credential from STDIN (never argv). fleet models auth qwen < key.txt
+      local mid="$1"; [ -n "$mid" ] || { echo "usage: fleet models auth <id>  (key on stdin)"; return 1; }
+      mkdir -p "$FLEET_STATE/secrets"; cat > "$FLEET_STATE/secrets/$mid.key"; chmod 600 "$FLEET_STATE/secrets/$mid.key"
+      echo "$mid: credential stored ($FLEET_STATE/secrets/$mid.key). Now: fleet models enable $mid";;
+    *) echo "usage: fleet models [list | enable <id> | disable <id> | test <id> | auth <id>]";;
+  esac
+}
+
+cmd_daemon() {
+  # Native persistent supervisor: singleton + auto-restart + heartbeat, via systemd --user.
+  # This is the thing every orchestrator hand-rolls as a nohup bash watcher that dies silently.
+  # It only ever acts on lanes spawned with an explicit --restart policy (opt-in, see supervisor.py).
+  local unit="fleet-daemon.service"
+  case "${1:-status}" in
+    start|on)
+      local svc="$FLEET_STATE/../.config/systemd/user"
+      mkdir -p "$HOME/.config/systemd/user"
+      sed "s#__FLEET__#$FLEET_HOME#g; s#__PY__#$PY#g" \
+        "$FLEET_HOME/systemd/fleet-daemon.service" > "$HOME/.config/systemd/user/$unit"
+      systemctl --user daemon-reload
+      systemctl --user enable --now "$unit" >/dev/null 2>&1
+      echo "fleet daemon: $(systemctl --user is-active "$unit") (interval ${FLEET_DAEMON_INTERVAL:-60}s)"
+      ;;
+    stop|off) systemctl --user disable --now "$unit" >/dev/null 2>&1; echo "fleet daemon: stopped";;
+    status)
+      echo "fleet daemon: $(systemctl --user is-active "$unit" 2>/dev/null || echo inactive)"
+      journalctl --user -u "$unit" -n 6 --no-pager 2>/dev/null | tail -4
+      ;;
+    tick) "$PY" "$FLEET_HOME/lib/supervisor.py";;   # one-shot reconcile, for tests/cron
+    *) echo "usage: fleet daemon start|stop|status|tick";;
+  esac
+}
+
+cmd_status() {
+  local filter="" json_mode=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --project) filter="${2:-}"; shift 2 2>/dev/null || shift;;
+    --json) json_mode=1; shift;;
+    *) shift;;
+  esac; done
+  if [ -n "$json_mode" ]; then
+    "$PY" "$FLEET_HOME/lib/status_json.py" "$filter"
+    return
+  fi
+  _metrics | "$PY" -c '
+import sys, json
+m = json.load(sys.stdin)
+g = m.get("gpu") or {}
+cap = m["capacity"]
+load, mem = m["load"], m["mem"]
+parts = [
+    "FARM  load %.1f/%d" % (load["load1"], load["cores"]),
+    "RAM %s/%sGB free" % (mem["ram_avail_gb"], mem["ram_total_gb"]),
+    "swap %sGB" % mem["swap_used_gb"],
+]
+ct = m.get("cpu_temp_c")
+if ct is not None:
+    parts.append("CPU %dC" % round(ct))
+if g:
+    parts.append("GPU %sC %s%%" % (g.get("temp_c"), g.get("util_pct")))
+parts.append("agents %d  [%s]" % (m["agents"], cap["level"].upper()))
+print("  ".join(parts))
+'
+  "$PY" - "$filter" <<'PY'
+import glob, json, os, subprocess, sys, time
+filt = sys.argv[1]
+rows = []
+for fp in sorted(glob.glob(os.path.join(os.environ["FLEET_STATE"], "state", "*.json"))):
+    try:
+        s = json.load(open(fp))
+    except Exception:
+        continue
+    if filt and s.get("project") != filt:
+        continue
+    rows.append(s)
+if not rows:
+    print("  (no agents)"); raise SystemExit
+print(f"  {'SLUG':<22} {'PROJ':<10} {'ENGINE':<7} {'TIER':<7} {'STATUS':<10} {'PR':<6} ACTIVITY")
+def _unit_inactive(slug):
+    if not slug:
+        return False
+    try:
+        out = subprocess.run(["systemctl", "--user", "is-active", f"fleet-{slug}"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        return out != "active"
+    except (OSError, subprocess.SubprocessError):
+        return False   # cannot ASK systemd = do not accuse a live lane of being dead
+
+
+for s in rows:
+    pr = s.get("pr_url") or ""
+    prn = "#" + pr.rsplit("/", 1)[-1] if pr else "-"
+    act = (s.get("last_activity") or "")[:34]
+    # claude tiers by model (opus/sonnet/haiku); codex tiers by reasoning effort.
+    tier = s.get("effort") or s.get("model") or "-"
+    status = s.get("status", "")
+    # A record left saying `running` by a machine restart has no unit and no process behind it, and
+    # nothing corrects it - the thing that would have is what died. Shown as running it makes the
+    # farm look busy and makes "is it safe to reboot" unanswerable.
+    if status in ("running", "starting"):
+        age = time.time() - (s.get("updated_at") or s.get("started_at") or time.time())
+        if age > 900 and _unit_inactive(str(s.get("slug") or "")):
+            status = status + "?"
+            act = f"no unit, no process for {int(age // 3600)}h — dead?  " + act
+    print(f"  {s.get('slug','')[:22]:<22} {s.get('project','')[:10]:<10} "
+          f"{(s.get('engine') or 'claude')[:7]:<7} {tier[:7]:<7} "
+          f"{status:<10} {prn:<6} {act[:60]}")
+PY
+}
+
+_audit() {  # kill-path attribution log: date action slug user
+  echo "$(date -Is) action=$1 slug=$2 user=$USER ppid=$PPID" >> "$FLEET_HOME/audit.log" 2>/dev/null || true
+}
+
+_live_lane_slugs() {
+  # slugs of lanes whose unit is still running/starting — the RAM holders
+  local f st
+  for f in "$FLEET_STATE"/state/*.json; do
+    [ -e "$f" ] || continue
+    st=$("$PY" -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))
+    print(d.get("slug","") if d.get("status") in ("running","starting") else "")
+except Exception: pass' "$f" 2>/dev/null)
+    [ -n "$st" ] && echo "$st"
+  done
+}
+
+cmd_game_mode() { # on|off|status — free the machine for gaming by SAVING + STOPPING the farm
+  # On 32GB a farm-in-flight (~11-18GB) and a heavy game (~10GB) do not both fit. A running lane's
+  # RAM is IN USE and cannot be reclaimed live (soft throttle does nothing), so this frees it by
+  # salvaging every lane's work to git, stopping the daemon so it will not respawn, killing the
+  # lanes to release their RAM, and stopping the CI Postgres. `off` restarts the daemon, which
+  # respawns until-* lanes from their briefs. Lanes with no restart policy lose in-progress work
+  # beyond what salvage pushed — that is the cost of freeing a machine that is genuinely full.
+  local action="${1:-status}"
+  case "$action" in
+    on)
+      echo "== game-mode ON: save + freeze the farm =="
+      local slugs; slugs=$(_live_lane_slugs)
+      echo "live lanes: $(echo $slugs | wc -w)"
+      local s
+      for s in $slugs; do echo "-- salvage $s"; cmd_salvage "$s" 2>&1 | tail -1; done
+      systemctl --user stop fleet-daemon.service 2>/dev/null && echo "daemon stopped (no respawns)"
+      for s in $slugs; do cmd_kill "$s" >/dev/null 2>&1; done
+      echo "lanes killed (RAM released)"
+      docker stop fleet-ci-postgres >/dev/null 2>&1 && echo "CI postgres stopped (freed its tmpfs)" || true
+      sleep 3
+      free -m | awk '/Mem:/{print "WSL free now: "$4"MB (autoMemoryReclaim returns it to Windows over ~1-2 min)"}'
+      echo "RAM is yours. Resume with: fleet game-mode off"
+      ;;
+    off)
+      systemctl --user start fleet-daemon.service 2>/dev/null && \
+        echo "daemon started — it will respawn until-pr/until-merged lanes from their briefs"
+      echo "CI Postgres starts on demand at the next CI run"
+      ;;
+    status)
+      echo "daemon: $(systemctl --user is-active fleet-daemon.service 2>/dev/null)"
+      echo "live lanes: $(_live_lane_slugs | wc -w)"
+      free -m | awk '/Mem:/{print "WSL used "$3"MB, free "$4"MB"}'
+      ;;
+    *) echo "usage: fleet game-mode on|off|status"; return 1;;
+  esac
+}
+
+cmd_kill() {
+  # `--retire` = kill AND retire the LANE, so the daemon never respawns it. A plain kill only stops
+  # the unit and marks the record killed; a lane with an unmet restart policy is then resurrected on
+  # the next tick with a fresh slug (the zombie / kill-war). Retire writes a lane-scoped marker the
+  # supervisor honours and stops any sibling instance the storm already spawned.
+  local retire=0 slug=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --retire) retire=1; shift;;
+    --*) echo "unknown flag: $1"; return 1;;
+    *) slug="$1"; shift;;
+  esac; done
+  [ -n "$slug" ] || { echo "usage: fleet kill [--retire] <slug>"; return 1; }
+  _audit kill "$slug"
+  _stop_agent "$slug"
+  local siblings
+  siblings=$("$PY" - "$slug" "$retire" <<'PY'
+import glob, json, os, sys
+STATE = os.environ["FLEET_STATE"]
+slug, retire = sys.argv[1], sys.argv[2] == "1"
+fp = os.path.join(STATE, "state", slug + ".json")
+project = lane = ""
+try:
+    rec = json.load(open(fp)); rec["status"] = "killed"
+    project, lane = rec.get("project", ""), rec.get("lane", "")
+    json.dump(rec, open(fp, "w"))
+except Exception:
+    pass
+if retire and lane:
+    rdir = os.path.join(STATE, ".retired")
+    os.makedirs(rdir, exist_ok=True)
+    open(os.path.join(rdir, f"{project}__{lane}"), "w").close()
+    sibs = []
+    for other in glob.glob(os.path.join(STATE, "state", "*.json")):
+        try:
+            d = json.load(open(other))
+        except Exception:
+            continue
+        if (d.get("project") == project and d.get("lane") == lane
+                and d.get("slug") and d.get("slug") != slug):
+            sibs.append(d["slug"])
+    sys.stdout.write(" ".join(sibs))
+PY
+)
+  if [ "$retire" = 1 ]; then
+    if [ -n "$siblings" ]; then
+      for s in $siblings; do _stop_agent "$s"; done
+      echo "retired lane; stopped sibling instance(s): $siblings"
+    else
+      echo "retired lane (no live siblings)"
+    fi
+  fi
+  echo "killed $slug"
+}
+
+_worktree_unsaved() {
+  # Echo a human reason if this worktree holds work that exists NOWHERE ELSE — uncommitted
+  # changes, or commits not reachable from any remote ref (branch never pushed / pushed behind).
+  # Empty output = safe to drop. This is what stands between `clean` and lost lane-hours.
+  local wt="$1"
+  [ -d "$wt/.git" ] || [ -f "$wt/.git" ] || {
+    echo "cannot inspect worktree (missing .git)"; return
+  }
+  local probe dirty
+  probe=$(mktemp)
+  if ! dirty=$(git -C "$wt" status --porcelain 2>"$probe"); then
+    echo "cannot inspect worktree (git status failed: $(head -n 1 "$probe"))"
+    rm -f -- "$probe"
+    return
+  fi
+  rm -f -- "$probe"
+  if [ -n "$dirty" ]; then
+    echo "$(echo "$dirty" | wc -l | tr -d ' ') uncommitted change(s)"; return
+  fi
+  probe=$(mktemp)
+  local unpushed
+  if ! unpushed=$(git -C "$wt" rev-list HEAD --not --remotes --count 2>"$probe"); then
+    echo "cannot inspect worktree (git rev-list failed: $(head -n 1 "$probe"))"
+    rm -f -- "$probe"
+    return
+  fi
+  rm -f -- "$probe"
+  if [ "${unpushed:-0}" -gt 0 ]; then
+    echo "$unpushed unpushed commit(s)"; return
+  fi
+  echo ""
+}
+
+_snapshot_worktree() { # $1=worktree $2=slug; complete forced-removal autopsy
+  "$PY" - "$1" "$2" <<'PY'
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+
+worktree, slug = Path(sys.argv[1]), sys.argv[2]
+if Path(slug).name != slug or not slug:
+    print(f"cannot snapshot unsafe slug: {slug!r}", file=sys.stderr)
+    raise SystemExit(1)
+archive = Path(os.environ["FLEET_STATE"], "state-archive", time.strftime("%Y-%m"))
+
+def git(*args, binary=False):
+    result = subprocess.run(
+        ["git", "-C", str(worktree), *args], capture_output=True,
+        text=not binary,
+    )
+    if result.returncode:
+        error = result.stderr if not binary else result.stderr.decode(errors="replace")
+        raise RuntimeError((error or f"git {' '.join(args)} failed").strip())
+    return result.stdout
+
+try:
+    status = git("status", "--short")
+    unstaged = git("diff")
+    staged = git("diff", "--cached")
+    raw_untracked = git("ls-files", "--others", "--exclude-standard", "-z", binary=True)
+except (OSError, RuntimeError) as exc:
+    print(f"cannot snapshot {slug}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+archive.mkdir(parents=True, exist_ok=True)
+cap = 200_000
+sections = [
+    status,
+    "\n--- unstaged diff ---\n",
+    unstaged,
+    "\n--- staged diff ---\n",
+    staged,
+]
+payload = "".join(sections)
+encoded = payload.encode()
+truncated = len(encoded) > cap
+if truncated:
+    payload = encoded[:cap].decode(errors="replace")
+    payload += f"\n--- TRUNCATED: original autopsy was {len(encoded)} bytes ---\n"
+target = archive / f"{slug}.dirt.txt"
+fd, tmp_name = tempfile.mkstemp(prefix=target.name + ".", dir=archive)
+try:
+    with os.fdopen(fd, "w") as fh:
+        fh.write(payload)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp_name, target)
+finally:
+    try:
+        os.unlink(tmp_name)
+    except FileNotFoundError:
+        pass
+
+untracked = [
+    item.decode(errors="surrogateescape")
+    for item in raw_untracked.split(b"\0") if item
+]
+untracked = [item for item in untracked if not item.startswith(".fleet-hooks/")]
+if untracked:
+    tar_target = archive / f"{slug}.untracked.tar"
+    tar_tmp = archive / f".{slug}.untracked.{os.getpid()}.tar"
+    try:
+        with tarfile.open(tar_tmp, "w") as tar:
+            for rel in untracked:
+                source = worktree / rel
+                if source.exists() or source.is_symlink():
+                    tar.add(source, arcname=rel, recursive=False)
+        os.replace(tar_tmp, tar_target)
+    finally:
+        try:
+            tar_tmp.unlink()
+        except FileNotFoundError:
+            pass
+print(target)
+PY
+}
+
+cmd_msg() {
+  # Drop or read a lane's mid-run inbox. codex exec takes no stdin, so this is delivered at the
+  # agent's next checkpoint (it is briefed to read its inbox), not a mid-thought interrupt.
+  local slug="${1:-}"
+  [ -n "$slug" ] || { echo "usage: fleet msg <slug> [text]   (no text = read the inbox)"; return 1; }
+  [ "$#" -gt 0 ] && shift
+  mkdir -p "$FLEET_STATE/msg"
+  local inbox="$FLEET_STATE/msg/$slug.md"
+  if [ "$#" -eq 0 ]; then
+    [ -s "$inbox" ] && cat "$inbox" || echo "(inbox empty for $slug)"
+    return 0
+  fi
+  printf '[%s] %s\n' "$(date +%H:%M)" "$*" >> "$inbox"
+  echo "queued for $slug — delivered at its next checkpoint (if the lane is briefed to check)"
+}
+
+cmd_tail() {
+  local slug="${1:-}"
+  [ -n "$slug" ] || { echo "usage: fleet tail <slug>"; return 1; }
+  [ "$slug" = "${slug##*/}" ] && [ "$slug" != "." ] && [ "$slug" != ".." ] ||
+    { echo "invalid lane slug: $slug"; return 1; }
+  "$PY" - "$slug" <<'PY'
+import json, os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+slug = sys.argv[1]
+st = os.environ["FLEET_STATE"]
+rec = os.path.join(st, "state", slug + ".json")
+unreadable = False
+try:
+    s = json.load(open(rec))
+except (OSError, json.JSONDecodeError):
+    matches = list(Path(st, "worktrees").glob(f"*/{slug}"))
+    if not matches:
+        print("no such lane:", slug)
+        raise SystemExit(1)
+    worktree = matches[0]
+    branch = subprocess.run(
+        ["git", "-C", str(worktree), "branch", "--show-current"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    s = {"slug": slug, "worktree": str(worktree), "branch": branch, "status": "unknown"}
+    unreadable = True
+if unreadable:
+    print(f"record unreadable, recovering from disk: {s.get('worktree','')}")
+age = ""
+if s.get("started_at"):
+    m = int((time.time() - s["started_at"]) / 60)
+    age = f"{m}m" if m < 90 else f"{m//60}h{m%60}m"
+tier = s.get("effort") or s.get("model") or "-"
+pr = s.get("pr_url") or "-"
+print(f"{s.get('by_icon','')} {slug}")
+print(f"  lane {s.get('lane','')}  ·  {s.get('engine','')}/{tier}  ·  {age}  ·  by {s.get('spawned_by','?')}")
+line = f"  status {s.get('status','?')}"
+if s.get("outcome"): line += f"  ·  outcome {s['outcome']}"
+if s.get("restart"): line += f"  ·  restart {s['restart']}"
+print(line)
+if s.get("scope"): print(f"  scope delivered {s['scope'].get('delivered')} dropped {s['scope'].get('dropped')}")
+print(f"  pr {pr}")
+if s.get("last_activity"): print(f"  step: {s['last_activity']}")
+last = os.path.join(st, "logs", slug + ".last")
+if os.path.exists(last):
+    txt = open(last, errors="replace").read().strip()
+    if txt:
+        print("  last message:")
+        for ln in txt[-800:].splitlines()[-12:]:
+            print("    " + ln)
+PY
+}
+
+cmd_salvage() {
+  # Push a lane's unpushed work to origin so it survives cleanup. Non-destructive: it only ADDS
+  # (commits any dirty changes, pushes the branch); it never removes the worktree (that's clean).
+  local slug="${1:-}"
+  [ -n "$slug" ] || { echo "usage: fleet salvage <slug>"; return 1; }
+  [ "$slug" = "${slug##*/}" ] && [ "$slug" != "." ] && [ "$slug" != ".." ] ||
+    { echo "invalid lane slug: $slug"; return 1; }
+  local rec="$FLEET_STATE/state/$slug.json"
+  local -a recovered
+  mapfile -d '' -t recovered < <("$PY" - "$rec" "$slug" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+record, slug = Path(sys.argv[1]), sys.argv[2]
+note = ""
+try:
+    data = json.loads(record.read_text())
+except (OSError, json.JSONDecodeError):
+    data = {}
+    note = "record unreadable, recovering from disk"
+worktree = str(data.get("worktree") or "")
+branch = str(data.get("branch") or "")
+if not worktree or not Path(worktree).is_dir():
+    matches = list(Path(os.environ["FLEET_STATE"], "worktrees").glob(f"*/{slug}"))
+    if matches:
+        worktree = str(matches[0])
+        note = note or "record missing worktree, recovering from disk"
+for value in (worktree, branch, note):
+    sys.stdout.write(value)
+    sys.stdout.write("\0")
+PY
+)
+  local wt="${recovered[0]:-}" br="${recovered[1]:-}" note="${recovered[2]:-}"
+  [ -n "$note" ] && echo "$note: $wt"
+  [ -d "$wt" ] || { echo "worktree gone, nothing to salvage: $wt"; return 1; }
+  [ -n "$br" ] || br=$(git -C "$wt" branch --show-current 2>/dev/null)
+  [ -n "$br" ] || { echo "cannot determine a branch for $wt; refusing to claim it is safe"; return 1; }
+  local probe dirty
+  probe=$(mktemp)
+  if ! dirty=$(git -C "$wt" status --porcelain 2>"$probe"); then
+    echo "cannot inspect worktree (git status failed: $(head -n 1 "$probe")); not safe to clean"
+    rm -f -- "$probe"
+    return 1
+  fi
+  rm -f -- "$probe"
+  local unsaved; unsaved=$(_worktree_unsaved "$wt")
+  if [ -z "$unsaved" ]; then echo "nothing to salvage — $slug has no unpushed work"; return 0; fi
+  echo "salvaging $slug ($unsaved) on branch $br"
+  if [ -n "$dirty" ]; then
+    if ! git -C "$wt" add -A -- . ':(exclude).fleet-hooks' ':(exclude).fleet-task.md' ||
+       ! git -C "$wt" commit -q -m "salvage: WIP from lane $slug"; then
+      echo "  COMMIT FAILED — work is still only in $wt; do not clean it"
+      return 1
+    fi
+    echo "  committed dirty changes"
+  fi
+  if git -C "$wt" push -u origin "$br" 2>&1 | tail -2 | sed "s/^/  /"; then
+    unsaved=$(_worktree_unsaved "$wt")
+    if [ -n "$unsaved" ]; then
+      echo "  push finished but work remains unsafe ($unsaved); do not clean it"
+      return 1
+    fi
+    echo "  pushed $br to origin — safe to \`fleet clean\` now"
+  else
+    echo "  PUSH FAILED — work is still only in $wt; do not clean it"
+    return 1
+  fi
+}
+
+cmd_clean() { # remove worktrees + state for FINISHED agents. NEVER touches a live one.
+  local force=0 by="" project="" dry=0 yes=0
+  while [ $# -gt 0 ]; do case "$1" in
+    --force) force=1; shift;;
+    --by) [ $# -ge 2 ] || { echo "missing value for --by"; return 1; }
+          by="$2"; shift 2;;
+    --project) [ $# -ge 2 ] || { echo "missing value for --project"; return 1; }
+               project="$2"; shift 2;;
+    --dry-run) dry=1; shift;;
+    --yes) yes=1; shift;;
+    *) echo "unknown clean flag: $1"; return 1;;
+  esac; done
+  if [ "$force" = "1" ] && [ -z "$by" ]; then
+    echo "REFUSING: --force requires --by <codename> so it cannot cross orchestrator ownership"
+    return 1
+  fi
+  "$PY" - "$force" "$by" "$project" <<'PY' |
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+force = sys.argv[1] == "1"
+by = sys.argv[2] if len(sys.argv) > 2 else ""
+project = sys.argv[3] if len(sys.argv) > 3 else ""
+ACTIVE = ("starting", "running")
+DONE = ("done", "done_no_pr", "pr_open", "failed", "ended", "killed")
+skipped = []
+
+def unit_is_inactive(slug):
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", "fleet-" + slug],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.stdout.strip() in ("inactive", "failed", "unknown") or result.returncode in (3, 4)
+
+def emit(s, stale=False):
+    values = (
+        str(s.get("slug") or ""), str(s.get("worktree") or ""),
+        str(s.get("project") or ""), str(s.get("spawned_by") or s.get("by") or ""),
+        "1" if stale else "0",
+    )
+    for value in values:
+        sys.stdout.buffer.write(value.encode(errors="surrogateescape") + b"\0")
+
+for fp in sorted(glob.glob(os.path.join(os.environ["FLEET_STATE"], "state", "*.json"))):
+    try:
+        s = json.load(open(fp))
+    except Exception as exc:
+        print(f"KEEP unreadable state record {os.path.basename(fp)}: {exc}", file=sys.stderr)
+        continue
+    owner = s.get("spawned_by") or s.get("by") or ""
+    if by and owner != by:
+        continue
+    if project and s.get("project") != project:
+        continue
+    st = s.get("status")
+    if st in ACTIVE:
+        if force:
+            emit(s)
+            continue
+        age = time.time() - (s.get("updated_at") or s.get("started_at") or time.time())
+        stale = age > 900 and unit_is_inactive(str(s.get("slug") or ""))
+        if not stale:
+            skipped.append(s.get("slug", ""))
+            continue
+        emit(s, stale=True)
+        continue
+    if force or st in DONE:
+        emit(s)
+if skipped:
+    print("SKIPPED %d RUNNING agent(s), left untouched: %s  (running agents are only force-cleanable by their own orchestrator: --force --by <codename>)"
+          % (len(skipped), ", ".join(skipped)), file=sys.stderr)
+PY
+  while IFS= read -r -d '' slug &&
+        IFS= read -r -d '' wt &&
+        IFS= read -r -d '' proj &&
+        IFS= read -r -d '' owner &&
+        IFS= read -r -d '' stale; do
+    if [ -z "$slug" ]; then
+      echo "KEEP state record with missing slug"
+      continue
+    fi
+    if [ -z "$wt" ]; then
+      echo "KEEP $slug — state record has a missing worktree field"
+      continue
+    fi
+    local fleet_root resolved
+    fleet_root=$(realpath -m -- "$FLEET_STATE/worktrees")
+    resolved=$(realpath -m -- "$wt")
+    if [ "${wt#/}" = "$wt" ] || [[ "$resolved" != "$fleet_root/"* ]]; then
+      echo "KEEP $slug — unsafe worktree path outside $fleet_root: $wt"
+      continue
+    fi
+    local unsaved=""
+    if [ -d "$wt" ]; then unsaved=$(_worktree_unsaved "$wt"); fi
+    if [ -n "$unsaved" ] && [ "$force" != "1" ]; then
+      echo "KEEP $slug — $unsaved; \`fleet salvage $slug\` then clean"
+      continue
+    fi
+    if [ -n "$unsaved" ] && [ "$force" = "1" ] && [ "$yes" != "1" ]; then
+      echo "REFUSING $slug — $unsaved; inspect it, then repeat with --yes to snapshot and discard"
+      continue
+    fi
+    if [ "$dry" = "1" ]; then
+      local stale_note=""
+      [ "$stale" = "1" ] && stale_note=" (stale active record)"
+      echo "would clean $slug${stale_note}${unsaved:+ — $unsaved}"
+      continue
+    fi
+    if [ -n "$unsaved" ] && ! _snapshot_worktree "$wt" "$slug" >/dev/null; then
+      echo "KEEP $slug — forced-clean snapshot failed; nothing was removed"
+      continue
+    fi
+    _audit clean "$slug"
+    _stop_agent "$slug"
+    local ppath; ppath="$(_proj "$proj" path)"; ppath="${ppath/#\~/$HOME}"
+    if [ -d "$wt" ]; then
+      if [ -z "$ppath" ] || [ ! -d "$ppath/.git" ]; then
+        echo "KEEP $slug — registered project checkout is unavailable: $ppath"
+        continue
+      fi
+      if ! git -C "$ppath" worktree remove --force "$wt" 2>/dev/null; then
+        echo "KEEP $slug — git refused to remove $wt; state record retained"
+        continue
+      fi
+      git -C "$ppath" worktree prune 2>/dev/null || true
+    fi
+    rm -f -- "$FLEET_STATE/state/$slug.json"
+    local lane_hook="$FLEET_STATE/hooks/$slug"
+    [ -d "$lane_hook" ] && rm -rf -- "$lane_hook"
+    echo "cleaned $slug"
+  done
+}
+
+cmd_sweep() { # post-merge janitor: drop merged worktrees AND reap resolved dashboard records
+  local project="" dry=0 force=0
+  while [ $# -gt 0 ]; do case "$1" in
+    --project) project="$2"; shift 2;;
+    --dry-run) dry=1; shift;;
+    --force) force=1; shift;;
+    *) echo "unknown $1"; return 1;; esac; done
+
+  local plist; plist="$([ -n "$project" ] && echo "$project" || cmd_projects)"
+  local p path base
+  for p in $plist; do
+    path="$(_proj "$p" path)"; path="${path/#\~/$HOME}"
+    base="$(_proj "$p" branch)"; base="${base:-main}"
+    [ -n "$path" ] && [ -d "$path/.git" ] || continue
+    echo "── $p  ($path)"
+    git -C "$path" fetch -q origin "$base" 2>/dev/null || true
+    FLEET_HOME="$FLEET_HOME" "$PY" - "$path" "$base" "$dry" "$force" "$p" <<'PY'
+import glob
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+
+path, base = sys.argv[1], sys.argv[2]
+dry, force = sys.argv[3] == "1", sys.argv[4] == "1"
+project = sys.argv[5]
+STATE = os.environ["FLEET_STATE"]
+sys.path.insert(0, os.path.join(os.environ.get("FLEET_HOME", ""), "lib"))
+try:
+    import salvage
+except Exception:
+    salvage = None  # a missing salvage module must never wedge the janitor
+GRACE = 900
+archive_dir = Path(STATE, "state-archive", time.strftime("%Y-%m"))
+
+
+def git(*args, cwd=None):
+    return subprocess.run(
+        ["git", "-C", cwd or path, *args], capture_output=True, text=True,
+    )
+
+
+class InspectionError(RuntimeError):
+    pass
+
+
+def dirt(worktree):
+    result = git("status", "--short", cwd=worktree)
+    if result.returncode:
+        raise InspectionError((result.stderr or "git status failed").strip())
+    return [
+        line for line in result.stdout.splitlines()
+        if line.strip() and not line[3:].startswith(".fleet-hooks")
+    ]
+
+
+def snapshot_dirt(worktree, slug):
+    if Path(slug).name != slug or not slug:
+        raise InspectionError(f"unsafe snapshot slug: {slug!r}")
+    probes = {}
+    for label, args in (
+        ("status", ("status", "--short")),
+        ("unstaged", ("diff",)),
+        ("staged", ("diff", "--cached")),
+        ("untracked", ("ls-files", "--others", "--exclude-standard", "-z")),
+    ):
+        result = git(*args, cwd=worktree)
+        if result.returncode:
+            raise InspectionError((result.stderr or f"git {label} failed").strip())
+        probes[label] = result.stdout
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    payload = (
+        probes["status"] + "\n--- unstaged diff ---\n" + probes["unstaged"]
+        + "\n--- staged diff ---\n" + probes["staged"]
+    )
+    encoded = payload.encode()
+    if len(encoded) > 200_000:
+        payload = encoded[:200_000].decode(errors="replace")
+        payload += f"\n--- TRUNCATED: original autopsy was {len(encoded)} bytes ---\n"
+    target = archive_dir / f"{slug}.dirt.txt"
+    fd, tmp_name = tempfile.mkstemp(prefix=target.name + ".", dir=archive_dir)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, target)
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+    untracked = [
+        item for item in probes["untracked"].split("\0")
+        if item and not item.startswith(".fleet-hooks/")
+    ]
+    if untracked:
+        tar_target = archive_dir / f"{slug}.untracked.tar"
+        tar_tmp = archive_dir / f".{slug}.untracked.{os.getpid()}.tar"
+        try:
+            with tarfile.open(tar_tmp, "w") as archive:
+                for rel in untracked:
+                    source = Path(worktree, rel)
+                    if source.exists() or source.is_symlink():
+                        archive.add(source, arcname=rel, recursive=False)
+            os.replace(tar_tmp, tar_target)
+        finally:
+            try:
+                tar_tmp.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def unit_is_inactive(slug):
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", "fleet-" + slug],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.stdout.strip() in ("inactive", "failed", "unknown") or result.returncode in (3, 4)
+
+
+_prcache = {}
+def pr_state(branch):
+    if not branch:
+        return None, None
+    if branch in _prcache:
+        return _prcache[branch]
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "1",
+             "--json", "number,state"],
+            cwd=path, capture_output=True, text=True, timeout=25,
+        )
+        if result.returncode:
+            answer = ("UNKNOWN", None)
+        else:
+            rows = json.loads(result.stdout or "[]")
+            answer = ((rows[0].get("state"), rows[0].get("number"))
+                      if rows else (None, None))
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError,
+            IndexError, KeyError, TypeError):
+        answer = ("UNKNOWN", None)
+    _prcache[branch] = answer
+    return answer
+
+
+live_branches, live_paths = set(), set()
+records, unreadable = [], []
+now = time.time()
+for record_path in glob.glob(os.path.join(STATE, "state", "*.json")):
+    try:
+        record = json.load(open(record_path))
+    except Exception:
+        # A torn record blocks the whole project (liveness cannot be established), and nothing
+        # else ever moves it, so one truncated file wedges the janitor permanently. Retire it once
+        # it has stayed unparseable for a full GRACE window - archived, never deleted, because the
+        # file may be the only trace of what that lane was doing.
+        try:
+            stale_for = now - os.path.getmtime(record_path)
+        except OSError:
+            stale_for = 0
+        if stale_for > GRACE:
+            month = time.strftime("%Y-%m", time.localtime())
+            attic = os.path.join(STATE, "state-archive", month)
+            os.makedirs(attic, exist_ok=True)
+            base = os.path.basename(record_path)
+            dest = os.path.join(attic, base + ".corrupt")
+            try:
+                os.replace(record_path, dest)
+                print(f"  quarantine  unreadable record {base} -> {dest}")
+                continue
+            except OSError as exc:
+                print(f"  quarantine  FAILED for {base}: {exc}", file=sys.stderr)
+        unreadable.append(os.path.basename(record_path))
+        continue
+    if record.get("status") in ("starting", "running"):
+        age = now - (record.get("updated_at") or record.get("started_at") or now)
+        stale = age > GRACE and unit_is_inactive(str(record.get("slug") or ""))
+        record["_fleet_stale_active"] = stale
+        if not stale:
+            live_branches.add(record.get("branch") or "")
+            live_paths.add(record.get("worktree") or "")
+    if record.get("project") == project:
+        records.append((record_path, record))
+
+trees, current = [], {}
+worktree_result = git("worktree", "list", "--porcelain")
+if worktree_result.returncode:
+    print("  ABORT   cannot enumerate git worktrees:", worktree_result.stderr.strip())
+    raise SystemExit
+for line in worktree_result.stdout.splitlines():
+    if not line.strip():
+        if current:
+            trees.append(current)
+            current = {}
+        continue
+    key, _, value = line.partition(" ")
+    current[key] = value
+if current:
+    trees.append(current)
+
+main_path = os.path.realpath(path)
+registered = {
+    os.path.realpath(tree.get("worktree", ""))
+    for tree in trees if tree.get("worktree")
+}
+slug_by_path = {
+    os.path.realpath(record.get("worktree") or ""): record.get("slug") or ""
+    for _record_path, record in records if record.get("worktree")
+}
+removed = kept = reaped = 0
+
+if salvage and not dry:
+    # Housekeeping: a salvaged lane whose PR later merged no longer needs its rescue ref.
+    for _ref in salvage.cleanup_landed(path, base):
+        print(f"  salvage-cleanup  dropped {_ref} (landed in origin/{base})")
+
+if unreadable:
+    print("  ABORT   %d unreadable state record(s): %s"
+          % (len(unreadable), ", ".join(unreadable[:4])))
+    print("          refusing to remove anything - liveness cannot be established.")
+    raise SystemExit
+
+fleet_root = os.path.realpath(os.path.join(STATE, "worktrees"))
+
+# Pass A: remove only fleet-owned worktrees whose merged state is proven.
+for tree in trees:
+    worktree = tree.get("worktree", "")
+    real_worktree = os.path.realpath(worktree)
+    if not worktree or real_worktree == main_path:
+        continue
+    if not real_worktree.startswith(fleet_root + os.sep):
+        print(f"  skip    (not fleet-owned)  {worktree}")
+        kept += 1
+        continue
+    branch = (tree.get("branch") or "").replace("refs/heads/", "")
+    if not branch:
+        print(f"  skip    (detached HEAD)  {worktree}")
+        kept += 1
+        continue
+    if branch in live_branches or worktree in live_paths:
+        print(f"  SKIP    {branch}  — a fleet agent is LIVE in it")
+        kept += 1
+        continue
+    state, number = pr_state(branch)
+    if state == "UNKNOWN":
+        print(f"  keep    {branch}  — GitHub state is UNKNOWN; refusing to infer no PR")
+        kept += 1
+        continue
+    if state == "OPEN":
+        print(f"  keep    {branch}  — PR #{number} is still OPEN")
+        kept += 1
+        continue
+    if state == "CLOSED":
+        print(f"  keep    {branch}  — PR #{number} was CLOSED unmerged (your call)")
+        kept += 1
+        continue
+    if state != "MERGED":
+        if git("merge-base", "--is-ancestor", branch, f"origin/{base}").returncode:
+            print(f"  keep    {branch}  — no merged PR, not in origin/{base}")
+            kept += 1
+            continue
+        number = None
+    try:
+        changes = dirt(worktree)
+    except InspectionError as exc:
+        print(f"  KEEP    {branch}  — cannot inspect worktree: {exc}")
+        kept += 1
+        continue
+    if changes and not force:
+        print(f"  KEEP    {branch}  — merged, but {len(changes)} uncommitted change(s); "
+              "--force to snapshot and drop")
+        kept += 1
+        continue
+    tag = f"PR #{number} merged" if number else f"already in origin/{base}"
+    if dry:
+        print(f"  would remove  {branch}  ({tag})")
+        removed += 1
+        continue
+    if changes:
+        try:
+            snapshot_dirt(worktree, slug_by_path.get(real_worktree) or Path(worktree).name)
+        except (InspectionError, OSError, tarfile.TarError) as exc:
+            print(f"  KEEP    {branch}  — forced-removal snapshot failed: {exc}")
+            kept += 1
+            continue
+    if salvage and not dry:
+        _saved, _detail = salvage.salvage(worktree, slug_by_path.get(real_worktree) or Path(worktree).name)
+        if _saved:
+            print(f"  SALVAGED  {branch}  — {_detail}")
+    result = git("worktree", "remove", "--force", worktree)
+    if result.returncode:
+        print(f"  KEEP    {branch}  — git worktree remove failed: {result.stderr.strip()}")
+        kept += 1
+        continue
+    git("worktree", "prune")
+    git("branch", "-D", branch)
+    print(f"  removed {branch}  ({tag})")
+    removed += 1
+
+# Pass B: archive terminal cards. Dirt and inspection errors always override age.
+for record_path, record in records:
+    status = record.get("status")
+    stale_active = bool(record.get("_fleet_stale_active"))
+    if status in ("starting", "running") and not stale_active:
+        continue
+    pr_status, number = pr_state(record.get("branch") or "")
+    if pr_status == "UNKNOWN":
+        print(f"  keep record {record.get('slug','')} — GitHub state is UNKNOWN")
+        continue
+    if pr_status == "OPEN":
+        continue
+    age = now - (record.get("updated_at") or record.get("started_at") or now)
+    if not (pr_status == "MERGED" or status == "killed" or stale_active or age > GRACE):
+        continue
+    worktree = record.get("worktree") or ""
+    if worktree and os.path.isdir(worktree):
+        real_worktree = os.path.realpath(worktree)
+        if not real_worktree.startswith(fleet_root + os.sep):
+            print(f"  keep record {record.get('slug','')} — worktree is not fleet-owned")
+            continue
+        try:
+            changes = dirt(worktree)
+        except InspectionError as exc:
+            print(f"  keep record {record.get('slug','')} — cannot inspect worktree: {exc}")
+            continue
+        if changes and not force:
+            print(f"  keep record {record.get('slug','')} — {len(changes)} uncommitted "
+                  "change(s); age does not override this KEEP")
+            continue
+        if real_worktree not in registered:
+            print(f"  keep record {record.get('slug','')} — worktree is not registered")
+            continue
+        if changes and not dry:
+            try:
+                snapshot_dirt(worktree, record.get("slug") or Path(worktree).name)
+            except (InspectionError, OSError, tarfile.TarError) as exc:
+                print(f"  keep record {record.get('slug','')} — snapshot failed: {exc}")
+                continue
+        if salvage and not dry:
+            _saved, _detail = salvage.salvage(worktree, record.get("slug") or Path(worktree).name)
+            if _saved:
+                print(f"  SALVAGED  {record.get('slug','')} — {_detail}")
+        if not dry:
+            result = git("worktree", "remove", "--force", worktree)
+            if result.returncode:
+                print(f"  keep record {record.get('slug','')} — removal failed: "
+                      f"{result.stderr.strip()}")
+                continue
+            git("worktree", "prune")
+    why = (f"PR #{number} merged" if pr_status == "MERGED"
+           else "stale active unit is inactive" if stale_active
+           else status if status in ("killed", "failed")
+           else f"{status}, {int(age // 60)}m old")
+    if dry:
+        print(f"  would reap record  {record.get('slug','')}  ({why})")
+        reaped += 1
+        continue
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(record_path, archive_dir / os.path.basename(record_path))
+    except OSError as exc:
+        print(f"  keep record {record.get('slug','')} — archive failed: {exc}")
+        continue
+    print(f"  reaped record  {record.get('slug','')}  ({why} -> archived)")
+    reaped += 1
+
+print(f"  ({removed} worktree(s) removed, {reaped} card(s) reaped, {kept} kept)")
+PY
+  done
+}
+
+cmd_autosweep() { # on [minutes] | off | status — periodic `fleet sweep` via a systemd --user timer
+  local action="${1:-status}" mins="${2:-10}"
+  local ud="$HOME/.config/systemd/user"
+  case "$action" in
+    on)
+      mkdir -p "$ud"
+      # __FLEET__ -> this script's absolute path; __INTERVAL__ -> the cadence in minutes
+      sed "s#__FLEET__#$SELF#g" "$FLEET_HOME/systemd/fleet-sweep.service" > "$ud/fleet-sweep.service"
+      sed "s#__INTERVAL__#$mins#g" "$FLEET_HOME/systemd/fleet-sweep.timer" > "$ud/fleet-sweep.timer"
+      systemctl --user daemon-reload
+      systemctl --user enable --now fleet-sweep.timer >/dev/null 2>&1
+      # let the user manager (and thus the timer) survive a reboot with no session — best
+      # effort: needs polkit/root on some systems, and the timer still runs while you're on.
+      loginctl enable-linger 2>/dev/null || true
+      echo "autosweep ON — 'fleet sweep' every ${mins} min (no --force; only merged, clean, idle worktrees)"
+      systemctl --user list-timers fleet-sweep.timer --no-pager 2>/dev/null | sed -n '1,2p'
+      ;;
+    off)
+      systemctl --user disable --now fleet-sweep.timer >/dev/null 2>&1 || true
+      echo "autosweep OFF"
+      ;;
+    status|*)
+      if systemctl --user is-enabled fleet-sweep.timer >/dev/null 2>&1; then
+        systemctl --user list-timers fleet-sweep.timer --no-pager 2>/dev/null | sed -n '1,2p' || true
+        local res; res=$(systemctl --user show fleet-sweep.service -p Result --value 2>/dev/null || true)
+        echo "last sweep: ${res:-n/a}"
+      else
+        echo "autosweep OFF  (enable: fleet autosweep on [minutes])"
+      fi
+      ;;
+  esac
+}
+
+cmd_logs() { tail -n 40 -f "$FLEET_STATE/logs/$1.jsonl"; }
+
+cmd_dashboard() { # start|stop|restart|status|token
+  local action="${1:-start}"
+  case "$action" in
+    start|stop|restart|status|token) "$FLEET_HOME/dashboard/run.sh" "$action" ;;
+    *) echo "usage: fleet dashboard start|stop|restart|status|token"; return 1 ;;
+  esac
+}
+
+case "${1:-help}" in
+  spawn) shift; cmd_spawn "$@";;
+  group) shift; cmd_group "$@";;
+  ci) shift; cmd_ci "$@";;
+  status|ps) shift; cmd_status "$@";;
+  metrics) shift; cmd_metrics "$@";;
+  capacity) shift; cmd_capacity "$@";;
+  add-project) shift; cmd_add_project "$@";;
+  projects) shift; cmd_projects "$@";;
+  kill) shift; cmd_kill "$@";;
+  game-mode|gamemode) shift; cmd_game_mode "$@";;
+  clean) shift; cmd_clean "$@";;
+  salvage) shift; cmd_salvage "$@";;
+  sweep) shift; cmd_sweep "$@";;
+  identity) shift; cmd_identity "$@";;
+  mode) shift; cmd_mode "$@";;
+  autosweep) shift; cmd_autosweep "$@";;
+  daemon) shift; cmd_daemon "$@";;
+  models) shift; cmd_models "$@";;
+  accounts) shift; "$PY" "$FLEET_HOME/lib/claude_accounts.py" "$@";;
+  events) shift; cmd_events "$@";;
+  logs) shift; cmd_logs "$@";;
+  tail) shift; cmd_tail "$@";;
+  msg) shift; cmd_msg "$@";;
+  dashboard) shift; cmd_dashboard "$@";;
+  help|--help|-h|*)
+    cat <<'H'
+fleet — headless Claude agent fleet on the farm
+
+  fleet spawn --project X --lane L [--engine claude|codex]
+              [--model M] [--effort low|medium|high|xhigh]
+              --by <codename> [--icon <emoji>] [--color <hex>]
+              (--issue N | --task "..." | --brief-file f) [--force]
+              [--restart until-pr|until-merged|until-file:<p>] [--done-when <c>]
+              [--issues a,b,c]  — delivery policy; the daemon respawns the lane
+                                until it delivers, and won't call a multi-issue
+                                lane done while any issue is dropped.
+
+              TIERS — each engine dials capability its own way:
+                claude (default)  tier by MODEL:   --model opus | sonnet | haiku
+                codex  (OpenAI)   tier by EFFORT:  --effort xhigh | high | medium | low
+                                  on --model gpt-5.6-sol (the default)
+              Both engines run on their own subscription, never an API key.
+  fleet group start NAME --project X --spec FILE
+                                  spawn disjoint lane branches from a TOML group spec
+  fleet group status NAME [--json]
+                                  live lane state, branch heads and changed-file counts
+  fleet group assemble NAME [--dry-run]
+                                  merge pushed lanes into one integration branch and one PR
+  fleet ci enqueue --project X (--pr N | --branch B)
+                                  queue a candidate for serialized merge-result verification
+  fleet ci daemon [start]|stop|status
+                                  manage the fleet-ci.slice user service (start is default)
+  fleet ci daemon run             foreground worker; --once processes at most one candidate
+  fleet ci status [--json]        queue state; JSON is the dashboard's stable contract
+  fleet ci log <id>               print every tier log for a run
+  fleet ci cancel <id>            eject a queued run or stop a running one
+  fleet status|ps [--project X]   table of agents + farm health
+               [--json]           machine-readable: farm + every lane (status,
+                                  outcome, pr, restart, scope). Build tooling on this.
+  fleet metrics                   full telemetry JSON (pretty)
+  fleet capacity                  can we spawn right now?
+  fleet events [--follow]         the append-only event stream — READ THIS instead of
+        [--lane L] [--project X]  polling logs. kinds: spawned, status, delivered,
+        [--since <ts>] [--json]   respawned, dropped-scope. --follow streams (tail -f);
+        [--kind a,b]              --since <unix ts> resumes; filter by lane/project.
+  fleet daemon start|stop         native supervisor: respawns --restart lanes to their
+        |status|tick              outcome, enforces --issues scope. OPT-IN — only ever
+                                  touches lanes with a --restart policy. systemd, one
+                                  instance, survives reboot.
+  fleet logs <slug>               tail an agent's raw stream
+  fleet tail <slug>               compact lane state plus its last message
+  fleet msg <slug> ["text"]       read or append to a lane's checkpoint inbox
+  fleet models                    list and manage routable model engines
+  fleet kill <slug>               stop an agent
+  fleet kill [--retire] <slug>   stop a lane; --retire also stops respawns for that lane
+  fleet game-mode on|off|status  free RAM for gaming: salvage+stop the farm, then resume
+  fleet salvage <slug>            commit and push a lane's recoverable work before cleaning
+  fleet clean [--project X]       remove FINISHED agents' safe worktrees; unknown flags fail
+              [--by NAME]         scope every selected state, including terminal lanes, by owner
+              [--dry-run]
+              [--force --by NAME --yes]
+                                  running lanes are skipped unless force is scoped to their owner;
+                                  unsaved forced removals require --yes and write an autopsy
+  fleet sweep [--dry-run]         POST-MERGE JANITOR: (A) drop every worktree whose branch
+              [--project X]       is merged into origin/main (+ prune + delete the branch),
+              [--force]           and (B) reap the dashboard CARD of every resolved agent
+                                  (PR merged, killed, or long-finished with no open PR) so
+                                  the board self-cleans. Never touches a live agent, an
+                                  OPEN-PR card, or (without --force) a worktree with
+                                  uncommitted work. autosweep runs this for you.
+  fleet autosweep on [minutes]    run `fleet sweep` on a systemd --user timer (default
+             | off | status       every 10 min) so nobody has to remember to.
+  fleet add-project --name N --repo owner/name [--port-base 5200]
+  fleet projects                  list registered projects
+  fleet identity [<name>]         show every code name's mark (emoji + colour)
+         [--icon E] [--color C]   set one deliberately. A code name has ONE mark:
+                                  it is registered on first spawn and the registry
+                                  wins after that, so all of an orchestrator's
+                                  agents carry the same emoji and colour.
+  fleet dashboard start|stop|restart|status|token
+                                  web dashboard on 127.0.0.1:7878; FLEET_DASH_BIND widens it
+                                  (and then its token gates reads too). Every write needs the
+                                  bearer token `fleet dashboard token` prints; `restart` is how
+                                  a new bind or token takes effect, and `status` reports the
+                                  socket it is really listening on
+  fleet mode [auto|full|soft|balanced|hard]
+                                  power mode — hand CPU back to Windows when you game.
+                                  auto (default): full when the GPU is idle, soft when
+                                  it's busy (you're playing). soft ~50% CPU keeps spawning;
+                                  balanced ~35% / hard ~20% PAUSE new spawns. Live, no
+                                  root, no restart. No arg shows the current mode.
+
+  Setup and day to day: docs/QUICKSTART.md; the whole rig: docs/OPERATIONS.md;
+  upgrading an older farm: docs/MIGRATION.md.
+H
+    ;;
+esac

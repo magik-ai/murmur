@@ -1,0 +1,6 @@
+[Unit]
+Description=Dedicated CPU scheduling slice for fleet CI
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true

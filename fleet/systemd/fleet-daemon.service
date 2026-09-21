@@ -1,0 +1,22 @@
+[Unit]
+Description=fleet supervisor daemon (respawn one-pass lanes to their outcome; heartbeat)
+# Installed and enabled by `fleet daemon start`, which substitutes __FLEET__ and __PY__.
+# Singleton is intrinsic: systemd runs exactly one instance of a user unit. Restart=always
+# revives it after a crash; enabling the unit brings it back after a reboot+login. This is the
+# native answer to a nohup bash watcher that dies silently.
+After=default.target
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin
+# Override the cadence/limits via `systemctl --user edit fleet-daemon` if needed.
+Environment=FLEET_DAEMON_INTERVAL=60
+# Operator overrides (FLEET_HOME, FLEET_DASH_BIND, tuning) live in one file rather than in
+# each unit. Read last, so it wins over the defaults above. The leading '-' makes it optional.
+EnvironmentFile=-%h/.config/fleet/env
+ExecStart=__PY__ __FLEET__/lib/supervisor.py loop
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

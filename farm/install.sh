@@ -12,13 +12,13 @@
 #
 #   1. system packages: git, tmux, python3 (3.11+), curl, GitHub's CLI
 #   2. user services survive logout (loginctl enable-linger), uv, the Claude Code CLI
-#   3. clones the fleet (the farm tool) and the head office CLI, installs both under ~/.local/bin
+#   3. clones murmur (it carries the fleet and the head office CLI), installs both under ~/.local/bin
 #   4. asks a few questions and writes the config: head office repository, owner, dashboard reach
 #   5. prints the two logins only you can do (GitHub, Claude) and the first spawn
 #
 # Flags:
 #   --yes            no questions, take every default (a single machine, dashboard on loopback)
-#   --org NAME       GitHub owner (user or org) that holds fleet, agent-hq and murmur; default magik-ai
+#   --org NAME       GitHub owner (user or org) that holds the murmur repository; default magik-ai
 #   --no-tailscale   never offer to install Tailscale
 #   -h, --help       this text
 #
@@ -138,18 +138,20 @@ clone_or_pull() { # clone_or_pull repo dir
     note "$1: cloned to $2"
   fi
 }
-clone_or_pull "$ORG/fleet" "$HOME/work/fleet"
-clone_or_pull "$ORG/agent-hq" "$HOME/work/agent-hq"
+clone_or_pull "$ORG/murmur" "$HOME/work/murmur"
+FLEET_SRC="$HOME/work/murmur/fleet"
+HQ_SRC="$HOME/work/murmur/hq"
+[ -f "$FLEET_SRC/install.sh" ] && [ -f "$HQ_SRC/bin/hq" ] || die "the murmur clone has no fleet/ or hq/ directory; is $ORG/murmur the right repository?"
 
 single="yes"
 ask single "Is this the only machine, with you working on it directly? (yes = dashboard stays local)" "yes"
 if [ "$single" = "yes" ] || [ "$single" = "y" ]; then
-  (cd "$HOME/work/fleet" && ./install.sh --local >/tmp/murmur-fleet-install.log 2>&1) || { tail -20 /tmp/murmur-fleet-install.log; die "fleet install failed (log above)"; }
+  (cd "$FLEET_SRC" && ./install.sh --local >/tmp/murmur-fleet-install.log 2>&1) || { tail -20 /tmp/murmur-fleet-install.log; die "fleet install failed (log above)"; }
 else
-  (cd "$HOME/work/fleet" && ./install.sh >/tmp/murmur-fleet-install.log 2>&1) || { tail -20 /tmp/murmur-fleet-install.log; die "fleet install failed (log above)"; }
+  (cd "$FLEET_SRC" && ./install.sh >/tmp/murmur-fleet-install.log 2>&1) || { tail -20 /tmp/murmur-fleet-install.log; die "fleet install failed (log above)"; }
 fi
 note "fleet: $(grep -c . /tmp/murmur-fleet-install.log) lines of install report in /tmp/murmur-fleet-install.log"
-(cd "$HOME/work/agent-hq" && python3 bin/hq install >/dev/null) || die "hq install failed"
+(cd "$HQ_SRC" && python3 bin/hq install >/dev/null) || die "hq install failed"
 note "hq: linked into ~/.local/bin"
 
 # ---------------------------------------------------------------------------------------------
@@ -181,6 +183,19 @@ policy="${FLEET_CONFIG:-$HOME/.config/fleet}/policy.toml"
 if ! grep -q '^\[hq\]' "$policy" 2>/dev/null; then
   printf '\n[hq]\nenabled = true\n' >> "$policy"
   note "policy.toml: head office on for every lane"
+fi
+# The shipped limits assume a big box (spawns stop below 6 GB free). Size them to this machine
+# once, so a small VPS can spawn at all; the numbers are yours to tune in policy.toml afterwards.
+if ! grep -q '^\[limits\]' "$policy" 2>/dev/null; then
+  total_gb=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
+  cpus=$(nproc 2>/dev/null || echo 2)
+  if [ "$total_gb" -gt 0 ] && [ "$total_gb" -lt 12 ]; then
+    floor=$(( total_gb / 4 )); [ "$floor" -ge 1 ] || floor=1
+    warn=$(( floor + 1 ))
+    agents=$(( cpus * 2 )); [ "$agents" -ge 2 ] || agents=2
+    printf '\n[limits]\nram_min_gb = %s\nwarn_ram_gb = %s\nmax_agents = %s\n' "$floor" "$warn" "$agents" >> "$policy"
+    note "policy.toml: limits sized for ${total_gb} GB and ${cpus} CPUs (spawns stop below ${floor} GB free, at most ${agents} agents)"
+  fi
 fi
 
 if [ "$single" != "yes" ] && [ "$single" != "y" ] && [ "$OFFER_TAILSCALE" = 1 ]; then
@@ -218,5 +233,6 @@ cat <<EOF
 
   Dashboard:  fleet dashboard start     then   fleet dashboard token
   Check:      fleet capacity   hq whoami   gh auth status
-  Read next:  docs/12-the-machine.md in the murmur repository
+  Upgrade:    git -C ~/work/murmur pull    (both tools run from that clone)
+  Read next:  ~/work/murmur/docs/12-the-machine.md
 EOF
