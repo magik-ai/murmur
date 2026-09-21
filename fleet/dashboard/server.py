@@ -138,7 +138,17 @@ def unit_loaded(unit):
 
 
 def hq_binary():
-    return shutil.which("hq") or ""
+    """The hq command, from PATH or from the user's own bin directory.
+
+    A dashboard started by a service unit carries a short PATH that rarely includes
+    ~/.local/bin, where `hq install` links the CLI. Without the fallback the mail tab on such a
+    farm said "no head office is installed" while hq sat one directory away; bin/fleet looks in
+    the same place for the same reason."""
+    found = shutil.which("hq")
+    if found:
+        return found
+    local = os.path.join(os.path.expanduser("~"), ".local", "bin", "hq")
+    return local if os.access(local, os.X_OK) else ""
 
 
 def hq_office():

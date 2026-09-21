@@ -2062,5 +2062,30 @@ class DashboardAccessTest(unittest.TestCase):
             thread.join(timeout=5)
 
 
+
+class HqBinaryFallbackTest(unittest.TestCase):
+    def test_hq_is_found_in_the_users_bin_when_the_service_path_lacks_it(self):
+        import shutil as _shutil
+        with tempfile.TemporaryDirectory() as home:
+            local = os.path.join(home, ".local", "bin")
+            os.makedirs(local)
+            hq = os.path.join(local, "hq")
+            with open(hq, "w") as handle:
+                handle.write("#!/bin/sh\nexit 0\n")
+            os.chmod(hq, 0o755)
+            real_which = _shutil.which
+            _shutil.which = lambda name, *a, **k: None
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = home
+            try:
+                self.assertEqual(dashboard.hq_binary(), hq)
+                os.chmod(hq, 0o644)
+                self.assertEqual(dashboard.hq_binary(), "")
+            finally:
+                _shutil.which = real_which
+                if old_home is not None:
+                    os.environ["HOME"] = old_home
+
+
 if __name__ == "__main__":
     unittest.main()
