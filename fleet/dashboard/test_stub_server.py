@@ -14,6 +14,8 @@ knowing anything about this file.
     empty    a farm that has just been installed: nothing registered, nothing run
     error    gh missing, hq missing, no graphics card, and a queue that will not answer
     loading  every route answers slowly, so the skeletons are what you see
+    quiet    a busy farm whose queue has only finished runs, whose lane names are too long
+             for a card, and whose office holds two inbox issues under one name
 """
 import http.server
 import json
@@ -32,7 +34,7 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 7901
 LOADING_DELAY = float(os.environ.get("STUB_LOADING_DELAY", "60"))
 NOW = time.time()
 
-STATES = ("ready", "empty", "error", "loading")
+STATES = ("ready", "empty", "error", "loading", "quiet")
 
 # Routes served from a background snapshot. In the loading state they answer at once and say
 # the first pass has not happened, which is a different thing from a slow request.
@@ -105,6 +107,39 @@ AGENTS = [
         "status": "state_unreadable", "outcome": "unknown", "started_at": ago(60000),
         "updated_at": ago(60000), "spawned_by": "winston",
         "state_error": "the state record could not be read twice in a row",
+    },
+]
+
+# Real farms name a lane after the ticket and the branch, which is far wider than a card. The
+# name is the part that may be cut; the word in the status pill is not.
+LONG_AGENTS = [
+    {
+        "slug": "storefront-checkout-retry-a-declined-card-once-then-explain-7c41",
+        "project": "storefront", "lane": "checkout-retry-a-declined-card-once-then-explain",
+        "engine": "claude", "model": "opus", "status": "done", "outcome": "met",
+        "started_at": ago(88000), "updated_at": ago(30000), "spawned_by": "winston",
+        "branch": "storefront/checkout-retry-a-declined-card-once-then-explain",
+        "cost_usd": 5.12, "tokens_in": 512000, "tokens_out": 71000,
+        "task": "Retry a declined card once, then explain the refusal in the customer's own words.",
+    },
+    {
+        "slug": "demo-catalogue-pagination-and-the-empty-search-result-4b19",
+        "project": "demo", "lane": "catalogue-pagination-and-the-empty-search-result",
+        "engine": "codex", "effort": "xhigh", "status": "failed", "outcome": "unmet",
+        "started_at": ago(70000), "updated_at": ago(26000), "spawned_by": "rubicon",
+        "branch": "demo/catalogue-pagination-and-the-empty-search-result",
+        "cost_usd": 1.44, "tokens_in": 132000, "tokens_out": 9900,
+        "task": "Page the catalogue, and say something useful when a search finds nothing.",
+    },
+    {
+        "slug": "demo-workspace-sticky-after-publish-and-the-avatar-bundle-1f90",
+        "project": "demo", "lane": "workspace-sticky-after-publish-and-the-avatar-bundle",
+        "engine": "claude", "model": "sonnet", "status": "pr_open", "outcome": "unknown",
+        "started_at": ago(64000), "updated_at": ago(3400), "spawned_by": "dali",
+        "branch": "demo/workspace-sticky-after-publish-and-the-avatar-bundle",
+        "pr_url": "https://example.invalid/demo/pull/515",
+        "cost_usd": 3.02, "tokens_in": 288000, "tokens_out": 40100,
+        "task": "Keep the reader in the workspace they published from, and bake the avatar after.",
     },
 ]
 
@@ -188,6 +223,13 @@ MAIL_BOXES = [
     {"name": "rubicon", "number": 13, "updated_at": ago(4200), "count_24h": 2, "last_at": ago(4200)},
     {"name": "dali", "number": 14, "updated_at": ago(20000), "count_24h": 1, "last_at": ago(20000)},
 ]
+
+# One office, two inbox issues under one name. It happens when a name is registered twice, and
+# the page used to show that name twice with half its thread in each row.
+MAIL_BOXES_DOUBLED = MAIL_BOXES + [
+    {"name": "winston", "number": 4, "updated_at": ago(50000), "count_24h": 1, "last_at": ago(50000)},
+]
+
 
 def message(sender, seconds_ago, text):
     """A message carries the time twice: as the office wrote it, and as a number to count from."""
@@ -349,9 +391,33 @@ def pending_payload(path):
     return envelope(pending=iso(), **{key: []})
 
 
+def quiet_payload(path, query):
+    """The three things the live farm showed that no other state here produces: a queue with
+    nothing running and nothing waiting, lane names too long for a card, and an office holding
+    two inbox issues under one name. Everything else in this state is the ready farm."""
+    if path == "/api/fleet":
+        return 200, AGENTS + LONG_AGENTS
+    if path == "/api/ci":
+        return 200, {"updated": NOW, "daemon_alive": True, "refresh_age": 2,
+                     "running": [], "queued": [], "recent": QUEUE["recent"]}
+    if path == "/api/mail/boxes":
+        return 200, envelope(boxes=MAIL_BOXES_DOUBLED)
+    if path == "/api/agent":
+        slug = query.get("slug", [""])[0]
+        for agent in LONG_AGENTS:
+            if agent["slug"] == slug:
+                return 200, dict(agent)
+    return None
+
+
 def payload_for(state, path, query):
     """One place that knows what each route answers in each state."""
     empty_list = []
+    if state == "quiet":
+        answer = quiet_payload(path, query)
+        if answer is not None:
+            return answer
+        state = "ready"
     if state == "loading" and is_snapshot(path):
         return 200, pending_payload(path)
     if path == "/api/config":

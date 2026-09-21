@@ -1335,17 +1335,62 @@ def _gh_json(args, timeout=MAIL_GH_TIMEOUT):
 
 
 def mail_fetch_boxes(office):
+    """The office's inbox issues, one box per NAME.
+
+    An office can hold two issues titled `inbox: winston`; it happens when a name is registered
+    twice. They are one mailbox to everybody who uses them, and the dashboard used to draw that
+    name twice with half the thread behind each row. The newest issue is the box people write
+    to, every issue under the name is read for the thread, and the box is as fresh as the
+    freshest of them.
+    """
     rows = _gh_json(["issue", "list", "--repo", office, "--state", "all", "--label", "inbox",
                      "--limit", "100", "--json", "number,title,updatedAt"])
-    boxes = []
+    boxes = {}
     for row in rows or []:
         if not isinstance(row, dict):
             continue
         title = str(row.get("title") or "")
-        boxes.append({"name": title.removeprefix("inbox: ").strip() or title,
-                      "number": row.get("number"),
-                      "updated_at": row.get("updatedAt")})
-    return boxes
+        name = title.removeprefix("inbox: ").strip() or title
+        number = row.get("number")
+        stamp = row.get("updatedAt")
+        box = boxes.get(name)
+        if box is None:
+            boxes[name] = {"name": name, "number": number, "updated_at": stamp,
+                           "numbers": [number] if number is not None else []}
+            continue
+        if number is not None:
+            box["numbers"].append(number)
+            if box["number"] is None or number > box["number"]:
+                box["number"] = number
+        if stamp and (not box["updated_at"] or str(stamp) > str(box["updated_at"])):
+            box["updated_at"] = stamp
+    for box in boxes.values():
+        box["numbers"] = sorted(set(box["numbers"]), reverse=True)
+    return list(boxes.values())
+
+
+def mail_fetch_box_thread(office, box, since):
+    """One mailbox's thread, read from every inbox issue that carries its name."""
+    numbers = box.get("numbers") or ([box["number"]] if box.get("number") is not None else [])
+    if len(numbers) == 1:
+        return mail_fetch_thread(office, numbers[0], since)
+    messages = []
+    for number in numbers:
+        messages.extend(mail_fetch_thread(office, number, since))
+    messages.sort(key=lambda message: message["created_at"])
+    return messages
+
+
+def mail_box_order(boxes):
+    """Newest first, with "all" pinned to the top: it is the box everybody reads, and a farm
+    with twenty five code names is otherwise a list in whatever order the forge answered."""
+    def freshness(box):
+        return str(box.get("last_at") or box.get("updated_at") or "")
+
+    pinned = [box for box in boxes if box.get("name") == "all"]
+    rest = [box for box in boxes if box.get("name") != "all"]
+    rest.sort(key=freshness, reverse=True)
+    return pinned + rest
 
 
 def mail_fetch_thread(office, number, since):
@@ -1399,7 +1444,7 @@ def mail_refresh():
             fresh_seen[name] = stamp
             continue
         try:
-            threads[name] = mail_fetch_thread(office, box["number"], since)
+            threads[name] = mail_fetch_box_thread(office, box, since)
             fresh_seen[name] = stamp
         except Exception as exc:
             threads[name] = previous.get(name, [])
@@ -1413,6 +1458,7 @@ def mail_refresh():
         # One clock. A sender's own stamp in the body is for display; a box's last activity is
         # the forge's `created_at`, which is the clock its `updated_at` is on too.
         box["last_at"] = (messages[-1]["created_at"] if messages else box.get("updated_at"))
+    boxes = mail_box_order(boxes)
     if error:
         with _snapshot_lock:
             _mail_snapshot["boxes"] = boxes

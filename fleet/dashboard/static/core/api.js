@@ -93,8 +93,24 @@ export function list(value) {
   return Array.isArray(value) ? value : [];
 }
 
+/* A request that never comes back is not a wait, it is a panel stuck on a skeleton for the life
+   of the page: the resource below only ever leaves "loading" when a request settles. The farm's
+   queue route reads the forge inline on its first draw, which is exactly how a live dashboard
+   was left showing two grey bars with nothing to tell the reader. */
+export const REQUEST_LIMIT_MS = 30000;
+
+async function fetchBounded(path, options) {
+  const bell = new AbortController();
+  const timer = setTimeout(() => bell.abort(), REQUEST_LIMIT_MS);
+  try {
+    return await fetch(path, { ...options, signal: bell.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function apiGet(path) {
-  const response = await fetch(path, { headers: headers({}) });
+  const response = await fetchBounded(path, { headers: headers({}) });
   return parse(response, path);
 }
 
@@ -104,7 +120,7 @@ export async function apiGet(path) {
  * serverReason(); a caller that swallows it leaves the reader guessing what was wrong.
  */
 export async function apiPost(path, body) {
-  const response = await fetch(path, {
+  const response = await fetchBounded(path, {
     method: "POST",
     headers: headers({ "Content-Type": "application/json" }),
     body: JSON.stringify(body || {}),
@@ -158,6 +174,13 @@ export function normaliseError(error, path = "") {
       title: "The server reported a problem",
       body: `The request for ${path || error.path} came back with status ${error.status}.`,
       command: "",
+    };
+  }
+  if (error && error.name === "AbortError") {
+    return {
+      title: "The server took too long to answer",
+      body: `${path || ""} did not come back within thirty seconds, so this panel has nothing to show yet. A route that reads the forge on every farm is the usual reason.`.trim(),
+      command: "fleet dash --status",
     };
   }
   return {

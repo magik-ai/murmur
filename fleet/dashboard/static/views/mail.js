@@ -14,7 +14,12 @@ import { mark } from "../core/identity.js";
    mailbox nobody reads from the top. */
 const LAST_MESSAGES = 100;
 
-const local = { box: "", timeline: false, seen: readSeen(), watched: "", showAll: false };
+/* How many mailboxes are listed before the reader is asked whether they want the rest. A farm
+   with twenty five code names is a list nobody reads to the bottom. */
+const FIRST_BOXES = 12;
+
+const local = { box: "", timeline: false, seen: readSeen(), watched: "", showAll: false,
+  allBoxes: false };
 
 function readSeen() {
   try {
@@ -78,9 +83,41 @@ function newCount(box) {
   return last > visited ? day : 0;
 }
 
+/* One name, one mailbox. The server folds two inbox issues of one name into one box; this is
+   the belt, because a name drawn twice is a key drawn twice, and a reader who clicks the second
+   winston has no way to tell which half of the thread they are looking at. */
+function oneBoxPerName(rows) {
+  const out = [];
+  const seen = new Set();
+  for (const box of rows) {
+    const name = box && box.name;
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(box);
+  }
+  return out;
+}
+
+/** Newest first, with "all" pinned to the top. The belt for the order the server sends. */
+function newestFirst(rows) {
+  const pinned = rows.filter((box) => box.name === "all");
+  const rest = rows.filter((box) => box.name !== "all");
+  rest.sort((left, right) => (fmt.seconds(right.last_at) || 0) - (fmt.seconds(left.last_at) || 0));
+  return [...pinned, ...rest];
+}
+
+/** The boxes on screen: the first twelve, the one that is open, and the rest once asked for. */
+function shownBoxes(boxes) {
+  if (local.allBoxes || boxes.length <= FIRST_BOXES) return boxes;
+  const head = boxes.slice(0, FIRST_BOXES);
+  const open = boxes.find((box) => box.name === local.box);
+  return open && !head.includes(open) ? [...head, open] : head;
+}
+
 function boxPane(context, boxes) {
+  const shown = shownBoxes(boxes);
   return card({ key: "boxes" },
-    h("ul", { class: "boxlist", role: "listbox", "aria-label": "Mailboxes" }, boxes.map((box) => {
+    h("ul", { class: "boxlist", role: "listbox", "aria-label": "Mailboxes" }, shown.map((box) => {
       const count = box.name === local.box ? 0 : newCount(box);
       return h("li", {
         key: box.name,
@@ -92,7 +129,16 @@ function boxPane(context, boxes) {
       },
         h("span", null, box.name),
         count ? h("span", { class: "new" }, String(count)) : null);
-    })));
+    })),
+    boxes.length > FIRST_BOXES ? h("div", { class: "boxlist-more" },
+      h("button", {
+        class: "ghost-button small",
+        "aria-expanded": String(local.allBoxes),
+        onclick: () => {
+          local.allBoxes = !local.allBoxes;
+          context.paint();
+        },
+      }, local.allBoxes ? "Show fewer" : `Show all ${boxes.length}`)) : null);
 }
 
 function select(name, context) {
@@ -168,7 +214,7 @@ function earlier(context, total) {
 }
 
 function composer(context) {
-  const boxes = listOf(context.res("/api/mail/boxes").data, "boxes").map((box) => box.name);
+  const boxes = oneBoxPerName(listOf(context.res("/api/mail/boxes").data, "boxes")).map((box) => box.name);
   const allowed = access.writable;
   const recipients = ["all", ...boxes.filter((name) => name !== "all")];
   return h("div", { class: "composer", key: "composer", "data-write": "" },
@@ -266,7 +312,7 @@ export default {
     if (data && data.unavailable) {
       return emptyState({ title: data.unavailable, body: "", command: data.fix });
     }
-    const boxes = listOf(data, "boxes");
+    const boxes = newestFirst(oneBoxPerName(listOf(data, "boxes")));
     const wanted = context.params.get("box");
     if (wanted && wanted !== local.box) {
       local.box = wanted;

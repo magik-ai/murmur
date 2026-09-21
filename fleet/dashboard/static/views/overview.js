@@ -104,7 +104,18 @@ function queueCard(context) {
     panel(resource, {
       loading: () => skeletonStack(2),
       isEmpty: (data) => !list(data.running).length && !list(data.queued).length,
-      empty: () => h("p", { class: "muted" }, "Nothing is being verified right now."),
+      /* A quiet queue is a state, not a gap. It says so, and it says how many finished runs
+         are waiting to be read, so the Open link above has something behind it. */
+      empty: (data) => {
+        const finished = list(data && data.recent).length;
+        return h("div", { class: "metric" },
+          h("span", { class: "label" }, "Nothing is being verified right now."),
+          h("span", { class: "value sm", "data-flash": "" },
+            finished ? `${finished} finished ${finished === 1 ? "run" : "runs"}` : "no finished run yet"),
+          h("span", { class: "muted" }, finished
+            ? "Open the queue to read what they decided."
+            : "A change sent here shows its stages as they run."));
+      },
       ready: (data) => {
         const head = list(data.running)[0] || list(data.queued)[0];
         return h("div", { class: "metric" },

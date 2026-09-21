@@ -40,6 +40,12 @@ python3 -m unittest dashboard/test_server.py   # API routes, log-path containmen
 bash    dashboard/test_browser.sh              # real Chromium: verdict colours + render guard
 ```
 
+`test_browser.sh` walks every tab in five stub states. Four are the states a panel can be in
+(`ready`, `empty`, `error`, `loading`); the fifth, `quiet`, is what a real farm looked like and
+no fixture used to: a queue with nothing running and only finished runs, lane names too long for
+a card, and a head office holding two inbox issues under one name. Open any of them by hand with
+`?state=quiet` in the address.
+
 `test_browser.sh` starts its own stub server carrying every verdict state, including the ones the
 live queue rarely holds — `ejected`, `cancelled`, `blocked`. "I could not find one to look at" is
 not evidence that a state renders correctly.

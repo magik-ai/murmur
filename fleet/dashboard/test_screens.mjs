@@ -11,13 +11,67 @@ import { loadPlaywright } from "./test_playwright.mjs";
 
 const OUT = process.env.SHOT_DIR || path.join(os.tmpdir(), "murmur-dash-shots");
 const PORT = Number(process.env.PORT || 7921);
-const STATES = ["ready", "empty", "error", "loading"];
+const STATES = ["ready", "empty", "error", "loading", "quiet"];
 const TABS = ["overview", "agents", "mail", "queue", "projects", "accounts", "system"];
 const SIZES = [{ width: 1440, height: 900 }, { width: 390, height: 844 }];
 
 /* A failed request the state is meant to produce. The browser logs one console line for it;
    that line is the fixture working, not the page breaking. */
 const EXPECTED_REQUEST_FAILURES = { error: ["/api/ci"] };
+
+/* What the live farm showed and no fixture used to: names too long for a card, twenty filters,
+   a queue with nothing running, and an office holding one name twice. The pictures are taken
+   either way; these are the three things a person would otherwise have to spot in them. */
+async function measured(page, state, tab, size) {
+  if (state !== "quiet") return [];
+  if (tab === "overview") {
+    const seen = await page.evaluate(() => {
+      const card = (word) => [...document.querySelectorAll(".card")].find((node) => node.innerText.startsWith(word));
+      const agents = card("Agents");
+      const queue = card("Queue");
+      return {
+        agentSkeletons: agents ? agents.querySelectorAll(".skeleton").length : -1,
+        agentText: agents ? agents.innerText.replace(/\s+/g, " ") : "",
+        queueText: queue ? queue.innerText.replace(/\s+/g, " ") : "",
+        queueSkeletons: queue ? queue.querySelectorAll(".skeleton").length : -1,
+      };
+    });
+    return [
+      ["shows the counts with no placeholder left above them",
+        seen.agentSkeletons === 0 && /Running \d/.test(seen.agentText), JSON.stringify(seen)],
+      ["says a quiet queue is quiet and counts what finished",
+        seen.queueSkeletons === 0 && /Nothing is being verified right now/.test(seen.queueText)
+          && /\d finished runs?/.test(seen.queueText), seen.queueText],
+    ];
+  }
+  if (tab === "agents") {
+    const seen = await page.evaluate(() => {
+      const cut = (node) => node.scrollWidth > node.clientWidth + 1;
+      const cards = [...document.querySelectorAll(".agent-card")];
+      const heights = [...new Set([...document.querySelectorAll(".chip")].map((node) => Math.round(node.getBoundingClientRect().height)))];
+      return {
+        cards: cards.length,
+        squeezed: cards.filter((card) => cut(card.querySelector(".pill-text"))).map((card) => card.querySelector(".pill-text").textContent),
+        longNames: cards.filter((card) => cut(card.querySelector(".name"))).length,
+        heights,
+      };
+    });
+    return [
+      ["never squeezes a status word", seen.cards > 0 && seen.squeezed.length === 0, seen.squeezed.join(", ")],
+      ["cuts the long lane names instead", seen.longNames > 0, `${seen.longNames} cut`],
+      ["keeps every filter chip one height", seen.heights.length === 1 && seen.heights[0] === 32,
+        seen.heights.join(", ")],
+    ];
+  }
+  if (tab === "mail") {
+    const names = await page.evaluate(() => [...document.querySelectorAll(".boxlist li span:first-child")].map((node) => node.textContent));
+    return [
+      ["lists one mailbox per name", names.length === new Set(names).size, names.join(", ")],
+      ["pins the box everybody reads to the top", names[0] === "all", names.join(", ")],
+    ];
+  }
+  return [];
+}
 
 function startStub() {
   const child = spawn("python3", [new URL("./test_stub_server.py", import.meta.url).pathname, String(PORT)], {
@@ -97,6 +151,9 @@ for (const state of STATES) {
         wide.scroll <= wide.view + 1, `${wide.scroll} wide in ${wide.view}`);
       const empty = await page.evaluate(() => document.getElementById("view").childElementCount === 0);
       check(`${state} ${tab} ${size.width} drew something`, !empty);
+      for (const [name, passed, detail] of await measured(page, state, tab, size)) {
+        check(`${state} ${tab} ${size.width} ${name}`, passed, detail);
+      }
       await page.screenshot({ path: path.join(OUT, `${state}-${tab}-${size.width}.png`) });
       if (tab === "agents-palette") await page.keyboard.press("Escape");
     }

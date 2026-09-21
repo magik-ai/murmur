@@ -1398,6 +1398,53 @@ class DashboardMailTest(unittest.TestCase):
             self.assertEqual(status, 404)
             self.assertEqual(payload["boxes"], ["all", "winston"])
 
+    def test_two_inbox_issues_of_one_name_are_one_mailbox(self):
+        """An office can hold two issues called `inbox: winston`. They are one mailbox: the
+        newest issue is the one people write to, and the thread is every issue's comments."""
+        now = time.time()
+        stamp = lambda back: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - back))
+        boxes = [
+            {"number": 7, "title": "inbox: winston", "updatedAt": stamp(7200)},
+            {"number": 21, "title": "inbox: winston", "updatedAt": stamp(1800)},
+            {"number": 9, "title": "inbox: all", "updatedAt": stamp(3600)},
+        ]
+        comments = {
+            7: [{"created_at": stamp(7200),
+                 "body": "**from dali** (2026-09-21T06:00:00Z):\nthe old office issue"}],
+            21: [{"created_at": stamp(1800),
+                  "body": "**from rubicon** (2026-09-21T08:00:00Z):\nthe new office issue"}],
+            9: [{"created_at": stamp(3600),
+                 "body": "**from winston** (2026-09-21T07:00:00Z):\nthe queue is open"}],
+        }
+        with self.office(boxes=boxes, comments=comments):
+            dashboard.mail_refresh()
+            payload = dashboard.mail_boxes()
+            names = [row["name"] for row in payload["boxes"]]
+            self.assertEqual(names.count("winston"), 1)
+            rows = {row["name"]: row for row in payload["boxes"]}
+            # the box people write to is the newest issue of that name
+            self.assertEqual(rows["winston"]["number"], 21)
+            self.assertEqual(rows["winston"]["numbers"], [21, 7])
+            # the day's count is both issues together, not whichever answered last
+            self.assertEqual(rows["winston"]["count_24h"], 2)
+            self.assertEqual(rows["winston"]["last_at"], stamp(1800))
+            thread = dashboard.mail_thread("winston")[1]["messages"]
+            self.assertEqual([message["sender"] for message in thread], ["dali", "rubicon"])
+
+    def test_the_boxes_are_newest_first_with_all_pinned_to_the_top(self):
+        """Twenty five code names in whatever order the forge answered is a list nobody reads."""
+        now = time.time()
+        stamp = lambda back: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - back))
+        ages = {"dali": 20000, "all": 9000, "winston": 1800, "rubicon": 5400}
+        boxes = [{"number": index + 2, "title": f"inbox: {name}", "updatedAt": stamp(back)}
+                 for index, (name, back) in enumerate(ages.items())]
+        comments = {index + 2: [{"created_at": stamp(back), "body": f"**from {name}** ():\nhello"}]
+                    for index, (name, back) in enumerate(ages.items())}
+        with self.office(boxes=boxes, comments=comments):
+            dashboard.mail_refresh()
+            names = [row["name"] for row in dashboard.mail_boxes()["boxes"]]
+            self.assertEqual(names, ["all", "winston", "rubicon", "dali"])
+
     def test_an_office_that_has_never_answered_does_not_deny_a_mailbox(self):
         # An outage must not read as "your mailbox does not exist", which is what a 404 says.
         with self.office() as box:

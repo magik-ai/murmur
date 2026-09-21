@@ -348,7 +348,11 @@ function paletteItems() {
     items.push({ label: row.name, where: "Project", go: () => go("projects", { project: row.name }) });
   }
   const boxes = api.resource("/api/mail/boxes").data;
+  // One name is one mailbox, however many inbox issues the office holds under it.
+  const offered = new Set();
   for (const box of api.list(boxes && boxes.boxes)) {
+    if (offered.has(box.name)) continue;
+    offered.add(box.name);
     items.push({ label: box.name, where: "Mailbox", go: () => go("mail", { box: box.name }) });
   }
   return items.filter((item) => typeof item.label === "string" && item.label.trim() !== "");

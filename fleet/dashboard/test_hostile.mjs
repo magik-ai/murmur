@@ -173,6 +173,59 @@ for (const [route, hash, name] of [
   await context.close();
 }
 
+/* A panel that is drawn before its answer arrives has TWO shapes under one key: a grey
+   placeholder and the value that replaces it. The live farm showed both at once, four grey
+   rows sitting above the four numbers they were standing in for. */
+
+{
+  const late = JSON.stringify([
+    { slug: "a", project: "demo", lane: "web", status: "running", started_at: 1, updated_at: 1 },
+    { slug: "b", project: "demo", lane: "api", status: "failed", started_at: 1, updated_at: 1 },
+  ]);
+  const { page, context } = await open({
+    hash: "#/overview",
+    overrides: {
+      "/api/fleet": (handler) => setTimeout(() => handler.fulfill({
+        status: 200, contentType: "application/json", body: late,
+      }), 1000),
+    },
+  });
+  const card = await page.evaluate(() => {
+    const agents = [...document.querySelectorAll(".card")].find((node) => /^Agents/.test(node.innerText));
+    return agents ? { text: agents.innerText, skeletons: agents.querySelectorAll(".skeleton").length } : null;
+  });
+  check("the skeleton is replaced by the numbers, not left above them",
+    card && card.skeletons === 0 && /Running\n1/.test(card.text), JSON.stringify(card));
+  await context.close();
+}
+
+/* A queue with nothing running and nothing waiting is a state, not a gap. It used to be the
+   one shape that left the overview card on its placeholder with nothing to read. */
+
+{
+  const finished = [0, 1, 2].map((index) => ({
+    id: `ci-${index}`, project: "demo", pr: 400 + index, branch: `demo/change-${index}`,
+    state: "passed", started: 1, ended: 2, tiers: [],
+  }));
+  const { page, context, thrown } = await open({
+    hash: "#/overview",
+    overrides: {
+      "/api/ci": JSON.stringify({ updated: 1, daemon_alive: true, running: [], queued: [], recent: finished }),
+    },
+  });
+  const card = await page.evaluate(() => {
+    const queue = [...document.querySelectorAll(".card")].find((node) => /^Queue/.test(node.innerText));
+    return queue ? { text: queue.innerText, skeletons: queue.querySelectorAll(".skeleton").length,
+      open: Boolean(queue.querySelector('a[href="#/queue"]')) } : null;
+  });
+  check("an empty queue says so, counts what finished, and keeps its way in",
+    card && card.skeletons === 0 && card.open
+      && /Nothing is being verified right now/.test(card.text)
+      && /3 finished runs/.test(card.text), JSON.stringify(card));
+  check("an empty queue threw nothing", thrown.length === 0, thrown.join(" | "));
+  await context.close();
+}
+
 /* -------------------------------------------------------- a name nobody thought to bound */
 
 {
@@ -555,6 +608,39 @@ for (const [hash, name] of [["#/system", "system"], ["#/projects", "projects"], 
   await page.waitForTimeout(1000);
   const toast = await page.evaluate(() => [...document.querySelectorAll(".toast")].map((node) => node.textContent).join(" | "));
   check("a refused message to a lane shows the reason the server gave", toast.includes(said), toast);
+  await context.close();
+}
+
+/* Twenty five code names is what a real office holds, and two of the issues carry one name.
+   The list has to be one row per name, newest first, and short enough to read. */
+
+{
+  const now = Date.now() / 1000;
+  const names = ["all", "winston", "winston", ...Array.from({ length: 22 }, (_unused, index) => `agent-${index}`)];
+  const boxes = names.map((name, index) => ({
+    name, number: 100 - index, updated_at: now - index * 600,
+    count_24h: 1, last_at: now - index * 600,
+  }));
+  const { page, context, thrown } = await open({
+    hash: "#/mail",
+    overrides: { "/api/mail/boxes": JSON.stringify({ at: new Date().toISOString(), stale_since: null, error: null, pending: null, boxes }) },
+  });
+  const read = () => page.evaluate(() => ({
+    names: [...document.querySelectorAll(".boxlist li span:first-child")].map((node) => node.textContent),
+    button: document.querySelector(".boxlist-more button") ? document.querySelector(".boxlist-more button").textContent : "",
+  }));
+  const first = await read();
+  check("one name is one mailbox however many issues carry it",
+    first.names.filter((name) => name === "winston").length === 1, first.names.join(", "));
+  check("a long office list stops at twelve and offers the rest",
+    first.names.length === 12 && first.button === "Show all 24", `${first.names.length} rows, button ${first.button}`);
+  check("the box everybody reads is first", first.names[0] === "all", first.names.slice(0, 3).join(", "));
+  await page.click(".boxlist-more button");
+  await page.waitForTimeout(400);
+  const all = await read();
+  check("asking for the rest shows them", all.names.length === 24 && all.button === "Show fewer",
+    `${all.names.length} rows, button ${all.button}`);
+  check("a long office list threw nothing", thrown.length === 0, thrown.join(" | "));
   await context.close();
 }
 

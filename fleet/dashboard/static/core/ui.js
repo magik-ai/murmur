@@ -45,13 +45,22 @@ export function render(parent, children) {
   const placed = [];
   const used = new Set();
   wanted.forEach((vnode, index) => {
-    const key = keyFor(vnode, index);
+    let key = keyFor(vnode, index);
+    /* Two children under one key is a data accident, not a page bug: one head office can hold
+       two mailboxes of one name. It used to strand a node all the same, because the map above
+       keeps the last of them and the first is then neither matched nor removed. */
+    while (used.has(key)) key = `${key}#${index}`;
     used.add(key);
-    let element = existing.get(key);
-    const same = element && (vnode.text != null
-      ? element.nodeType === 3
-      : element.nodeType === 1 && element.localName === vnode.tag);
+    const found = existing.get(key);
+    let element = found;
+    const same = found && (vnode.text != null
+      ? found.nodeType === 3
+      : found.nodeType === 1 && found.localName === vnode.tag);
     if (!same) {
+      /* A node under this key whose tag changed is REPLACED, never joined. Leaving it behind is
+         how four skeletons ended up sitting above the four numbers they stood in for: the
+         placeholder is a div, the value is a link, and both answer to the same key. */
+      if (found) found.remove();
       element = create(vnode);
       element.__vkey = key;
     } else {
@@ -319,7 +328,7 @@ export function panel(resource, options) {
     return emptyState({ title: resource.data.unavailable, body: "", command: resource.data.fix });
   }
   if (options.isEmpty && options.isEmpty(resource.data)) {
-    return [staleLine(resource), options.empty()];
+    return [staleLine(resource), options.empty(resource.data)];
   }
   return [staleLine(resource), options.ready(resource.data)];
 }

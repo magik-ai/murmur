@@ -696,5 +696,16 @@ await okAsync("a limit window is labelled by its own name", async () => {
   assert.ok(!/<svg|base64/i.test(source), "an engine mark comes from the server, not from a logo in the page");
 });
 
+await okAsync("the quiet farm carries what the live farm showed and no other state does", async () => {
+  const queue = (await get("/api/ci", "quiet")).body;
+  assert.equal(queue.running.length, 0, "nothing is being verified");
+  assert.equal(queue.queued.length, 0, "and nothing is waiting for a runner");
+  assert.ok(queue.recent.length > 0, "but there are verdicts to read");
+  const lanes = (await get("/api/fleet", "quiet")).body;
+  assert.ok(lanes.some((row) => String(row.slug).length > 48), "a lane name wider than a card");
+  const names = (await get("/api/mail/boxes", "quiet")).body.boxes.map((row) => row.name);
+  assert.ok(names.length > new Set(names).size, "an office holding one name twice");
+});
+
 stub.kill();
 console.log(`\nRESULT: ${passed} checks passed`);
