@@ -1465,7 +1465,10 @@ class LibraryIsNotOneFarmTest(unittest.TestCase):
             self.assertEqual(dashboard.ID.marks()[0], dashboard.ID.DEFAULT_GLYPHS)
 
     def test_the_model_catalog_finds_its_own_checkout_rather_than_one_persons_home(self):
-        self.assertTrue(dashboard.MODELS.FLEET_HOME.endswith("/fleet"))
+        # The checkout may be named anything (fleet, fleet-repo, murmur/fleet): what matters is
+        # that FLEET_HOME is the directory holding lib/, not a name under somebody's home.
+        expected = os.path.realpath(os.path.join(os.path.dirname(dashboard.MODELS.__file__), ".."))
+        self.assertEqual(os.path.realpath(dashboard.MODELS.FLEET_HOME), expected)
         self.assertTrue(os.path.isdir(os.path.join(dashboard.MODELS.FLEET_HOME, "config")))
         self.assertNotIn("work/fleet", dashboard.MODELS.EXAMPLE)
         self.assertTrue(os.path.isfile(dashboard.MODELS.EXAMPLE))
