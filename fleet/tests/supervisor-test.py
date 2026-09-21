@@ -17,7 +17,7 @@ brief = os.path.join(ROOT, "briefs", "b.md")
 open(brief, "w").write("test brief")
 
 # a stub `fleet` that records the call AND writes a fresh CHILD state record with respawn_count=0
-# and a newer started_at — exactly like real cmd_spawn. This is what makes the child govern the
+# and a newer started_at (outside the bootstrap grace, see below) — exactly like real cmd_spawn. This is what makes the child govern the
 # lane next tick, and is what the earlier (weaker) stub missed, hiding the respawn-storm bug.
 STUB = os.path.join(ROOT, "fleet-stub")
 calls = os.path.join(ROOT, "spawn-calls.log")
@@ -39,7 +39,12 @@ rec = {{"slug": slug, "project": proj, "lane": lane, "engine": kv.get("engine","
        "repo": "o/r", "worktree": "{ROOT}", "brief_path": "{brief}",
        "restart": kv.get("restart"), "done_when": kv.get("done-when"),
        "issues": kv.get("issues"), "respawn_count": 0, "status": "starting",
-       "started_at": int(time.time()) + 1}}
+       # Newer than the parent record (now - 300), so the child governs the lane, and older than
+       # the bootstrap grace (120 s), so the next tick sees an exited child rather than one still
+       # booting. The earlier value, one second in the FUTURE, sat outside grace only while the
+       # next tick landed inside that second; a slower machine turned the storm case into a lane
+       # waiting out its grace for ever, and the suite flaked on CI.
+       "started_at": int(time.time()) - 200}}
 json.dump(rec, open(os.path.join("{STATE}", slug + ".json"), "w"))
 print("spawned " + slug)
 ''')
