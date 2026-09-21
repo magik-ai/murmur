@@ -1,81 +1,99 @@
-// playwright-core is not vendored here. Resolve it normally, or point FLEET_PLAYWRIGHT at a
-// copy that already exists on the machine (any project's node_modules/playwright-core/index.mjs).
-const { chromium } = await import(process.env.FLEET_PLAYWRIGHT || 'playwright-core')
-const URL = process.env.DASH_URL || "http://127.0.0.1:7901"
-const R=[]; const check=(n,p,d)=>{R.push({n,p});console.log(`${p?'PASS':'FAIL'}  ${n}${d?'  — '+d:''}`)}
-const hue = (c) => { const m=c.match(/\d+/g); if(!m) return 'none'
-  const [r,g,b]=m.map(Number)
-  if (Math.abs(r-g)<18 && Math.abs(g-b)<18) return 'grey'
-  if (g>r+25 && g>b+15) return 'green'
-  if (r>g+40 && g>b+15) return 'amber'
-  if (r>g+50) return 'red'
-  if (b>r+30) return 'blue'
-  return `other(${r},${g},${b})` }
+/* The five status colours, measured in both themes, against a queue that carries every
+   verdict. The live queue rarely holds an ejected or a cancelled record, and "I could not find
+   one to look at" is not evidence that it renders correctly. A colour that reads strongly in
+   one theme and washes out in the other is the defect this check exists to catch. */
 
-const b = await chromium.launch()
-const p = await (await b.newContext({viewport:{width:1600,height:1100},colorScheme:'dark'})).newPage()
-await p.goto(URL,{waitUntil:'domcontentloaded'}); await p.waitForTimeout(1600)
+import { loadPlaywright } from "./test_playwright.mjs";
 
-// Recent must be COLLAPSED on first load
-const rec = await p.evaluate(() => {
-  const secs=[...document.querySelectorAll('.ci-pane section, .ci-pane details, [id*=Recent], [id*=recent]')]
-  const el = secs.find(s => /recent/i.test(s.textContent.slice(0,40))) || document.getElementById('ciRecentSection')
-  if (!el) return {found:false}
-  const cards = el.querySelectorAll('.ci-card').length
-  const visible = [...el.querySelectorAll('.ci-card')].filter(c=>c.getBoundingClientRect().height>0).length
-  return {found:true, tag:el.tagName.toLowerCase(), open:el.open, cards, visible}
-})
-check('Recent starts collapsed', rec.found && (rec.open===false || rec.visible===0),
-      JSON.stringify(rec))
+const URL = process.env.DASH_URL || "http://127.0.0.1:7903";
+const WANTED = { run: "blue", wait: "amber", fail: "red", done: "green", pause: "grey" };
 
-// Running/Queued must NOT be collapsed
-const rq = await p.evaluate(() => {
-  const out={}
-  for (const key of ['Running','Queued']) {
-    const el=[...document.querySelectorAll('.ci-pane section, .ci-pane details')]
-      .find(s=>new RegExp(key,'i').test(s.textContent.slice(0,30)))
-    out[key]= el ? (el.tagName.toLowerCase()==='details' ? el.open!==false : true) : null
+const results = [];
+const check = (name, passed, detail) => {
+  results.push({ name, passed });
+  console.log(`${passed ? "PASS" : "FAIL"}  ${name}${detail ? `  ${detail}` : ""}`);
+};
+
+/* Classify a colour the way an eye does, not by its exact value: the point is that failed is
+   red in both themes, not that it is one particular red. A browser hands back whichever form
+   the stylesheet used, so both the wide gamut form and the plain one are read here. */
+const hue = (value) => {
+  const text = String(value);
+  const parts = text.match(/[\d.]+/g);
+  if (!parts) return "none";
+  if (text.startsWith("oklch")) {
+    const [, chroma, angle] = parts.map(Number);
+    if (chroma < 0.05) return "grey";
+    if (angle < 40 || angle >= 340) return "red";
+    if (angle < 110) return "amber";
+    if (angle < 200) return "green";
+    if (angle < 300) return "blue";
+    return `other(${angle})`;
   }
-  return out })
-check('Running/Queued stay expanded', rq.Running!==false && rq.Queued!==false, JSON.stringify(rq))
+  const [red, green, blue] = parts.map(Number);
+  if (Math.abs(red - green) < 18 && Math.abs(green - blue) < 18) return "grey";
+  if (green > red + 25 && green > blue + 15) return "green";
+  if (red > green + 40 && green > blue + 15) return "amber";
+  if (red > green + 50) return "red";
+  if (blue > red + 30) return "blue";
+  return `other(${red},${green},${blue})`;
+};
 
-// expand Recent, then measure the colour of each verdict
-await p.evaluate(() => {
-  const el=[...document.querySelectorAll('details')].find(s=>/recent/i.test(s.textContent.slice(0,40)))
-  if (el) el.open = true
-  const h=[...document.querySelectorAll('.ci-pane h4, .ci-pane summary, .sechead')].find(x=>/recent/i.test(x.textContent))
-  if (h) h.click()
-})
-await p.waitForTimeout(700)
+const { chromium } = await loadPlaywright();
+const browser = await chromium.launch();
 
-const colors = await p.evaluate(() => {
-  const out={}
-  for (const card of document.querySelectorAll('.ci-card, .ci-card-toggle')) {
-    const t=card.innerText
-    const chip=card.querySelector('.cistate, .state, [class*=state]')
-    const cs=getComputedStyle(card)
-    // Classify by CLASS, not by text: a RUNNING card contains "backend · passed" in its tier
-    // strip, so text matching picked the wrong card and measured the wrong colour.
-    const cls = card.className || ''
-    const key = /\bpassed_partial\b/.test(cls) ? 'passed_partial'
-      : /\bejected\b/.test(cls) ? 'ejected' : /\bcancell?ed\b/.test(cls) ? 'cancelled'
-      : /\bblocked\b/.test(cls) ? 'blocked'
-      : /\bfailed\b/.test(cls) ? 'failed' : /\bpassed\b/.test(cls) ? 'passed' : null
-    if (key && !out[key]) out[key]={chip: chip?getComputedStyle(chip).color:null,
-                                    border: cs.borderLeftColor}
+for (const scheme of ["light", "dark"]) {
+  const page = await (await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+    colorScheme: scheme,
+  })).newPage();
+  await page.goto(`${URL}/#/queue`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1600);
+
+  const collapsed = await page.evaluate(() => {
+    const head = [...document.querySelectorAll(".section-head")]
+      .find((node) => /recent/i.test(node.textContent));
+    return head ? head.querySelector("button").getAttribute("aria-expanded") : null;
+  });
+  if (scheme === "light") check("recent starts collapsed", collapsed === "false", String(collapsed));
+
+  await page.evaluate(() => {
+    const head = [...document.querySelectorAll(".section-head")]
+      .find((node) => /recent/i.test(node.textContent));
+    if (head) head.querySelector("button").click();
+  });
+  await page.waitForTimeout(700);
+
+  const measured = await page.evaluate(() => {
+    const out = {};
+    for (const pill of document.querySelectorAll("#view .pill")) {
+      const meaning = ["run", "wait", "fail", "done", "pause"]
+        .find((name) => pill.classList.contains(name));
+      if (!meaning || out[meaning]) continue;
+      out[meaning] = {
+        dot: getComputedStyle(pill.querySelector(".dot")).backgroundColor,
+        text: getComputedStyle(pill).color,
+      };
+    }
+    for (const card of document.querySelectorAll(".ci-card")) {
+      const meaning = ["run", "wait", "fail", "done", "pause"]
+        .find((name) => card.classList.contains(name));
+      if (meaning && out[meaning]) out[meaning].edge = getComputedStyle(card).borderLeftColor;
+    }
+    return out;
+  });
+
+  for (const [meaning, want] of Object.entries(WANTED)) {
+    const found = measured[meaning];
+    const seen = found ? [hue(found.dot), hue(found.edge || found.dot)] : null;
+    check(`${scheme}: ${meaning} reads ${want}`,
+      Boolean(found) && seen.every((value) => value === want),
+      found ? `dot=${found.dot} edge=${found.edge} -> ${seen}` : "no record in this state");
   }
-  return out })
-for (const [state, want] of [['passed','green'],['passed_partial','amber'],
-                             ['failed','red'],['ejected','grey'],['cancelled','grey'],
-                             ['blocked','amber']]) {
-  const c = colors[state]
-  const got = c ? [hue(c.chip||''), hue(c.border||'')] : null
-  check(`${state} is ${want}`, !!c && !!got && got.every(g => g === want),
-        // Both, not either: chip alone passed while the border was red, which is how a
-        // colour regression hides behind a test that prints the value it does not check.
-        c ? `chip=${c.chip} border=${c.border} -> ${got}` : 'card not rendered')
+  await page.close();
 }
-await b.close()
-const bad=R.filter(r=>!r.p)
-console.log(`\nRESULT: ${R.length-bad.length}/${R.length} passed`)
-if (bad.length) process.exit(1)
+
+await browser.close();
+const failed = results.filter((result) => !result.passed);
+console.log(`\nRESULT: ${results.length - failed.length}/${results.length} passed`);
+if (failed.length) process.exit(1);

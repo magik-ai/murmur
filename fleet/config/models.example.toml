@@ -1,6 +1,6 @@
 # Fleet model catalog. Declarative: what models exist, what they're for, how to run them.
 # Mutable runtime state (enabled/disabled, last health check, measured limits) lives separately
-# in ~/.fleet/models-state.json and is set by `fleet models enable|disable|test` — so this file
+# in ~/.fleet/models-state.json and is set by `fleet models enable|disable|test`, so this file
 # stays a clean description and the toggles never rewrite it.
 #
 # Fields per [model]:
@@ -9,6 +9,8 @@
 #   role         when an orchestrator should pick it (the routing doctrine, one line)
 #   quality      short quality-vs-Opus note for the catalog
 #   caps         the subscription's real limits (so nobody is surprised)
+#                A note about what a plan is doing TODAY (an exhausted quota, an outage) is
+#                yours to keep in your own models.toml; nothing dated ships in this example.
 #   default_on   whether it starts enabled before anyone toggles it
 #   bin          (generic) the CLI binary
 #   auth_env     (generic) env var the headless CLI reads for its subscription credential
@@ -18,51 +20,51 @@
 
 [codex]
 color      = "#10A37F"
-label      = "Codex — GPT-5.6 Sol"
+label      = "Codex"
 engine     = "codex"
-role       = "frontier tier. QUOTA EXHAUSTED 08.08 — check before spawning; claude is the workhorse until it returns."
-quality    = "frontier (~Opus-class agentic)"
-caps       = "ChatGPT subscription; ran dry 08.08 — no longer the bottomless pool"
+role       = "frontier tier: architecture, security, migrations, anything where being wrong is expensive."
+quality    = "frontier, Opus-class on agentic work"
+caps       = "ChatGPT subscription; check the plan's own limits before leaning on it"
 default_on = true
 tos        = "first-party CLI on the ChatGPT subscription (auth_mode chatgpt)"
 
 [claude]
 color      = "#D97757"
-label      = "Claude Code — Claude 5 family"
-# every alias below verified headless on this farm; fable burns the weekly window
-# faster than opus and has its own scoped promo limit - watch it on the front page
-models     = "sonnet · opus · haiku · fable"
+label      = "Claude Code"
+# The pool is SHARED with your own interactive sessions. `fleet accounts` shows the live
+# headroom; spawn with --account auto to spread lanes across the accounts you have added.
+models     = "sonnet, opus, haiku"
 engine     = "claude"
-role       = "the workhorse while codex is out. Pool is SHARED with the owner's own sessions — `fleet accounts` shows live headroom; spawn with --account auto."
-quality    = "frontier — the bar (88.6% SWE-bench Verified)"
-caps       = "Claude Max subscription; limits visible via `fleet accounts`, spread across accounts with --account"
+role       = "the workhorse: most lanes, most of the time."
+quality    = "frontier"
+caps       = "Claude subscription; limits visible via `fleet accounts`"
 default_on = true
 tos        = "first-party CLI on the Anthropic OAuth subscription"
 
 [qwen]
 color      = "#7C5CFC"
-label      = "Qwen Code — Alibaba Coding Plan"
+label      = "Qwen Code"
 engine     = "generic"
 bin        = "qwen"
-role       = "BULK tier behind a review gate: long, mechanical, verifiable work (sweeps, test backfill, inventory, boilerplate). Never architecture/security/migrations/money."
-quality    = "~80% SWE-bench Verified (~8 pts under Opus) — Sonnet-adjacent; strong for well-specified grind"
-caps       = "$50 Pro: flat request-quota 90k/mo · 45k/wk · 6k per 5h. No per-token, no forced overage."
+role       = "BULK tier behind a review gate: long, mechanical, verifiable work (sweeps, test backfill, inventory, boilerplate). Never architecture, security, migrations or money."
+quality    = "a few points under the frontier tier; strong on well-specified grind"
+caps       = "flat request quota per month, week and five-hour window; no per-token billing"
 default_on = false
 auth_env   = "QWEN_CODE_API_KEY"
 run        = "{bin} -p {task} --output-format stream-json"
 health     = "Reply with exactly: OK"
-tos        = "LOW — Qwen Code ships a documented headless mode; the Coding Plan is sold for agentic/CI use."
+tos        = "LOW: a documented headless mode, and the plan is sold for agentic use."
 
 [kimi]
 color      = "#6D5AE6"
-label      = "Kimi Code — Kimi K3 (PREPARED, do not enable)"
+label      = "Kimi Code (PREPARED, do not enable)"
 engine     = "generic"
 bin        = "kimi"
-role       = "PREPARED ONLY. Its subscription ToS forbids non-interactive/scripted use (suspension risk) — see tos. Wired for completeness; keep OFF until a ToS-legal path exists."
-quality    = "vendor-only 76.8% SWE-V (3-days-old, no independent confirmation)"
-caps       = "Kimi Code plans $19–$199; shared weekly credit pool"
+role       = "PREPARED ONLY. Its subscription terms forbid non-interactive use, so a farm on that subscription risks suspension. Wired for completeness; keep OFF until a permitted path exists."
+quality    = "vendor figures only, no independent confirmation"
+caps       = "shared weekly credit pool"
 default_on = false
 auth_env   = "KIMI_API_KEY"
 run        = "{bin} -p {task} --output-format stream-json"
 health     = "Reply with exactly: OK"
-tos        = "HIGH / BLOCKED — 'subscriptions are for interactive use only'; scripted batch → account suspension. Do not run a headless fleet on the sub."
+tos        = "HIGH, BLOCKED: 'subscriptions are for interactive use only'; scripted batches risk account suspension. Do not run a headless fleet on that subscription."

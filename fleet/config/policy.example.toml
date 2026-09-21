@@ -1,27 +1,28 @@
 # Capacity policy for the fleet. Copy to ~/.config/fleet/policy.toml and tune.
 # The spawn guard BLOCKS a new agent if any hard limit is exceeded.
 #
-# Numbers are measured, not guessed: a codex worker idles at ~0.15GB, a vite build
-# peaks at ~1.3GB / 1.5 cores for ~8s. ~20 agents fit in 25GB with a 6GB floor and
-# 16GB swap. Past that the real limit is the subscription's usage pool, not the box.
+# These are starting points, not facts about your machine. An agent is cheap while it
+# thinks and expensive in short bursts (a front end build, a test run), so the floors
+# are there to leave room for several bursts at once. Measure: watch free memory while
+# the farm is busy, and take the throttle temperatures from your chips' documentation.
 [limits]
 ram_min_gb   = 6     # hard: block spawns when free RAM drops below this
 max_agents   = 20    # hard: never run more concurrent agents than this
-gpu_temp_max = 87    # hard: block if GPU hotter than this (C) — 5070 Ti throttles ~88-90
-cpu_temp_max = 92    # hard: block if CPU hotter than this (C) — 9800X3D throttles ~95
+gpu_temp_max = 87    # hard: block if GPU hotter than this (C), a little under throttling
+cpu_temp_max = 92    # hard: block if CPU hotter than this (C), a little under throttling
 
 warn_ram_gb   = 8    # soft: dashboard + orchestrator warn below this (above the hard floor)
 warn_agents   = 15
-warn_gpu_temp = 82   # normal under load 65-83; amber above
-warn_cpu_temp = 85   # normal under load 60-85; amber above
+warn_gpu_temp = 82   # amber above this; below it is normal under load
+warn_cpu_temp = 85   # amber above this; below it is normal under load
 
-# ── Power modes: hand CPU back to Windows when you use the PC ──────────────────
+# ── Power modes: hand the CPU back when you are using the machine ──────────────
 # `fleet mode auto|full|soft|balanced|hard`. The farm's agents live in a systemd
 # --user slice we cap live (no root, no restart). cpu_quota_pct = share of the WHOLE
 # machine; cpu_weight = scheduler share when not capped (100 = default, lower = yields);
 # allow_spawn = accept new agents. `auto` uses GPU load to pick full (idle) vs soft (gaming).
 [mode]
-auto_enter_gpu = 25   # GPU util % that reads as "a game is running" -> throttle to soft
+auto_enter_gpu = 25   # GPU util % that reads as "someone is using this box" -> soft
 auto_exit_gpu  = 10   # ...and below this...
 auto_exit_hold = 60   # ...for this many seconds -> back to full (hysteresis, no yo-yo)
 
@@ -29,7 +30,7 @@ auto_exit_hold = 60   # ...for this many seconds -> back to full (hysteresis, no
 cpu_quota_pct = 0     # 0 here means "uncapped" (a real 0% would freeze it)
 cpu_weight    = 100
 allow_spawn   = true
-[mode.soft]     # yields to a foreground game but KEEPS working — what auto picks
+[mode.soft]     # yields to what you are doing but KEEPS working; what auto picks
 cpu_quota_pct = 50
 cpu_weight    = 40
 allow_spawn   = true
@@ -37,7 +38,7 @@ allow_spawn   = true
 cpu_quota_pct = 35
 cpu_weight    = 20
 allow_spawn   = false
-[mode.hard]     # near-frozen; for a game that wants every frame
+[mode.hard]     # near-frozen; for work that wants the whole machine
 cpu_quota_pct = 20
 cpu_weight    = 10
 allow_spawn   = false
@@ -55,6 +56,12 @@ allow_spawn   = false
 [identity]
 author_format = "{agent} (agent)"
 # email_format = "you+{agent}@example.com"
+
+# The mark a new code name is given on first sight: one glyph and one colour, held in
+# $FLEET_CONFIG/codenames.json from then on, so every agent an orchestrator spawns
+# carries the same mark. Uncomment to use your own set instead of the shipped one.
+# glyphs  = ["●", "■", "▲", "◆"]
+# colours = ["#5b8def", "#3fb950", "#d29922", "#a371f7"]
 
 # ── Head office (agent-hq), optional ──────────────────────────────────────────
 # A cross-agent coordination layer: one claim per branch, a pre-push guard that refuses

@@ -13,7 +13,10 @@ import shutil
 import subprocess
 import time
 
-FLEET_HOME = os.environ.get("FLEET_HOME", os.path.expanduser("~/work/fleet"))
+# The checkout this file belongs to, so a clone anywhere works without being told where it is.
+# FLEET_HOME still wins, which is how `bin/fleet` passes its own resolved home down.
+FLEET_HOME = os.environ.get("FLEET_HOME") or os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
 CONFIG = os.path.expanduser(os.path.join(os.environ.get("FLEET_CONFIG", "~/.config/fleet"),
                                          "models.toml"))
 EXAMPLE = os.path.join(FLEET_HOME, "config", "models.example.toml")
@@ -107,7 +110,7 @@ def health_check(mid):
         return "fail", f"{binp} not installed on the farm", ""
     auth_env = m.get("auth_env", "")
     if auth_env and not os.environ.get(auth_env) and not _model_secret(mid):
-        return "fail", f"no credential — set {auth_env} (fleet models auth {mid})", ""
+        return "fail", f"no credential: set {auth_env} (fleet models auth {mid})", ""
     prompt = m.get("health", "Reply with exactly: OK")
     run = m.get("run", "{bin} -p {task}")
     cmd = run.replace("{bin}", binp).replace("{task}", _shquote(prompt))
@@ -212,7 +215,7 @@ if __name__ == "__main__":
     elif a[0] == "routable":
         m = effective(a[1]); print("yes" if (m and m["routable"]) else "no")
     elif a[0] == "launchspec":
-        # TAB-separated bin, auth_env, run-template, secret-path — consumed by the launcher's
+        # TAB-separated bin, auth_env, run-template, secret-path, consumed by the launcher's
         # generic engine path. Only meaningful for engine=generic models.
         m = effective(a[1])
         if m:

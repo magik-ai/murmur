@@ -81,6 +81,12 @@ Turning a local farm into a delivery path is a separate, deliberate decision.
 It needs published statuses, and then exactly one writer per check name, never
 two systems reporting one context in parallel.
 
+If your farm runs a web dashboard, its Queue tab is where all of this becomes
+visible: one row per change, the stage that is currently running, and the same
+"a farm verdict can differ from the hosted one" explanation spelled out on
+screen instead of buried in a log. The tab reports what the farm found. It
+still has no vote.
+
 ## A merge is a deployment
 
 On a project that ships from its main branch, a merge reaches production in

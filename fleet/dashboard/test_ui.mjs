@@ -1,652 +1,607 @@
+/* The front end's contract, checked without a browser: the shape of the page, the shape of
+   every module, and the shape of every route the page reads. It starts the stub itself, so a
+   green reading here is a reading against the same fixtures the browser check uses. */
+
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { tokens, parseColour, contrast } from "./test_palette.mjs";
 
-const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
-const script = html.match(/<script>([\s\S]*)<\/script>/)[1];
-const cardSource = script.slice(
-  script.indexOf("let CI_STAGE_OPEN"),
-  script.indexOf("function renderCI"),
-);
-const { ciCard, ciDetail, ciHasRecords, ciLogKey, ciLogs } = new Function(
-  "esc",
-  "span",
-  `${cardSource}; return {ciCard,ciDetail,ciHasRecords,ciLogKey,ciLogs:CI_LOGS};`,
-)(
-  (value) =>
-    String(value ?? "").replace(/[&<]/g, (character) =>
-      character === "&" ? "&amp;" : "&lt;",
-    ),
-  (seconds) => `${Math.floor(Number(seconds) || 0)}s`,
-);
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT || 7951);
+const BASE = `http://127.0.0.1:${PORT}`;
 
-const sample = {
-  pr: 3210,
-  repo: "your-org/demo",
-  branch: "feat/local-ci",
-  tier: "backend",
-  started: Date.now() / 1000 - 80,
-  enqueued: Date.now() / 1000 - 400,
-  tiers: [
-    { name: "frontend", state: "passed" },
-    { name: "backend", state: "running" },
-    { name: "docker", state: "pending" },
-  ],
-  uncovered: ["visual parity"],
-};
+const EM_DASH = String.fromCharCode(8212);
+const read = (relative) => fs.readFileSync(path.join(HERE, relative), "utf8");
 
-assert.match(ciCard({ ...sample, state: "running" }, "running"), /running/);
-assert.match(
-  ciCard({ ...sample, state: "queued", position: 2 }, "queued"),
-  /position 2/,
-);
-assert.match(
-  ciCard({ ...sample, state: "passed", ended: Date.now() / 1000 }, "recent"),
-  /passed/,
-);
-
-const verdictCards = Object.fromEntries(
-  [
-    ["passed", []],
-    ["passed_partial", ["visual parity", "hosted browser"]],
-    ["failed", []],
-    ["conflict", []],
-    ["ejected", []],
-    ["cancelled", []],
-  ].map(([state, uncovered]) => [
-    state,
-    ciCard(
-      {
-        ...sample,
-        state,
-        uncovered,
-        reason:
-          state === "passed_partial"
-            ? "merge verified with hosted-only gates"
-            : undefined,
-      },
-      "recent",
-    ),
-  ]),
-);
-assert.match(verdictCards.passed, /class="ci-card passed\b/);
-assert.match(verdictCards.passed, /class="tierline passed"/);
-assert.match(verdictCards.passed_partial, /class="ci-card passed_partial\b/);
-assert.match(verdictCards.passed_partial, /class="tierline passed_partial"/);
-assert.match(
-  verdictCards.passed_partial,
-  /<div class="cireason partial"><b>2 uncovered<\/b>/,
-);
-assert.match(verdictCards.failed, /class="ci-card failed failure-code\b/);
-assert.match(verdictCards.conflict, /class="ci-card conflict failure-conflict\b/);
-assert.match(verdictCards.ejected, /class="ci-card ejected\b/);
-assert.doesNotMatch(verdictCards.ejected, /\bfailure-/);
-assert.match(verdictCards.cancelled, /class="ci-card cancelled\b/);
-assert.doesNotMatch(verdictCards.cancelled, /\bfailure-/);
-
-const failureRecord = {
-  ...sample,
-  id: "ci-3210-failed",
-  state: "failed",
-  failure_kind: "environment",
-  reason: "failed tier(s): frontend",
-  base_sha: "base123",
-  merge_sha: "merge456",
-  tiers: [
-    { name: "backend", state: "passed", started: 100, ended: 130 },
-    {
-      name: "frontend",
-      state: "failed",
-      started: 130,
-      ended: 160,
-      failure_kind: "environment",
-      detail: "runner image is unavailable",
-      log: "/tmp/fleet/ci/frontend.log",
-    },
-    {
-      name: "docker",
-      state: "skipped",
-      failure_kind: null,
-      detail: "paths unchanged",
-    },
-  ],
-  failed_tests: [
-    {
-      tier: "frontend",
-      test: "e2e/queue.spec.js:12 › shows a failure",
-      log: "/tmp/fleet/ci/frontend.log",
-    },
-  ],
-};
-const failure = ciCard(failureRecord, "recent", failureRecord.id, false);
-assert.match(failure, /failure-environment/);
-assert.match(failure, /runner image is unavailable/);
-assert.match(failure, /<b>frontend<\/b>/);
-assert.match(failure, /role="button" tabindex="0"/);
-assert.match(failure, /aria-expanded="false"/);
-assert.doesNotMatch(failure, /e2e\/queue\.spec\.js:12/);
-assert.doesNotMatch(failure, /\/tmp\/fleet\/ci\/frontend\.log/);
-assert.doesNotMatch(failure, /visual parity/);
-assert.doesNotMatch(failure, /<details/);
-
-ciLogs[ciLogKey(failureRecord.id, "frontend")] = {
-  status: "loaded",
-  payload: {
-    content: "FAIL queue.spec.js\nexpected compact card",
-    truncated: false,
-  },
-};
-const failureDetail = ciDetail(
-  failureRecord,
-  "recent",
-  failureRecord.id,
-);
-const failureExpanded = ciCard(
-  failureRecord,
-  "recent",
-  failureRecord.id,
-  true,
-);
-assert.match(failureDetail, /base123 → merge456/);
-assert.match(failureDetail, /<details class="cistage passed"/);
-assert.match(failureDetail, /<details class="cistage failed"/);
-assert.match(failureDetail, /<details class="cistage skipped"/);
-assert.match(failureDetail, /e2e\/queue\.spec\.js:12/);
-assert.match(failureDetail, /FAIL queue\.spec\.js/);
-assert.doesNotMatch(failureDetail, /\/tmp\/fleet\/ci\/frontend\.log/);
-assert.match(failureDetail, /Hosted gates not covered/);
-assert.match(failureDetail, /visual parity/);
-assert.match(failureDetail, /skipped — paths unchanged/);
-assert.match(failureExpanded, /class="ci-card failed failure-environment expanded"/);
-assert.match(failureExpanded, /aria-expanded="true"/);
-assert.match(failureExpanded, /e2e\/queue\.spec\.js:12/);
-assert.match(failureExpanded, /FAIL queue\.spec\.js/);
-assert.doesNotMatch(failureExpanded, /modalp|aria-modal/);
-
-const runningDetail = ciDetail(
-  {
-    ...sample,
-    id: "ci-3210-running",
-    state: "running",
-    tiers: sample.tiers.map((tier) =>
-      tier.name === "backend"
-        ? { ...tier, started: Date.now() / 1000 - 80 }
-        : tier,
-    ),
-  },
-  "running",
-  "ci-3210-running",
-);
-assert.match(runningDetail, /<details class="cistage running"/);
-assert.match(runningDetail, /<span class="stagedesc">running<\/span>/);
-assert.match(runningDetail, /<span class="stageduration">\d+s<\/span>/);
-
-const queuedDetail = ciDetail(
-  {
-    id: "ci-3211-queued",
-    pr: 3211,
-    repo: "your-org/demo",
-    branch: "feat/waiting",
-    state: "queued",
-    enqueued: Date.now() / 1000 - 30,
-  },
-  "queued",
-);
-for (const stage of ["backend", "frontend", "docker"]) {
-  assert.match(
-    queuedDetail,
-    new RegExp(`<span class="stagename">${stage}<\\/span>[\\s\\S]*?queued`),
-  );
+let passed = 0;
+function ok(name, body) {
+  body();
+  passed += 1;
+  console.log(`PASS  ${name}`);
+}
+async function okAsync(name, body) {
+  await body();
+  passed += 1;
+  console.log(`PASS  ${name}`);
 }
 
-const skippedBeforeEnvironmentFailure = ciCard(
-  {
-    ...sample,
-    state: "failed",
-    reason: "failed tier(s): frontend",
-    tiers: [
-      {
-        name: "backend",
-        state: "skipped",
-        failure_kind: null,
-        detail: "paths unchanged",
-      },
-      {
-        name: "frontend",
-        state: "failed",
-        failure_kind: "environment",
-        detail: "test database is unreachable",
-      },
-      { name: "docker", state: "skipped", failure_kind: null },
-    ],
-  },
-  "recent",
-);
-assert.match(skippedBeforeEnvironmentFailure, /failure-environment/);
-assert.match(
-  skippedBeforeEnvironmentFailure,
-  /<span class="failurekind environment">environment<\/span>/,
-);
-assert.doesNotMatch(skippedBeforeEnvironmentFailure, /failure-code/);
+/* ------------------------------------------------------------- the page */
 
-const legacyPassed = ciCard(
-  { ...sample, state: "passed", ended: Date.now() / 1000 },
-  "recent",
-);
-assert.doesNotMatch(legacyPassed, /\bstale\b|\bdivergent\b|ciflags/);
-assert.equal(
-  ciCard(
-    {
-      ...sample,
-      state: "passed",
-      stale: false,
-      divergent: false,
-      ended: Date.now() / 1000,
-    },
-    "recent",
-  ),
-  legacyPassed,
-);
+const html = read("index.html");
 
-const stalePassed = ciCard(
-  {
-    ...sample,
-    state: "passed",
-    stale: true,
-    ended: Date.now() / 1000,
-  },
-  "recent",
-);
-assert.notEqual(stalePassed, legacyPassed);
-assert.match(stalePassed, /class="ci-card passed stale"/);
-assert.match(stalePassed, /class="ciflag stale">stale base<\/span>/);
+ok("the page is a shell, not an application", () => {
+  assert.ok(html.split("\n").length < 100, "index.html must stay under a hundred lines");
+  const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)];
+  assert.equal(scripts.length, 1, "only the pre-paint theme script may be inline");
+  assert.ok(scripts[0][1].includes("data-theme"), "the inline script sets the theme before paint");
+  assert.ok(scripts[0][1].split("\n").length < 12, "the inline script stays a handful of lines");
+  assert.match(html, /<script type="module" src="\/static\/app\.js">/);
+  assert.match(html, /<link rel="stylesheet" href="\/static\/app\.css">/);
+});
 
-const divergent = ciCard(
-  {
-    ...sample,
-    state: "passed",
-    divergent: true,
-    farm_verdict: "passed",
-    github_verdict: "failed",
-    ended: Date.now() / 1000,
-  },
-  "recent",
-);
-assert.match(divergent, /class="ci-card passed divergent"/);
-assert.match(
-  divergent,
-  /verdict divergence · farm: passed · GitHub: failed/,
-);
-assert.doesNotMatch(divergent, /class="ci-card (?:failed|failure-code)/);
-const observedVerdicts = ciDetail(
-  {
-    ...sample,
-    state: "passed",
-    stale: true,
-    stale_reason: "verified against main@old, now main@new",
-    divergent: true,
-    farm_verdict: "passed",
-    hosted_verdict: "failed",
-  },
-  "recent",
-);
-assert.match(observedVerdicts, /Stale verdict/);
-assert.match(observedVerdicts, /verified against main@old, now main@new/);
-assert.match(observedVerdicts, /Divergent verdict/);
-assert.match(observedVerdicts, /farm reported passed while GitHub reported failed/);
-assert.equal(ciHasRecords([], [], []), false);
-assert.equal(ciHasRecords([], [], [{ state: "passed" }]), true);
-
-// Keep the accessibility and persistence contract executable without adding a
-// browser dependency to this stdlib-only dashboard.
-assert.match(html, /html,body\{height:100%;overflow:hidden\}/);
-assert.match(
-  html,
-  /\.pane\{[^}]*overflow-y:auto;overflow-x:hidden;[^}]*\}/,
-);
-assert.match(
-  html,
-  /--pane-min-w:calc\(var\(--card-w\) \+ 2 \* var\(--pane-gutter\) \+ var\(--pane-scrollbar-w\)\)/,
-);
-assert.match(
-  html,
-  /\.cards,\.ci-grid\{[^}]*minmax\(min\(100%,var\(--card-w\)\),1fr\)/,
-);
-assert.match(html, /#fleetview\{display:flex;flex-direction:column\}/);
-assert.match(html, /\.fleet-split\{flex:1 1 auto;min-height:0;/);
-assert.match(html, /\.fleet-split\.stacked\{flex-direction:column\}/);
-assert.match(
-  html,
-  /\.ci-card\.passed_partial\{border-left-color:var\(--warn\)\}/,
-);
-assert.match(
-  html,
-  /\.ci-card\.divergent\{[^}]*border-color:var\(--divergent\)/,
-);
-assert.match(
-  html,
-  /\.ci-card\.failed,\.ci-card\.conflict\{border-left-color:var\(--block\)\}/,
-);
-assert.match(
-  html,
-  /\.ci-card\.ejected,\.ci-card\.cancelled\{border-left-color:var\(--dim\)\}/,
-);
-assert.match(
-  html,
-  /\.ci-card\.passed \.cistate\{color:var\(--ok\)\}/,
-);
-assert.match(
-  html,
-  /\.ci-card\.passed_partial \.cistate\{color:var\(--warn\)\}/,
-);
-assert.match(
-  html,
-  /\.ci-card\.failed \.cistate,\.ci-card\.conflict \.cistate\{color:var\(--block\)\}/,
-);
-assert.match(
-  html,
-  /\.ci-card\.ejected \.cistate,\.ci-card\.cancelled \.cistate\{color:var\(--dim\)\}/,
-);
-assert.match(
-  html,
-  /\.tierline\.passed_partial \.tier\.passed[^}]*color:var\(--warn\)/,
-);
-assert.match(html, /\.tier\.passed,\.tier\.pass\{color:var\(--ok\)\}/);
-assert.match(html, /\.tier\.failed,\.tier\.fail\{color:var\(--block\)\}/);
-assert.match(
-  html,
-  /\.tierline\.ejected \.tier,\.tierline\.cancelled \.tier\{color:var\(--dim\)/,
-);
-assert.match(
-  html,
-  /\.card\.state_unreadable \.st\{color:var\(--block\)\}/,
-);
-assert.match(
-  script,
-  /s\.status==='state_unreadable'\?`<div class="alarm">⚠ state unreadable · liveness unknown<\/div>`/,
-);
-assert.match(
-  html,
-  /id="ciRecentToggle"[^>]*type="button"[^>]*aria-expanded="false"[^>]*aria-controls="ciRecent"/,
-);
-assert.match(html, /<div class="ci-grid" id="ciRecent" hidden><\/div>/);
-assert.match(
-  html,
-  /id="ciRunningSection" hidden>\s*<h3>Running[\s\S]*?id="ciQueuedSection" hidden>\s*<h3>Queued/,
-);
-assert.match(
-  html,
-  /class="splitter"[^>]*role="separator"/,
-);
-assert.match(html, /class="splitter"[^>]*tabindex="0"/);
-assert.match(html, /class="splitter"[^>]*aria-orientation="vertical"/);
-assert.match(script, /localStorage\.setItem\(SPLIT_KEY/);
-assert.match(script, /localStorage\.setItem\(RECENT_KEY/);
-assert.match(script, /e\.key==='Home'/);
-assert.match(script, /e\.key==='End'/);
-assert.match(script, /\$\('ciPane'\)\.addEventListener\('keydown'/);
-assert.match(script, /e\.key!=='Enter'&&e\.key!==' '/);
-assert.match(script, /e\.key!=='Escape'/);
-assert.match(script, /get\('\/api\/ci\/log\?id='/);
-assert.match(script, /addEventListener\('dblclick'/);
-assert.match(script, /addEventListener\('pointerdown'/);
-assert.match(script, /g\.available<2\*g\.min/);
-assert.match(
-  html,
-  // metrics, then the Anthropic subscription strip (its own labelled row - these numbers
-  // describe the vendor, not the machine), then the split panes
-  /<div id="fleetview">\s*<div class="health" id="health"><\/div>\s*<div class="health" id="acctrow" hidden><\/div>\s*<div class="fleet-split" id="fleetSplit">/,
-);
-assert.match(
-  html,
-  /<div class="fleet-split" id="fleetSplit">\s*<section class="pane agents-pane"[\s\S]*?<div class="splitter"[\s\S]*?<section class="pane ci-pane"/,
-);
-
-function recentHarness(saved) {
-  const storage = new Map();
-  if (saved !== undefined) {
-    storage.set("fleet.dashboard.ci.recent.open.v1", saved);
+ok("the page carries the chrome the views expect", () => {
+  for (const id of ["sidebar", "navlinks", "topbar", "productTitle", "viewTitle", "capacity",
+    "projectFilter", "freshness", "themeSwitch", "paletteOpen", "palette", "paletteInput",
+    "paletteList", "view", "drawer", "drawerTitle", "drawerBody", "drawerScrim", "toasts",
+    "favicon", "sidebarTitle"]) {
+    assert.ok(html.includes(`id="${id}"`), `index.html is missing #${id}`);
   }
-  const localStorage = {
-    getItem: (key) => storage.get(key) ?? null,
-    setItem: (key, value) => storage.set(key, String(value)),
-  };
-  const end = script.indexOf("// RECENT_TOGGLE_END");
-  assert.ok(end > 0, "index.html lost its RECENT_TOGGLE_END marker");
-  const recentSource = script.slice(script.indexOf("const RECENT_KEY"), end);
-  const api = new Function(
-    "localStorage",
-    "renderCI",
-    `${recentSource}; return {
-      isOpen:()=>RECENT_OPEN,
-      setRecentOpen,
-      storedRecentOpen,
-      key:RECENT_KEY,
-    };`,
-  )(localStorage, () => {});
-  return { ...api, storage };
-}
+  const shell = read("static/app.js");
+  for (const choice of ["system", "light", "dark"]) {
+    assert.ok(new RegExp(`\\["${choice}"`).test(shell), `the theme control cannot reach ${choice}`);
+  }
+  assert.ok(html.includes("murmur"), "the fallback product name is murmur");
+});
 
-{
-  const firstLoad = recentHarness();
-  assert.equal(firstLoad.isOpen(), false);
-  firstLoad.setRecentOpen(true);
-  assert.equal(firstLoad.storage.get(firstLoad.key), "open");
-  const reload = recentHarness(firstLoad.storage.get(firstLoad.key));
-  assert.equal(reload.isOpen(), true);
-  reload.setRecentOpen(false);
-  assert.equal(reload.storage.get(reload.key), "closed");
-}
+/* ------------------------------------------------------------- the files */
 
-function splitHarness(saved = "0.6900000000000001") {
-  const listeners = new Map();
-  const classes = () => {
-    const values = new Set();
-    return {
-      add: (...names) => names.forEach((name) => values.add(name)),
-      remove: (...names) => names.forEach((name) => values.delete(name)),
-      contains: (name) => values.has(name),
-      toggle(name, force) {
-        const on = force === undefined ? !values.has(name) : force;
-        if (on) values.add(name);
-        else values.delete(name);
-        return on;
-      },
-    };
-  };
-  const rootStyle = new Map();
-  const root = {
-    style: {
-      setProperty: (name, value) => rootStyle.set(name, value),
-    },
-  };
-  const fleetSplit = {
-    classList: classes(),
-    clientLeft: 1,
-    clientWidth: 1358,
-    getBoundingClientRect() {
-      return { left: 20, width: this.clientWidth + 2 };
-    },
-  };
-  const ciPane = {
-    style: {},
-    offsetWidth: 600,
-    clientWidth: 585,
-  };
-  const agentsPane = {
-    style: { flexBasis: "" },
-    offsetWidth: 600,
-    clientWidth: 585,
-  };
-  const splitter = {
-    classList: classes(),
-    attributes: new Map(),
-    addEventListener: (name, handler) => listeners.set(name, handler),
-    setAttribute(name, value) {
-      this.attributes.set(name, value);
-    },
-    setPointerCapture() {},
-    getBoundingClientRect() {
-      const available = fleetSplit.clientWidth - 10;
-      const basis =
-        Number.parseFloat(agentsPane.style.flexBasis) || available * 0.42;
-      return { left: 20 + fleetSplit.clientLeft + basis, width: 10 };
-    },
-  };
-  const elements = { fleetSplit, ciPane, agentsPane, splitter };
-  const body = { classList: classes() };
-  const document = { body, documentElement: root };
-  const window = { addEventListener() {} };
-  const storage = new Map([["fleet.dashboard.split.v1", saved]]);
-  const localStorage = {
-    getItem: (key) => storage.get(key) ?? null,
-    setItem: (key, value) => storage.set(key, String(value)),
-  };
-  const getComputedStyle = (element) => {
-    if (element === root) {
-      return {
-        getPropertyValue(name) {
-          return (
-            rootStyle.get(name) ??
-            {
-              "--card-w": "260px",
-              "--pane-gutter": "16px",
-              "--splitter-hit": "10px",
-            }[name] ??
-            ""
-          );
-        },
-      };
+const REQUIRED_FILES = [
+  "static/app.css", "static/app.js",
+  "static/core/api.js", "static/core/ui.js", "static/core/fmt.js", "static/core/identity.js",
+  "static/views/overview.js", "static/views/agents.js", "static/views/mail.js",
+  "static/views/queue.js", "static/views/projects.js", "static/views/accounts.js",
+  "static/views/system.js",
+];
+
+ok("every file the design record names exists", () => {
+  for (const relative of REQUIRED_FILES) {
+    assert.ok(fs.existsSync(path.join(HERE, relative)), `missing ${relative}`);
+  }
+});
+
+ok("nothing outside the api module talks to the network", () => {
+  for (const relative of REQUIRED_FILES) {
+    if (relative.endsWith("core/api.js") || relative.endsWith(".css")) continue;
+    const source = read(relative);
+    for (const forbidden of ["fetch(", "new WebSocket", "new EventSource", "XMLHttpRequest"]) {
+      assert.ok(!source.includes(forbidden), `${relative} performs its own ${forbidden}`);
     }
-    return { borderLeftWidth: "0px", borderRightWidth: "0px" };
-  };
-  const splitSource = script.slice(
-    script.indexOf("// Resizable canvas."),
-    script.indexOf("let VER=null;"),
-  );
-  const api = new Function(
-    "$",
-    "document",
-    "window",
-    "localStorage",
-    "getComputedStyle",
-    `${splitSource}; return {
-      applySplit,
-      paneMin,
-      splitGeometry,
-      DEFAULT_SPLIT,
-      getRatio:()=>splitRatio,
-    };`,
-  )(
-    (id) => elements[id],
-    document,
-    window,
-    localStorage,
-    getComputedStyle,
-  );
+  }
+});
 
-  function fire(name, clientX, pointerId = 1) {
-    const handler = listeners.get(name);
-    assert.ok(handler, `missing ${name} handler`);
-    handler({
-      type: name,
-      clientX,
-      pointerId,
-      preventDefault() {},
+ok("no file carries an em dash", () => {
+  for (const relative of ["index.html", "test_stub_server.py", "test_screens.mjs", ...REQUIRED_FILES]) {
+    assert.ok(!read(relative).includes(EM_DASH), `${relative} contains an em dash`);
+  }
+});
+
+/* -------------------------------------------------------------- the css */
+
+const css = read("static/app.css");
+
+ok("the theme is defined three times and nowhere else", () => {
+  assert.match(css, /^:root \{/m, "the light palette sits on :root");
+  assert.match(css, /@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{/);
+  assert.match(css, /^:root\[data-theme="dark"\] \{/m);
+  assert.match(css, /@supports \(color: oklch\(/, "wide gamut refines the sRGB fallback");
+  assert.match(css, /body \{[\s\S]*background: var\(--bg\)/, "body paints its own background");
+});
+
+ok("every colour in the stylesheet is a token", () => {
+  const stray = [];
+  css.split("\n").forEach((line, index) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("--") || trimmed.startsWith("@supports") || trimmed.startsWith("/*")) return;
+    if (/#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(|hsla?\(/.test(trimmed)) stray.push(`${index + 1}: ${trimmed}`);
+  });
+  assert.deepEqual(stray, [], `a colour literal escaped the token blocks:\n${stray.join("\n")}`);
+});
+
+ok("the measurements the record fixes are tokens", () => {
+  assert.match(css, /--control: 32px/);
+  assert.match(css, /--radius: 8px/);
+  assert.match(css, /--head: 40px/);
+  assert.match(css, /ui-monospace/);
+  assert.match(css, /font-variant-numeric: tabular-nums/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /\[hidden\] \{ display: none !important; \}/);
+});
+
+ok("every colour a reader has to read passes AA in both themes", () => {
+  // Nothing here is large text: the smallest of it is eleven pixels, so 4.5 is the bar.
+  const TEXT = ["text", "text-dim", "text-faint", "accent",
+    "tone-run", "tone-wait", "tone-fail", "tone-done", "tone-pause"];
+  const BEHIND = ["surface", "surface-2", "bg"];
+  const thin = [];
+  for (const gamut of ["srgb", "oklch"]) {
+    for (const theme of ["light", "dark"]) {
+      const palette = tokens(theme, gamut);
+      for (const front of TEXT) {
+        for (const behind of BEHIND) {
+          const one = parseColour(palette[front]);
+          const other = parseColour(palette[behind]);
+          assert.ok(one && other, `${gamut} ${theme}: --${front} or --${behind} is missing`);
+          const ratio = contrast(one, other);
+          if (ratio < 4.5) thin.push(`${gamut} ${theme} --${front} on --${behind}: ${ratio.toFixed(2)}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(thin, [], `text that cannot be read:\n${thin.join("\n")}`);
+});
+
+ok("the sidebar really collapses at the two widths the record names", () => {
+  const narrow = css.match(/@media \(max-width: 900px\) \{([\s\S]*?)\n\}/);
+  const phone = css.match(/@media \(max-width: 600px\) \{([\s\S]*?)\n\}/);
+  assert.ok(narrow, "there is no rule for the icons-only width");
+  assert.ok(phone, "there is no rule for the phone width");
+  assert.match(narrow[1], /--sidebar: \d+px/, "the sidebar does not narrow");
+  assert.match(narrow[1], /\.navlink span\.label[\s\S]*display: none/, "the labels do not go away");
+  assert.match(narrow[1], /\.navlink \{[^}]*min-width: (\d\d)px/, "a link becomes smaller than a fingertip");
+  const tap = Number(narrow[1].match(/\.navlink \{[^}]*min-width: (\d+)px/)[1]);
+  assert.ok(tap >= 24, `a navigation target is ${tap}px wide`);
+  assert.match(phone[1], /grid-template-areas: "top" "side" "view"/, "the sidebar does not move to the top");
+});
+
+ok("every movement respects a reader who asked for less of it", () => {
+  const durations = [...css.matchAll(/transition:[^;]*?(\d+)(ms|s)\b/g)].map((found) => found[0]);
+  assert.deepEqual(durations, [],
+    `a transition names its own duration instead of the token:\n${durations.join("\n")}`);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*:root \{ --motion: 1ms; \}/);
+});
+
+/* ---------------------------------------------------------- the modules */
+
+const fmt = await import("./static/core/fmt.js");
+const ui = await import("./static/core/ui.js");
+const identity = await import("./static/core/identity.js");
+const api = await import("./static/core/api.js");
+
+ok("times and sizes read the way a person says them", () => {
+  const now = 1_000_000;
+  assert.equal(fmt.ago(now - 10, now), "just now");
+  assert.equal(fmt.ago(now - 600, now), "10m ago");
+  assert.equal(fmt.ago(null), "not known");
+  assert.equal(fmt.duration(3700), "1h 1m");
+  assert.equal(fmt.duration(90061), "1d 1h");
+  assert.equal(fmt.until(now + 300, now), "in 5m");
+  assert.equal(fmt.bytes(1536), "1.5 KB");
+  assert.equal(fmt.num(1234567), "1,234,567");
+  assert.equal(fmt.money(1.5), "$1.50");
+  assert.equal(fmt.percent(71), "71%");
+  assert.equal(fmt.num(null), "none");
+  assert.equal(fmt.shorten("one two three four", 9), "one two…");
+});
+
+ok("status has five meanings and only five", () => {
+  assert.deepEqual(Object.keys(ui.MEANINGS), ["run", "wait", "fail", "done", "pause"]);
+  const raw = ["running", "starting", "pr_open", "done_no_pr", "done", "ended", "failed",
+    "killed", "gave_up", "state_unreadable", "paused", "held", "", null, "something new"];
+  for (const status of raw) {
+    assert.ok(ui.MEANINGS[ui.agentMeaning(status)], `${status} lands outside the five meanings`);
+  }
+  assert.equal(ui.agentMeaning("running"), "run");
+  assert.equal(ui.agentMeaning("pr_open"), "wait");
+  assert.equal(ui.agentMeaning("state_unreadable"), "fail");
+  assert.equal(ui.agentMeaning("done"), "done");
+  assert.equal(ui.agentMeaning("held"), "pause");
+  for (const state of ["passed", "failed", "queued", "running", "conflict", "blocked", "anything"]) {
+    assert.ok(ui.MEANINGS[ui.queueMeaning(state)], `${state} lands outside the five meanings`);
+  }
+});
+
+ok("only a real web address is rendered as a link", () => {
+  for (const good of ["https://example.invalid/demo/pull/1", "http://127.0.0.1:8080/x?y=1"]) {
+    assert.equal(typeof ui.safeHref(good), "string", good);
+  }
+  for (const bad of ["javascript:window.__pwn=1", "JavaScript:alert(1)", "data:text/html,<b>x",
+    "vbscript:x", "//example.invalid/x", "/api/fleet", "", null, undefined, 12, "ftp://host/x"]) {
+    assert.equal(ui.safeHref(bad), null, `${bad} must not become a link`);
+  }
+});
+
+/** Every word a tree would put on the screen, so a check can read what a reader would read. */
+function words(node) {
+  if (node == null || node === false) return "";
+  if (Array.isArray(node)) return node.map(words).join(" ");
+  if (typeof node !== "object") return String(node);
+  if (node.text != null) return node.text;
+  return (node.children || []).map(words).join(" ");
+}
+
+/** The tags a tree uses, so a check can tell a command apart from a sentence about one. */
+function tags(node, found = []) {
+  if (node == null || typeof node !== "object") return found;
+  if (Array.isArray(node)) {
+    for (const child of node) tags(child, found);
+    return found;
+  }
+  if (node.tag) found.push(`${node.tag}.${node.props.class || ""}`);
+  for (const child of node.children || []) tags(child, found);
+  return found;
+}
+
+ok("an empty panel and an error panel both print the command they name", () => {
+  const empty = ui.emptyState({
+    title: "No projects yet",
+    body: "A project tells the farm which repository a lane may work in.",
+    command: "fleet add-project --name <name> --repo <owner>/<repo>",
+  });
+  assert.equal(empty.tag, "div");
+  assert.equal(empty.props.class, "state-note");
+  assert.match(words(empty), /No projects yet/);
+  assert.match(words(empty), /fleet add-project --name <name> --repo <owner>\/<repo>/);
+  assert.ok(tags(empty).includes("code.cmd"), "the command is not written as a command");
+
+  const error = ui.errorState({
+    title: "gh is not installed",
+    body: "Checks on a change cannot be read without it.",
+    command: "sudo apt install gh",
+  });
+  assert.equal(error.props.class, "state-note error");
+  assert.match(words(error), /sudo apt install gh/);
+  assert.ok(tags(error).includes("code.cmd"));
+
+  // A panel with nothing to suggest must not invent a command line for the reader to copy.
+  const quiet = ui.emptyState({ title: "Nothing here", body: "", command: "" });
+  assert.ok(!tags(quiet).includes("code.cmd"), "an empty command still drew a command line");
+});
+
+ok("the four states are decided in one place, and each of them draws something", () => {
+  const waiting = { path: "/api/x", everLoaded: false, error: null, data: null };
+  const failed = { path: "/api/x", everLoaded: false, error: { title: "gh could not answer", body: "one line", command: "sudo apt install gh" } };
+  const missing = { path: "/api/x", everLoaded: true, data: { unavailable: "No head office is configured.", fix: "hq init" } };
+  const waking = { path: "/api/x", everLoaded: true, data: { pending: "2026-09-21T00:00:00Z", boxes: [] } };
+  const empty = { path: "/api/x", everLoaded: true, data: [] };
+  const ready = { path: "/api/x", everLoaded: true, data: ["one"] };
+  const options = {
+    isEmpty: (data) => !api.list(data).length,
+    empty: () => ui.emptyState({ title: "Nothing yet", body: "", command: "fleet status" }),
+    ready: (data) => ui.h("p", null, `${data.length} of them`),
+  };
+  assert.ok(tags(ui.panel(waiting, options)).some((tag) => tag.startsWith("div.skeleton")),
+    "a panel that has never had an answer must shimmer");
+  assert.match(words(ui.panel(failed, options)), /sudo apt install gh/);
+  assert.match(words(ui.panel(missing, options)), /No head office is configured\./);
+  assert.ok(tags(ui.panel(waking, options)).some((tag) => tag.startsWith("div.skeleton")),
+    "a snapshot that has not been taken yet must shimmer, not show an error");
+  assert.match(words(ui.panel(empty, options)), /Nothing yet/);
+  assert.match(words(ui.panel(ready, options)), /1 of them/);
+});
+
+ok("a mark is a glyph and one of the page's own twelve colours", () => {
+  identity.setRegistry({
+    winston: { icon: "W", color: "#5b8def" },
+    evil: { icon: "E".repeat(400), color: "red;background-image:url('https://evil.example.invalid/x.png')" },
+  });
+  assert.equal(identity.mark("winston").registered, true);
+  const unknown = identity.mark("newcomer");
+  assert.equal(unknown.registered, false);
+  assert.equal(unknown.glyph, "N");
+  assert.equal(identity.mark("").glyph, String.fromCharCode(183));
+  for (const name of ["winston", "evil", "newcomer", "", null]) {
+    const found = identity.mark(name);
+    assert.equal("color" in found, false, "a mark must not carry a colour value at all");
+    assert.ok(Number.isInteger(found.tone) && found.tone >= 0 && found.tone < identity.TONES,
+      `${name} has tone ${found.tone}`);
+    assert.ok([...found.glyph].length <= 2, `${name} has a glyph of ${[...found.glyph].length} characters`);
+  }
+  assert.equal(identity.mark("evil").glyph, "EE");
+  assert.equal(identity.tone("abc"), identity.tone("abc"));
+});
+
+ok("layout lives in the stylesheet and no route writes a style attribute", () => {
+  for (const relative of REQUIRED_FILES.filter((name) => name.endsWith(".js"))) {
+    const source = read(relative);
+    const styles = [...source.matchAll(/style:\s*([^,)}]+)/g)].map((found) => found[1].trim());
+    for (const value of styles) {
+      assert.match(value, /^widthStyle\(/,
+        `${relative} writes a style attribute instead of using a class: ${value}`);
+    }
+  }
+});
+
+ok("an answer that is not an object is a failure, not data", () => {
+  for (const payload of [null, undefined, "a proxy said hello", 42, true]) {
+    assert.throws(() => api.shaped(payload, "/api/ci"), api.ApiError,
+      `${JSON.stringify(payload)} must not reach a view as data`);
+  }
+  for (const payload of [{}, [], { unavailable: "no office", fix: "hq init" }]) {
+    assert.equal(api.shaped(payload, "/api/ci"), payload);
+  }
+  const shaped = api.normaliseError(new api.ApiError(200, { error: api.UNREADABLE }, "/api/ci"), "/api/ci");
+  assert.match(shaped.title, /could not be read/);
+  assert.ok(shaped.command.length > 0);
+  assert.deepEqual(api.list(["one"]), ["one"]);
+  for (const notAList of [null, undefined, {}, "x", 3]) assert.deepEqual(api.list(notAList), []);
+});
+
+ok("a failure is turned into a sentence and a command, never a trace", () => {
+  const offline = api.normaliseError(new TypeError("fetch failed"), "/api/fleet");
+  assert.match(offline.title, /did not answer/);
+  assert.ok(offline.command);
+  const missing = api.normaliseError(new api.ApiError(404, null, "/api/projects"), "/api/projects");
+  assert.match(missing.body, /\/api\/projects/);
+  const refused = api.normaliseError(new api.ApiError(403, { error: "no token" }, "/api/projects"));
+  assert.match(refused.title, /cannot read/);
+  const tool = api.normaliseError(new api.ApiError(500, { error: "gh is not installed" }, "/api/ci"));
+  assert.equal(tool.command, "sudo apt install gh");
+  for (const shaped of [offline, missing, refused, tool]) {
+    assert.ok(!/ at |Error:|\.js:\d/.test(shaped.body), "an error body must not carry a stack trace");
+  }
+});
+
+const VIEWS = await Promise.all(
+  ["overview", "agents", "mail", "queue", "projects", "accounts", "system"]
+    .map((name) => import(`./static/views/${name}.js`).then((module) => module.default)),
+);
+
+ok("every view declares the same contract", () => {
+  const ids = VIEWS.map((view) => view.id);
+  assert.deepEqual(ids, ["overview", "agents", "mail", "queue", "projects", "accounts", "system"]);
+  for (const view of VIEWS) {
+    assert.equal(typeof view.title, "string");
+    assert.ok(view.title.length > 0);
+    assert.equal(typeof view.render, "function");
+    const needs = typeof view.needs === "function" ? view.needs({}) : view.needs;
+    assert.ok(Array.isArray(needs), `${view.id} must declare what it reads`);
+    for (const route of needs) assert.match(route, /^\/api\//, `${view.id} reads ${route}`);
+  }
+});
+
+ok("the status vocabulary is written down once", () => {
+  const shell = read("static/app.js");
+  assert.match(shell, /agentMeaning/, "the shell reads the one table in core/ui.js");
+  assert.ok(!/pr_open:\s*"wait"/.test(shell) && !/done_no_pr:/.test(shell),
+    "the shell must not carry a second copy of the status table");
+  for (const relative of REQUIRED_FILES.filter((name) => name.endsWith(".js") && !name.endsWith("core/ui.js"))) {
+    assert.ok(!/state_unreadable:\s*"/.test(read(relative)), `${relative} maps a status of its own`);
+  }
+});
+
+ok("the page and the shell agree on the seven entries, exactly", () => {
+  const registry = read("static/app.js");
+  const icons = registry.match(/const ICONS = \{([\s\S]*?)\n\};/);
+  assert.ok(icons, "the shell has no icon table");
+  const named = [...icons[1].matchAll(/^\s{2}([a-z]+):/gm)].map((found) => found[1]);
+  assert.deepEqual(named, VIEWS.map((view) => view.id),
+    "the icons and the views are not the same seven, in the same order");
+  for (const icon of icons[1].match(/'[^']*'/g) || []) {
+    assert.match(icon, /^'<(path|circle)/, "an icon is not drawn by this page");
+  }
+});
+
+/* ---------------------------------------------------------- the routes */
+
+const stub = spawn("python3", [path.join(HERE, "test_stub_server.py"), String(PORT)], { stdio: "ignore" });
+process.on("exit", () => stub.kill());
+
+async function waitForStub() {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      if ((await fetch(`${BASE}/api/config`)).ok) return;
+    } catch (error) { /* not up yet */ }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error("the stub server never came up");
+}
+await waitForStub();
+
+const get = async (route, state = "ready") => {
+  const joiner = route.includes("?") ? "&" : "?";
+  const response = await fetch(`${BASE}${route}${joiner}state=${state}`);
+  return { status: response.status, body: await response.json(), response };
+};
+
+await okAsync("the page and its files are served", async () => {
+  const page = await fetch(`${BASE}/`);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-type"), /text\/html/);
+  const script = await fetch(`${BASE}/static/app.js`);
+  assert.equal(script.status, 200);
+  assert.match(script.headers.get("content-type"), /javascript/);
+  const style = await fetch(`${BASE}/static/app.css`);
+  assert.match(style.headers.get("content-type"), /text\/css/);
+  assert.equal((await fetch(`${BASE}/static/../test_ui.mjs`)).status, 404);
+});
+
+await okAsync("the settings the page needs before it can draw", async () => {
+  const { body } = await get("/api/config");
+  assert.equal(typeof body.title, "string");
+  assert.equal(typeof body.version, "string");
+  for (const flag of ["hq", "slice", "gpu", "cpu_temp", "ci_daemon", "forge"]) {
+    assert.equal(typeof body.features[flag], "boolean", `features.${flag} must be a boolean`);
+  }
+  assert.ok("pending" in body, "/api/config does not say whether its first pass has run");
+  const waking = (await get("/api/config", "loading")).body;
+  assert.ok(waking.pending, "a config read before the first pass says so");
+  assert.equal(waking.features.slice, false, "a control with no reading behind it stays off");
+  assert.equal(waking.features.ci_daemon, false);
+});
+
+await okAsync("a snapshot that has never been taken says so instead of answering empty", async () => {
+  for (const route of ["/api/health", "/api/mail/boxes", "/api/mail/feed?hours=24", "/api/mail/who"]) {
+    const { status, body } = await get(route, "loading");
+    assert.equal(status, 200, `${route} must not fail while it is waking up`);
+    assert.ok(body.pending, `${route} does not say its first pass is still to come`);
+  }
+});
+
+await okAsync("the prerequisites come back in the order the record fixes", async () => {
+  const { body } = await get("/api/health");
+  for (const field of ["at", "stale_since", "error", "pending"]) {
+    assert.ok(field in body, `/api/health does not say its ${field}`);
+  }
+  assert.match(body.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, "a snapshot time is ISO in UTC");
+  assert.deepEqual(body.checks.map((check) => check.id), [
+    "gh", "tmux", "systemd_user", "linger", "hq", "claude", "codex",
+    "gpu_sensor", "cpu_temp_sensor", "ci_daemon", "sweep_timer", "office",
+  ]);
+  for (const check of body.checks) {
+    assert.ok(["ok", "missing", "error", "off"].includes(check.state), `${check.id} has state ${check.state}`);
+    assert.equal(typeof check.label, "string");
+    assert.equal(typeof check.detail, "string");
+    assert.equal(typeof check.fix, "string");
+    if (check.state === "ok") assert.equal(check.fix, "", `${check.id} is ok and needs no fix`);
+  }
+  const broken = (await get("/api/health", "error")).body.checks;
+  for (const check of broken.filter((row) => row.state === "missing" || row.state === "error")) {
+    assert.ok(check.fix.length > 0, `${check.id} is not ok and must name the command that fixes it`);
+  }
+});
+
+await okAsync("a project row says where it is and what it is doing", async () => {
+  const { body } = await get("/api/projects");
+  assert.ok(Array.isArray(body));
+  for (const row of body) {
+    for (const field of ["name", "repo", "path", "base_branch", "ports", "lanes_open", "last_activity"]) {
+      assert.ok(field in row, `a project row has no ${field}`);
+    }
+    for (const port of ["web", "api", "e2e"]) assert.equal(typeof row.ports[port], "number");
+  }
+  assert.deepEqual((await get("/api/projects", "empty")).body, []);
+});
+
+await okAsync("a lane's log says whether there is a file at all", async () => {
+  const { body } = await get("/api/agent/log?slug=demo-api-3f2a&tail=25");
+  assert.equal(body.slug, "demo-api-3f2a");
+  assert.ok(Array.isArray(body.lines));
+  assert.equal(body.lines.length, 25);
+  assert.equal(typeof body.truncated, "boolean");
+  assert.equal(typeof body.missing, "boolean");
+  assert.ok("file" in body);
+  const none = (await get("/api/agent/log?slug=demo-api-3f2a", "empty")).body;
+  assert.equal(none.missing, true);
+  assert.equal(typeof none.message, "string");
+});
+
+const ENVELOPES = [
+  ["/api/mail/boxes", "boxes", ["name", "number", "updated_at", "count_24h", "last_at"]],
+  ["/api/mail/thread?box=all", "messages", ["sender", "at", "text", "created_at"]],
+  ["/api/mail/feed?hours=24", "events", ["at", "at_label", "kind", "text"]],
+  ["/api/mail/who", "sessions", ["name", "state", "age_hours", "since", "task"]],
+];
+
+await okAsync("every mail route answers the same envelope", async () => {
+  for (const [route, key, fields] of ENVELOPES) {
+    const { body } = await get(route);
+    for (const field of ["at", "stale_since", "error", "pending"]) {
+      assert.ok(field in body, `${route} does not say its ${field}`);
+    }
+    assert.match(body.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, `${route} does not date itself in ISO`);
+    for (const field of ["stale_since", "pending"]) {
+      if (body[field] != null) assert.match(body[field], /^\d{4}-\d{2}-\d{2}T/, `${route}.${field} is not ISO`);
+    }
+    assert.ok(Array.isArray(body[key]), `${route} does not carry ${key}`);
+    for (const row of body[key]) {
+      for (const field of fields) assert.ok(field in row, `a row of ${key} has no ${field}`);
+    }
+    const drained = (await get(route, "empty")).body;
+    assert.deepEqual(drained[key], [], `${route} does not empty out`);
+  }
+  const thread = (await get("/api/mail/thread?box=all")).body;
+  assert.equal(thread.box, "all");
+  assert.equal(typeof thread.window_hours, "number");
+  assert.equal(typeof (await get("/api/mail/feed?hours=24")).body.hours, "number");
+  for (const session of (await get("/api/mail/who")).body.sessions) {
+    assert.ok(["live", "stale"].includes(session.state));
+  }
+});
+
+await okAsync("a thread request that cannot be served is refused, not guessed at", async () => {
+  assert.equal((await get("/api/mail/thread?box=")).status, 400, "an empty mailbox name is refused");
+  assert.equal((await get("/api/mail/thread?box=all&since=yesterday")).status, 400, "a time the server cannot read is refused");
+  const send = await fetch(`${BASE}/api/mail/send?state=empty`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to: "all", text: "hello" }),
+  });
+  assert.equal(send.status, 503, "sending before the office has been read is refused");
+  assert.equal(typeof (await send.json()).error, "string");
+});
+
+await okAsync("an unknown mailbox is answered, not swallowed", async () => {
+  const { status, body } = await get("/api/mail/thread?box=nobody");
+  assert.equal(status, 404);
+  assert.equal(typeof body.error, "string");
+  assert.ok(Array.isArray(body.boxes), "a wrong box is answered with the boxes that do exist");
+});
+
+await okAsync("a farm with no office says so in one sentence", async () => {
+  for (const [route] of ENVELOPES) {
+    const { status, body } = await get(route, "error");
+    assert.equal(status, 200, `${route} must not turn a missing office into a failure`);
+    assert.equal(typeof body.unavailable, "string");
+    assert.ok(body.fix.length > 0, `${route} must name the command that fixes it`);
+  }
+});
+
+await okAsync("the two write routes say what they did", async () => {
+  const send = async (route, payload) => {
+    const response = await fetch(`${BASE}${route}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
-  }
-
-  function clickAt(clientX) {
-    const box = splitter.getBoundingClientRect();
-    if (clientX < box.left || clientX >= box.left + box.width) return false;
-    fire("pointerdown", clientX);
-    fire("pointerup", clientX);
-    return true;
-  }
-
-  return {
-    ...api,
-    clickAt,
-    elements,
-    fire,
-    rootStyle,
-    saved: () => storage.get("fleet.dashboard.split.v1"),
+    return { status: response.status, body: await response.json() };
   };
-}
+  const message = await send("/api/agent/msg", { slug: "demo-api-3f2a", text: "look at the orders screen" });
+  assert.equal(message.status, 200);
+  assert.equal(message.body.ok, true);
+  assert.equal(message.body.slug, "demo-api-3f2a");
+  assert.equal(typeof message.body.detail, "string");
+  assert.equal((await send("/api/agent/msg", { slug: "" })).status, 400);
 
-{
-  const ui = splitHarness();
-  const beforeLeft = ui.elements.splitter.getBoundingClientRect().left;
-  const beforeSaved = ui.saved();
-  for (let grab = 0; grab < 5; grab += 1) {
-    const box = ui.elements.splitter.getBoundingClientRect();
-    assert.equal(ui.clickAt(box.left + box.width / 2), true);
+  const mail = await send("/api/mail/send", { to: "all", text: "the search lane is done" });
+  assert.equal(mail.body.ok, true);
+  assert.equal(mail.body.to, "all");
+  assert.equal(typeof mail.body.from, "string");
+  assert.equal((await send("/api/mail/send", { to: "all", text: "" })).status, 400);
+
+  const project = await send("/api/projects", { name: "newone", repo: "your-org/newone", port_base: 5300 });
+  assert.equal(project.body.name, "newone");
+  assert.equal(typeof project.body.ports.web, "number");
+  assert.equal(typeof (await send("/api/projects", { name: "" })).body.error, "string");
+});
+
+await okAsync("the state flag flips the whole dataset", async () => {
+  assert.equal((await get("/api/fleet", "ready")).body.length > 0, true);
+  assert.deepEqual((await get("/api/fleet", "empty")).body, []);
+  assert.equal((await get("/api/accounts", "empty")).body.accounts.length, 0);
+  assert.deepEqual((await get("/api/models", "empty")).body, []);
+  assert.equal((await get("/api/ci", "empty")).body.recent.length, 0);
+  assert.equal((await get("/api/ci", "error")).status, 500);
+  assert.equal((await get("/api/config", "error")).body.features.gpu, false);
+  assert.equal((await get("/api/access", "error")).body.writable, false);
+  assert.equal((await get("/api/metrics", "error")).body.gpu, null);
+});
+
+await okAsync("a limit window is labelled by its own name", async () => {
+  const { body } = await get("/api/accounts");
+  const windows = [];
+  for (const account of body.accounts) {
+    if (account.session != null) windows.push("session");
+    if (account.weekly != null) windows.push("weekly");
+    for (const scoped of account.scoped || []) windows.push(scoped.label);
   }
-  assert.equal(ui.elements.splitter.getBoundingClientRect().left, beforeLeft);
-  assert.equal(ui.saved(), beforeSaved);
-}
+  assert.ok(windows.includes("long context"), "a scoped window keeps its own label");
+  const source = read("static/views/accounts.js");
+  assert.ok(!/fable/i.test(source), "no window may be singled out by name in the page");
+  assert.ok(!/<svg|base64/i.test(source), "an engine mark comes from the server, not from a logo in the page");
+});
 
-{
-  const ui = splitHarness("0.69");
-  const box = ui.elements.splitter.getBoundingClientRect();
-  const cursorX = box.left + box.width / 2;
-  const firstClick = ui.clickAt(cursorX);
-  const secondClick = ui.clickAt(cursorX);
-  if (firstClick && secondClick) ui.fire("dblclick", cursorX);
-  assert.equal(firstClick && secondClick, true);
-  assert.equal(ui.getRatio(), ui.DEFAULT_SPLIT);
-  assert.equal(ui.saved(), String(ui.DEFAULT_SPLIT));
-}
-
-{
-  const ui = splitHarness("0.42");
-  const before = ui.elements.splitter.getBoundingClientRect();
-  const grabX = before.left + 2;
-  ui.fire("pointerdown", grabX);
-  ui.fire("pointermove", grabX + 100);
-  ui.fire("pointerup", grabX + 100);
-  const after = ui.elements.splitter.getBoundingClientRect();
-  assert.equal(after.left - before.left, 100);
-  assert.equal(Number(ui.saved()), ui.getRatio());
-}
-
-{
-  const ui = splitHarness("0.69");
-  const beforeBasis = ui.elements.agentsPane.style.flexBasis;
-  const beforeSaved = ui.saved();
-  ui.elements.fleetSplit.clientWidth = 580;
-  ui.applySplit(ui.getRatio());
-  assert.equal(ui.elements.fleetSplit.classList.contains("stacked"), true);
-  assert.equal(ui.saved(), beforeSaved);
-  ui.elements.fleetSplit.clientWidth = 1358;
-  ui.applySplit(ui.getRatio());
-  assert.equal(ui.elements.fleetSplit.classList.contains("stacked"), false);
-  assert.equal(ui.elements.agentsPane.style.flexBasis, beforeBasis);
-  assert.equal(ui.saved(), beforeSaved);
-}
-
-{
-  const ui = splitHarness("0.42");
-  assert.equal(ui.paneMin(), 260 + 2 * 16 + 15);
-  assert.equal(ui.rootStyle.get("--pane-scrollbar-w"), "15px");
-  assert.equal(
-    ui.splitGeometry().available,
-    ui.elements.fleetSplit.clientWidth - 10,
-  );
-}
-
-// Read-only means every control that writes looks disabled, the Auto button included: it was
-// the one clickable thing left bright on a page that refuses writes, and a click that silently
-// does nothing reads as a broken dashboard.
-{
-  const rule = html.match(/body\.readonly[^{]*\{[^}]*\}/);
-  assert.ok(rule, "a body.readonly rule must exist");
-  for (const selector of [".modeseg button", ".autobtn", ".acct-rm", "#acct-add-btn", "[data-act]"]) {
-    assert.ok(
-      rule[0].includes(`body.readonly ${selector}`),
-      `read-only mode must dim ${selector}`,
-    );
-  }
-  assert.match(rule[0], /cursor:not-allowed/);
-}
-
-console.log("dashboard UI contract ok");
+stub.kill();
+console.log(`\nRESULT: ${passed} checks passed`);

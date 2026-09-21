@@ -147,6 +147,41 @@ shared, long-lived service: health strip, subscription tiles, one card per lane 
 link, live activity and cost. Stop it with `fleet dashboard stop`, never with a pattern kill, see
 [`sharp-edges.md`](sharp-edges.md).
 
+### What the dashboard serves
+
+Reads are open when the dashboard is bound to this machine only, and need the bearer token once
+the bind is wide. Writes always need it. The page and its own files are open either way, or the
+page could never be opened to hand over the token in the first place.
+
+| Route | Method | Answers |
+|---|---|---|
+| `/static/<file>` | GET | the front end's files, confined to `dashboard/static` |
+| `/api/config` | GET | the page's name, this build, and which optional parts this farm has |
+| `/api/health` | GET | one row per prerequisite: `ok`, `missing`, `off` or `error`, each with a fix |
+| `/api/projects` | GET | the registered projects, with lanes open now and last activity |
+| `/api/projects` | POST | registers one, by running `fleet add-project` |
+| `/api/agent/log?slug&tail=200` | GET | that lane's log as words, at most 2000 lines |
+| `/api/agent/msg` | POST | `{slug, text}`, delivered by `fleet msg` at the lane's next checkpoint |
+| `/api/mail/boxes` | GET | the head office's mailboxes, with a count for the last day |
+| `/api/mail/thread?box&since` | GET | one mailbox's messages, newest last |
+| `/api/mail/feed?hours=24` | GET | the whole office as one timeline, from `hq feed` |
+| `/api/mail/who` | GET | the live sessions, from `hq who` |
+
+Every time in these answers is an ISO 8601 stamp in UTC, so two of them can be merged and
+sorted: the moment an answer was true, a message's own stamp, a session's last sign of life.
+The office timeline also keeps hq's own short label next to the stamp.
+| `/api/mail/send` | POST | `{to, text}`, sent through `hq msg` as this dashboard's own name |
+
+One background thread refreshes the health table, the mailboxes, the office timeline and the
+session list every 45 seconds. No GET runs a tool, reaches the network or writes to disk: the
+page redraws every few seconds, and a tool call on a read path is a few thousand calls an hour
+against the API budget every agent on the machine shares. An answer says `pending` until that
+thread's first pass, and keeps the last good values when a pass fails, with `stale_since` saying
+when they were still true. They read through `gh` and never through `hq inbox`, because a plain
+inbox read moves a cursor shared by every process signing as one name on one machine, so a page
+polling it would quietly consume an agent's mail. With no `hq` installed, or none pointed at an
+office, every mail route answers with one sentence and the command that fixes it.
+
 A lane ends by opening a pull request and stopping. Merging is a human decision.
 
 ---
@@ -295,6 +330,8 @@ Everything below is optional, has a working default, and belongs in `~/.config/f
 | `FLEET_DASH_BIND` | `127.0.0.1` | what the dashboard binds; an IPv6 literal is served on an IPv6 socket |
 | `FLEET_DASH_PORT` | `7878` | its port |
 | `FLEET_DASH_TOKEN` | a minted one in `$FLEET_CONFIG/dash-token` | the bearer token every write needs, and every read once the bind is wide |
+| `FLEET_DASH_TITLE` | `murmur` | what the page calls itself, in the tab and in its header |
+| `FLEET_DASH_HQ_AGENT` | `dashboard` | the name the page signs head office mail with. Never a name taken from a request, so a message from the page is always attributable to the page |
 | `FLEET_FARM_ALIAS` | this machine's hostname | the ssh host name printed in the account-login instructions. The hostname is almost never how you actually reach the box, and a wrong name there sends an operator to a machine that does not answer |
 | `FLEET_NVIDIA_SMI` | `nvidia-smi` on PATH | the GPU sensor. Unset and absent, `fleet mode auto` is inert and says so once |
 | `FLEET_LHM_URL` | unset | a LibreHardwareMonitor endpoint for CPU temperature. Unset, the temperature reads UNKNOWN and never blocks a spawn |

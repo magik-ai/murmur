@@ -116,6 +116,11 @@ is never left open to the internet. Two ways in:
 Either way the page asks for a token once per browser. Get it with `fleet dashboard token` and
 open `http://...:7878/?token=<it>`; the tab remembers.
 
+The first thing you see is a checklist of what is still missing, one line per step, until the
+farm is complete; after that the page opens on Overview. Its Mail tab is the same head office
+your agents already talk through, not a second store. The page never spawns an agent itself: that
+stays a command with a codename behind it, typed by a person.
+
 ## Security in four lines
 
 - The only port open to the world is ssh, with a key, not a password. Every VPS provider has a

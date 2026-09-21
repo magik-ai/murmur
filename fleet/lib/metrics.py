@@ -27,26 +27,24 @@ NVIDIA = os.environ.get("FLEET_NVIDIA_SMI") or shutil.which("nvidia-smi")
 # None, which is a warning, never a block.
 LHM_URL = os.environ.get("FLEET_LHM_URL", "").strip()
 
-# Sized from measurement, not fear: a codex worker idles at ~0.15GB and 90% of an
-# agent's life is thinking/reading/editing (near-zero). The cost is bursty — a `vite
-# build` peaks at ~1.3GB / 1.5 cores for ~8s, pytest less. With a 6GB floor that leaves
-# ~19GB working: 20 idle agents ~6GB, plus a third of them bursting a build at once
-# ~12GB => ~18GB, inside budget, with 16GB swap as the shock absorber. CPU: six
-# concurrent builds ~9 of 14 cores. So ~20 is the machine's real ceiling, not 12.
-# At that scale the true limit is the subscription's usage pool, not the hardware —
-# which is exactly why we mix Claude and codex (separate pools).
+# Starting points, not measurements of your machine. An agent is cheap while it thinks and
+# expensive in short bursts (a front end build, a test run), so the floors exist to leave room
+# for several bursts at once rather than for the agents themselves. MEASURE YOUR OWN BOX and put
+# the numbers in policy.toml: watch free memory while the farm is busy, and read the throttle
+# temperature from the chip's own documentation. Past a certain size the real ceiling stops
+# being the hardware and becomes the subscription's usage pool.
 DEFAULT_POLICY = {
     "ram_min_gb": 6,      # hard floor: below this, block spawns (headroom for in-flight bursts)
     "disk_min_gb": 20,    # state/git writes stop being trustworthy below this hard floor
-    # Agent count no longer BLOCKS — hardware is the only hard gate. `warn_agents` still
-    # drives an amber "watch it" signal; there is no count ceiling.
-    "gpu_temp_max": 87,   # hard ceiling in C (RTX 5070 Ti throttles ~88-90)
-    "cpu_temp_max": 92,   # hard ceiling in C (Ryzen 9800X3D throttles ~95)
+    # Agent count no longer BLOCKS: hardware is the only hard gate. `warn_agents` still drives
+    # an amber "watch it" signal; there is no count ceiling.
+    "gpu_temp_max": 87,   # hard ceiling in C; set it a little under where your GPU throttles
+    "cpu_temp_max": 92,   # hard ceiling in C; set it a little under where your CPU throttles
     "warn_ram_gb": 8,     # soft: dashboard/orchestrator warns below this (above the hard floor)
     "warn_disk_gb": 40,   # leave room for worktrees, package installs and CI images
-    "warn_agents": 24,    # amber above this — advisory only, never blocks
-    "warn_gpu_temp": 82,  # normal under load is 65-83; amber above this
-    "warn_cpu_temp": 85,  # normal under load is 60-85; amber above this
+    "warn_agents": 24,    # amber above this: advisory only, never blocks
+    "warn_gpu_temp": 82,  # amber above this; below it is normal under load
+    "warn_cpu_temp": 85,  # amber above this; below it is normal under load
 }
 
 
@@ -164,7 +162,7 @@ def cpu_temp():
 
 def swap_churn_kbps():
     """Swap traffic in KB/s (vmstat's si+so) from /proc/vmstat page counters vs a persisted prior
-    sample. This is the honest thrashing signal — 0 when swap is merely parked, high only when the
+    sample. This is the honest thrashing signal: 0 when swap is merely parked, high only when the
     kernel is actively moving pages to/from disk. Best-effort: any error -> 0.0."""
     import json as _json
     import time as _time
@@ -242,7 +240,7 @@ def disk():
     }
 
 
-# Only these cost the machine anything. `pr_open` is TERMINAL — the agent opened its PR
+# Only these cost the machine anything. `pr_open` is TERMINAL: the agent opened its PR
 # and exited, so it burns no RAM and no CPU. Counting it against the concurrency cap
 # (as this did) blocks spawns on a farm that is 95% idle: 13 finished agents awaiting
 # merge read as 13 running ones. Keep this set identical to `clean`'s.
@@ -250,7 +248,7 @@ ACTIVE = ("starting", "running")
 
 
 def agents():
-    """Agents actually occupying the machine — not ones that finished and left a PR."""
+    """Agents actually occupying the machine, not ones that finished and left a PR."""
     n = 0
     for fp in glob.glob(os.path.join(STATE, "state", "*.json")):
         state = None
@@ -300,7 +298,7 @@ def verdict(m, pol):
     if ct is not None and ct > pol["warn_cpu_temp"]:
         warnings.append(f"CPU above warning temperature ({pol['warn_cpu_temp']}C)")
     # `blocks` holds only HARDWARE blocks (RAM/disk floors, GPU/CPU temp). Agent count is
-    # deliberately absent — a busy farm with cool metal and free RAM keeps spawning.
+    # deliberately absent: a busy farm with cool metal and free RAM keeps spawning.
     ok = not blocks
     level = "block" if not ok else ("warn" if warnings else "ok")
     return {"can_spawn": ok, "level": level, "reasons": blocks + warnings,

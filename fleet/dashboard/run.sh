@@ -28,7 +28,10 @@ if [ -f "$ENVFILE" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue;; esac
     key="${line%%=*}"; value="${line#*=}"
-    case "$key" in FLEET_DASH_BIND|FLEET_DASH_PORT|FLEET_DASH_TOKEN) ;; *) continue;; esac
+    case "$key" in
+      FLEET_DASH_BIND|FLEET_DASH_PORT|FLEET_DASH_TOKEN|FLEET_DASH_TITLE|FLEET_DASH_HQ_AGENT) ;;
+      *) continue;;
+    esac
     case "$value" in
       \"*\") value="${value#\"}"; value="${value%\"}";;
       \'*\') value="${value#\'}"; value="${value%\'}";;
@@ -40,6 +43,10 @@ fi
 PORT="${FLEET_DASH_PORT:-7878}"
 BIND="${FLEET_DASH_BIND:-127.0.0.1}"
 ENV_TOKEN="${FLEET_DASH_TOKEN:-}"
+# What the page calls itself, and the name it signs office mail with. Both have defaults in the
+# server; they are forwarded only when set, so an unset one stays the server's business.
+TITLE="${FLEET_DASH_TITLE:-}"
+HQ_AGENT="${FLEET_DASH_HQ_AGENT:-}"
 TOKEN_FILE="$FLEET_CONFIG/dash-token"
 
 _loopback() { case "$1" in 127.*|::1|localhost) return 0;; *) return 1;; esac; }
@@ -116,10 +123,14 @@ _start() {
     # minted one is never passed at all, the server reads its own file.
     envargs=(-e "FLEET_CONFIG=$FLEET_CONFIG" -e "FLEET_DASH_PORT=$PORT" -e "FLEET_DASH_BIND=$BIND")
     if [ -n "$ENV_TOKEN" ]; then envargs+=(-e "FLEET_DASH_TOKEN=$ENV_TOKEN"); fi
+    if [ -n "$TITLE" ]; then envargs+=(-e "FLEET_DASH_TITLE=$TITLE"); fi
+    if [ -n "$HQ_AGENT" ]; then envargs+=(-e "FLEET_DASH_HQ_AGENT=$HQ_AGENT"); fi
     if ! tmux new-session -d -s "$SESSION" -c "$HERE" "${envargs[@]}" "python3 server.py" 2>/dev/null; then
       # tmux older than 3.2 has no `new-session -e`: export instead, still never argv.
       export FLEET_DASH_PORT="$PORT" FLEET_DASH_BIND="$BIND"
       if [ -n "$ENV_TOKEN" ]; then export FLEET_DASH_TOKEN="$ENV_TOKEN"; fi
+      if [ -n "$TITLE" ]; then export FLEET_DASH_TITLE="$TITLE"; fi
+      if [ -n "$HQ_AGENT" ]; then export FLEET_DASH_HQ_AGENT="$HQ_AGENT"; fi
       tmux new-session -d -s "$SESSION" -c "$HERE" "python3 server.py"
     fi
     live=""

@@ -1,61 +1,75 @@
-// The pane must not rebuild itself while it is being used. Without this, a click lands on a node
-// the poll has already replaced - which is a lost click for a human and an "element was detached
-// from the DOM" timeout for anything automated.
-// playwright-core is not vendored here. Resolve it normally, or point FLEET_PLAYWRIGHT at a
-// copy that already exists on the machine (any project's node_modules/playwright-core/index.mjs).
-const { chromium } = await import(process.env.FLEET_PLAYWRIGHT || 'playwright-core')
+/* The page must not rebuild itself under the reader. Without this, a click lands on a node the
+   tick has already replaced, a half typed message disappears, an open drawer shuts and the
+   scroll position jumps. The tick is three seconds, so this check waits out two of them and
+   asks whether anything the reader was holding on to survived. */
 
-const URL = process.env.DASH_URL || 'http://127.0.0.1:7901'
-const R = []
-const check = (n, p, d) => { R.push({ n, p }); console.log(`${p ? 'PASS' : 'FAIL'}  ${n}${d ? '  — ' + d : ''}`) }
+import { loadPlaywright } from "./test_playwright.mjs";
 
-const b = await chromium.launch()
-const p = await b.newPage()
-await p.goto(URL, { waitUntil: 'domcontentloaded' })
-await p.waitForTimeout(1500)
+const URL = process.env.DASH_URL || "http://127.0.0.1:7903";
+const TWO_TICKS = 7000;
 
-// Recent starts collapsed by design, so its cards have no box to hover until it is opened.
-await p.evaluate(() => {
-  const t=document.getElementById('ciRecentToggle')
-  if (t) t.click()
-})
-await p.waitForTimeout(700)
+const results = [];
+const check = (name, passed, detail) => {
+  results.push({ name, passed });
+  console.log(`${passed ? "PASS" : "FAIL"}  ${name}${detail ? `  ${detail}` : ""}`);
+};
 
-// Stamp every card so a rebuild is detectable: a re-render replaces the nodes and loses the mark.
-const stamp = async () => p.evaluate(() => {
-  document.querySelectorAll('.ci-card').forEach((el, i) => { el.dataset.mark = 'm' + i })
-  return document.querySelectorAll('.ci-card[data-mark]').length
-})
-const surviving = async () => p.evaluate(() =>
-  document.querySelectorAll('.ci-card[data-mark]').length)
+const { chromium } = await loadPlaywright();
+const browser = await chromium.launch();
+// A short window on purpose: the list has to be taller than the screen for a scroll
+// position to exist at all, and a check that cannot move cannot prove it stayed.
+const page = await (await browser.newContext({ viewport: { width: 1100, height: 520 } })).newPage();
 
-const marked = await stamp()
-check('cards are present to observe', marked > 0, `${marked} cards`)
+await page.goto(`${URL}/#/agents`, { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(1600);
 
-// 1. idle: the poll is expected to redraw, so the marks are expected to go
-await p.mouse.move(5, 5)
-await p.waitForTimeout(4000)
-const idleLeft = await surviving()
-check('an idle pane still refreshes (the guard is not a freeze)', idleLeft === 0,
-      `${idleLeft}/${marked} marks survived idle`)
+/* Mark the first card, so a rebuild can be seen even when the new node looks identical. */
+await page.evaluate(() => {
+  document.querySelector(".agent-card").dataset.probe = "held";
+});
+await page.click(".agent-card");
+await page.waitForTimeout(1200);
 
-// 2. hovered: the redraw must be deferred, so the marks must survive
-await stamp()
-const box = await p.locator('.ci-card').first().boundingBox()
-await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-await p.waitForTimeout(4000)
-const hoverLeft = await surviving()
-check('a hovered pane is NOT rebuilt under the pointer', hoverLeft === marked,
-      `${hoverLeft}/${marked} marks survived hover`)
+const opened = await page.evaluate(() => !document.getElementById("drawer").hidden);
+check("a card opens the drawer", opened);
 
-// 3. and it resumes once the pointer leaves
-await p.mouse.move(5, 5)
-await p.waitForTimeout(4000)
-const afterLeft = await surviving()
-check('rendering resumes after the pointer leaves', afterLeft === 0,
-      `${afterLeft}/${marked} marks survived`)
+await page.fill("#laneMessage", "half a sentence the reader has not finished");
+const scrolled = await page.evaluate(() => {
+  document.getElementById("drawerBody").scrollTop = 120;
+  window.scrollTo(0, 80);
+  return { page: Math.round(window.scrollY), drawer: document.getElementById("drawerBody").scrollTop };
+});
+check("the fixture is tall enough to have a scroll position", scrolled.page > 0 && scrolled.drawer > 0,
+  JSON.stringify(scrolled));
+await page.waitForTimeout(TWO_TICKS);
 
-await b.close()
-const bad = R.filter(r => !r.p)
-console.log(`\nRESULT: ${R.length - bad.length}/${R.length} passed`)
-if (bad.length) process.exit(1)
+const after = await page.evaluate(() => ({
+  drawerOpen: !document.getElementById("drawer").hidden,
+  typed: document.getElementById("laneMessage").value,
+  drawerScroll: document.getElementById("drawerBody").scrollTop,
+  pageScroll: Math.round(window.scrollY),
+  probe: document.querySelector(".agent-card").dataset.probe,
+  focused: document.activeElement && document.activeElement.id,
+}));
+
+check("the drawer is still open two ticks later", after.drawerOpen);
+check("the half written message survived", after.typed === "half a sentence the reader has not finished", after.typed);
+check("the drawer kept its scroll position", after.drawerScroll === scrolled.drawer, String(after.drawerScroll));
+check("the page kept its scroll position", after.pageScroll === scrolled.page, String(after.pageScroll));
+check("the card was updated, not replaced", after.probe === "held", String(after.probe));
+
+/* Closing puts the reader back on the list, and nothing stays behind on the screen. */
+await page.click("#drawerClose");
+await page.waitForTimeout(1200);
+const closed = await page.evaluate(() => ({
+  hidden: document.getElementById("drawer").hidden,
+  scrimHidden: document.getElementById("drawerScrim").hidden,
+  cards: document.querySelectorAll(".agent-card").length,
+}));
+check("closing the drawer hides it and its cover", closed.hidden && closed.scrimHidden);
+check("the list is still there afterwards", closed.cards > 0, `${closed.cards} cards`);
+
+await browser.close();
+const failed = results.filter((result) => !result.passed);
+console.log(`\nRESULT: ${results.length - failed.length}/${results.length} passed`);
+if (failed.length) process.exit(1);

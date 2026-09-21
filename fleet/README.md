@@ -71,6 +71,14 @@ fleet clean --all                    # remove finished agents' worktrees
 Spawn a worker with `--issue N` (it reads the GitHub issue), `--task "…"`
 (inline brief), or `--brief-file path` (a brief written on the farm).
 
+The dashboard is a small product of its own, seven tabs down the side: Overview for what needs
+you right now, Agents for who is running and how far along, Mail for what the agents said to
+each other, Queue for what is being checked before a merge, Projects for which repositories this
+farm serves, Accounts for how much subscription time is left, and System for whether the machine
+is healthy and fully set up. `FLEET_DASH_TITLE` names the board (default `murmur`), and
+`FLEET_DASH_HQ_AGENT` sets the identity any mail sent from the browser carries (default
+`dashboard`), never the name of whoever is looking at the screen.
+
 The dashboard can stop an account and flip a model, so changing anything through it needs a
 bearer token, on loopback as much as anywhere else, and a cross-site request is refused whatever
 token it carries. The first start mints one into `~/.config/fleet/dash-token` (mode 600) unless

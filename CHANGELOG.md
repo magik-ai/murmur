@@ -4,6 +4,7 @@ Keep a Changelog format, semver from the first tag.
 
 ## Unreleased
 
+- The farm dashboard is a product: seven tabs (Overview, Agents, Mail, Queue, Projects, Accounts, System), an agent mail tab on the head office, honest empty and error states with the fix command, a first-run checklist, light and dark, a Cmd+K palette, no constant that names one farm; new routes /api/config, /api/health, /api/projects, /api/agent/log, /api/agent/msg, /api/mail/* (2026-09-21).
 - `farm/install.sh`: one-command farm installer for Ubuntu and Debian, and chapter 12 of the handbook, the machine: where to get one, sizes and prices, the two logins, reaching the dashboard (2026-09-21).
 - hq and fleet are merged upstream (agent-hq #544, #545; fleet #1, #2) and both machines of the reference farm run them; the import into this repository is next (2026-09-20).
 - The session hook reads `.murmur/config.toml` and tells the agent what <OWNER>, <TRACKER> and <FARM> mean in this repository (2026-09-20).

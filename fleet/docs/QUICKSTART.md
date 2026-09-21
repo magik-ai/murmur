@@ -106,14 +106,33 @@ fleet status                  # every lane plus farm health
 fleet tail <slug>             # one lane, human-readable, with its last message
 fleet events --follow         # the event stream: spawned, status, delivered, dropped-scope
 fleet dashboard start         # the board on 127.0.0.1:7878, started for you on the first spawn
+fleet dashboard stop          # never a pattern kill, this is a shared service
+fleet dashboard restart       # after changing the bind, the title or the token
+fleet dashboard status        # is it running, and on what socket
 fleet dashboard token         # the bearer token the board needs before it can change anything
 ```
 
-Prefer `fleet events` and `fleet status --json` over grepping logs. The dashboard is a shared
-service: stop it with `fleet dashboard stop`, never with a pattern kill. Open it once as
+Prefer `fleet events` and `fleet status --json` over grepping logs. Open the board once as
 `http://127.0.0.1:7878/?token=<token>` and the tab keeps the token; reaching it from another
 machine is `FLEET_DASH_BIND` in `~/.config/fleet/env` plus `fleet dashboard restart`, and then
 the token covers reading too.
+
+The board itself is a small product, seven tabs down the left side:
+
+| Tab | Answers, in one line |
+|---|---|
+| Overview | what needs me right now |
+| Agents | who is running, on what, how far along |
+| Mail | what the agents said to each other |
+| Queue | what is being checked before a merge |
+| Projects | which repositories this farm serves |
+| Accounts | how much subscription time is left |
+| System | is the machine healthy and fully set up |
+
+Every live panel carries a freshness label, "Live" or "Stale" with a time, so you can always tell
+whether you are looking at the current state or the last good read. Press Cmd+K (Ctrl+K on
+Linux and Windows) anywhere on the page to jump straight to a tab, an agent, a project or a
+mailbox, and use the switch in the header to flip the page between light and dark.
 
 ### 10. Review, merge, clean up
 

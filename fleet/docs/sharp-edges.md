@@ -1,6 +1,6 @@
 # Sharp edges
 
-Eight things every operator of a farm has to know. Each one is a real failure mode of this design,
+Thirteen things every operator of a farm has to know. Each one is a real failure mode of this design,
 not a hypothetical: the mechanism is explained, and so is the guard that already exists, because
 knowing where the guard stops is the useful part.
 
@@ -214,6 +214,94 @@ and exactly one writer per context name, never hosted and farm at once.
 
 ---
 
+## 9. The dashboard signs mail as one fixed identity, not you
+
+**Mechanism.** Every message the dashboard sends goes out as `HQ_AGENT=<FLEET_DASH_HQ_AGENT> hq msg
+<to> <text>`. `FLEET_DASH_HQ_AGENT` defaults to `dashboard`. Whoever is sitting at the browser,
+the message lands in the office from that one name, never from the person who typed it.
+
+**The guard.** `FLEET_DASH_HQ_AGENT` is a setting, so a farm can give its dashboard a name that
+reads plainly as "someone at the board wrote this", and that sender carries the same colour and
+glyph in the thread as any other mailbox, so a reader never mistakes it for an agent's own voice.
+
+**Where the guard stops.** There is no login on the dashboard. Two people sharing one board send
+under the same name, and a reader of the thread cannot tell them apart afterwards. If a message
+needs to be attributable to one person, say who you are inside the text, or send it from a
+terminal under your own codename instead of the compose box.
+
+---
+
+## 10. Reading mail in the dashboard never moves anyone's inbox cursor
+
+**Mechanism.** `hq inbox` at a terminal marks mail read: a cursor keyed to one name on one machine
+moves past it, and the same mail will not show again to that name there. The dashboard's mail
+routes never call `hq inbox`. They read the office's raw comments directly on a 45-second
+snapshot, so opening the Mail tab, scrolling a thread, or leaving it open on a screen changes
+nothing about what any agent will later find unread.
+
+**The guard.** This is a fix, not a new risk: before the dashboard, the only way to glance at mail
+from outside your own session was `hq inbox`, and running that under the wrong name silently
+stole that name's unread mail. The Mail tab is the safe way to look now.
+
+**Where the guard stops.** The tab's own "new since I last looked" count lives in the browser's
+local storage, not on the server. It resets in a private window or a different browser, and it
+says nothing about what an agent itself has or has not read.
+
+---
+
+## 11. A wide dashboard bind means the token also starts guarding reads
+
+**Mechanism.** `FLEET_DASH_BIND` set past `127.0.0.1` opens the dashboard to a network, and the
+one bearer token becomes the only thing standing between that network and everything the board
+can show: every lane's brief and result, the whole mail archive, account and cost figures. On
+loopback the token only ever guarded the two write routes; widen the bind and it starts guarding
+every read too.
+
+**The guard.** The token is required on every route once the bind is not loopback, `fleet
+dashboard token` prints it on demand, and a cross-site request is refused whatever token it
+carries.
+
+**Where the guard stops.** The token is one shared secret, not a login: anyone holding the link
+sees everything the board sees, and there is no way to hand out a read-only copy. Prefer
+Tailscale or an ssh tunnel over a public bind, and treat the token like a password once you widen
+it.
+
+---
+
+## 12. Mail in the dashboard is 45 seconds behind the office, by design
+
+**Mechanism.** Every mail route is served from a snapshot a background thread refreshes every 45
+seconds; opening the Mail tab never talks to GitHub on the request path. A message sent moments
+ago by an agent at the terminal may not appear yet, and the last good snapshot is kept and shown,
+with a "stale since" time, when GitHub itself is briefly unreachable.
+
+**The guard.** The delay is bounded and visible: the freshness label on the tab says Live or
+Stale with a time, so the lag is never silently mistaken for "nothing was said."
+
+**Where the guard stops.** 45 seconds is long enough that a fast back-and-forth in the terminal
+looks out of order or incomplete if you are only watching the dashboard. For anything you are
+actively steering in real time, `hq inbox --peek` or `hq feed` at a terminal is still faster than
+the tab.
+
+---
+
+## 13. A dashboard started by your own systemd unit needs its own `EnvironmentFile`
+
+**Mechanism.** `fleet dashboard start|stop|restart` reads `~/.config/fleet/env` itself. A systemd
+unit that runs `dashboard/server.py` directly, outside those commands, does not read that file on
+its own, so a bind, a title or a token set through `fleet dashboard` never reaches a unit you
+built by hand.
+
+**The guard.** Give such a unit `EnvironmentFile=-%h/.config/fleet/env` in a drop-in, the same fix
+[`docs/MIGRATION.md`](MIGRATION.md) already gives for a hand-rolled daemon unit. Then a change made
+through `fleet dashboard` takes effect the next time the unit starts, instead of silently never.
+
+**Where the guard stops.** `fleet dashboard restart` still does not reach a unit outside this
+repository's control, environment file or not: restart that unit yourself once the file is in
+place. `docs/MIGRATION.md` has the full walkthrough.
+
+---
+
 ## The short version
 
 1. `--force` means "yes, destroy it". `--dry-run` first, always.
@@ -224,3 +312,8 @@ and exactly one writer per context name, never hosted and farm at once.
 6. Over 120 KB the prompt is spilled to a file. A brief that large is probably two lanes.
 7. Never kill the dashboard by pattern.
 8. The farm can tell you a candidate is broken. Only the hosted run can tell you it is mergeable.
+9. Dashboard mail always arrives from "dashboard", never from the person who typed it.
+10. The Mail tab never marks anything read; `hq inbox` at a terminal still does.
+11. Widen the dashboard's bind and the token starts guarding reads too, not just writes.
+12. Dashboard mail runs 45 seconds behind the office. Trust the freshness label, not silence.
+13. A dashboard run by your own systemd unit needs `EnvironmentFile` or it never sees the config.

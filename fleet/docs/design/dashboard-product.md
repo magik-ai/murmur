@@ -177,4 +177,25 @@ and a person who has never seen the farm can say what every tab is for from the 
 
 ## 8. What other products taught us
 
-Filled in from the packaging research (see the murmur plan, `internal/research/report-dashboard-packaging.md`).
+From a survey of Coolify, Dokploy, Portainer, Uptime Kuma, Grafana, Linear, Vercel, GitHub
+Actions, OpenClaw, Conductor, Vibe Kanban, claude-squad, Cursor cloud agents, Devin and Codex
+cloud (the notes are in the murmur plan). The rules we adopt:
+
+- One constant shell: sidebar plus header on every view, so a tab switch never feels like a
+  new app (Linear). A farm is one flat pool, so agents are a flat list, not a project tree
+  (Conductor, claude-squad).
+- Status is a neutral pill with a coloured dot, never a coloured row, and there are five
+  meanings only: running, waiting on a person, failed, done, paused (Coolify, Uptime Kuma).
+  Colours are picked in a perceptually even space so every state reads equally strong (Linear).
+- Every live panel carries a freshness label, Live or Stale with an "as of" time, and the
+  favicon mirrors the worst state on screen (Smashing Magazine, Vercel).
+- Skeletons, never spinners; value changes animate under 300 ms; lists update in place by key
+  (Smashing Magazine, OpenClaw).
+- A first run is a checklist with the exact commands, not an empty table (Coolify, Portainer).
+  Every tab has its own empty state with one action (Pencil and Paper).
+- Talking to a running agent lives on the agent (a composer in its drawer, OpenClaw); the mail
+  archive is a separate list-plus-thread view. The two are visually distinct so a live
+  redirect is never confused with the async log.
+- Cost and tokens per agent are shown, because almost nobody in this category does it well
+  (OpenClaw, Devin).
+- A scoped command palette, Cmd+K, jumps to a tab, an agent, a project or a mailbox (Linear).

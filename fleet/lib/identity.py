@@ -9,6 +9,13 @@ sight and the registry WINS from then on.
 
 Registry: $FLEET_CONFIG/codenames.json   { "vivaldi": {"icon": "🎻", "color": "#..."} }
 Change one deliberately:  fleet identity vivaldi --icon 🎻 --color '#d4a017'
+
+The marks a new code name is drawn from are the defaults below. A deployment that wants its own
+set says so in $FLEET_CONFIG/policy.toml, and nothing here needs editing:
+
+    [identity]
+    glyphs  = ["●", "■", "▲"]
+    colours = ["#5b8def", "#3fb950"]
 """
 import contextlib
 import fcntl
@@ -20,10 +27,46 @@ import time
 CONFIG = os.path.expanduser(os.environ.get("FLEET_CONFIG", "~/.config/fleet"))
 REG = os.path.join(CONFIG, "codenames.json")
 
-CREATURES = ["🦊", "🦉", "🐢", "🐝", "🦋", "🦈", "🐙", "🦅", "🐺", "🦁", "🐬",
-             "🦕", "🐸", "🦎", "🐳", "🦇", "🦜", "🐡", "🦩", "🦥", "🐧", "🦦"]
-COLORS = ["#5b8def", "#3fb950", "#d29922", "#f85149", "#a371f7", "#3fb0d9",
-          "#e685b5", "#f0883e", "#56d364", "#db61a2", "#58a6ff", "#bc8cff"]
+DEFAULT_GLYPHS = ["🦊", "🦉", "🐢", "🐝", "🦋", "🦈", "🐙", "🦅", "🐺", "🦁", "🐬",
+                  "🦕", "🐸", "🦎", "🐳", "🦇", "🦜", "🐡", "🦩", "🦥", "🐧", "🦦"]
+DEFAULT_COLOURS = ["#5b8def", "#3fb950", "#d29922", "#f85149", "#a371f7", "#3fb0d9",
+                   "#e685b5", "#f0883e", "#56d364", "#db61a2", "#58a6ff", "#bc8cff"]
+
+# Re-read when policy.toml changes, so editing the palette does not need a restart, and never
+# on every resolve: this is called once per spawn and once per dashboard draw.
+_marks_cache = {"key": None, "value": None}
+
+
+def marks():
+    """(glyphs, colours) a new code name is drawn from: the deployment's, or the defaults.
+
+    A policy file that cannot be read is one line on stderr and the defaults, never a failed
+    spawn: a palette is decoration, and decoration must not stop work.
+    """
+    path = os.path.join(CONFIG, "policy.toml")
+    try:
+        key = os.path.getmtime(path)
+    except OSError:
+        key = None
+    if _marks_cache["value"] and _marks_cache["key"] == key:
+        return _marks_cache["value"]
+    glyphs, colours = list(DEFAULT_GLYPHS), list(DEFAULT_COLOURS)
+    if key is not None:
+        try:
+            import tomllib
+            with open(path, "rb") as handle:
+                table = tomllib.load(handle).get("identity") or {}
+            if not isinstance(table, dict):
+                raise ValueError("[identity] is not a TOML table")
+            chosen = [str(item) for item in (table.get("glyphs") or []) if str(item).strip()]
+            painted = [str(item) for item in
+                       (table.get("colours") or table.get("colors") or []) if str(item).strip()]
+            glyphs = chosen or glyphs
+            colours = painted or colours
+        except Exception as exc:
+            print(f"fleet identity: using the default marks ({path}: {exc})", file=sys.stderr)
+    _marks_cache["key"], _marks_cache["value"] = key, (glyphs, colours)
+    return glyphs, colours
 
 
 def _hash(s):
@@ -111,8 +154,9 @@ def resolve(name, icon="", color=""):
             e = reg[name]
             return e.get("icon", ""), e.get("color", "")
         h = _hash(name)
-        e = {"icon": icon or CREATURES[h % len(CREATURES)],
-             "color": color or COLORS[h % len(COLORS)]}
+        glyphs, colours = marks()
+        e = {"icon": icon or glyphs[h % len(glyphs)],
+             "color": color or colours[h % len(colours)]}
         reg[name] = e
         _save_unlocked(reg)
         return e["icon"], e["color"]
@@ -122,7 +166,7 @@ def cli(argv):
     if not argv:                                     # list every known mark
         reg = load()
         if not reg:
-            print("  (no code names registered yet — they register on first spawn)")
+            print("  (no code names registered yet: they register on first spawn)")
             return
         for k in sorted(reg):
             e = reg[k]
