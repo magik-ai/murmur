@@ -106,7 +106,8 @@ pile of unread rules that nobody follows. One layer a day works better.
 ## What to read next
 
 Read the golden workflow chapter for the gate-by-gate shape of a single
-change. Read the parallel lanes chapter before running more than one agent at
+change. When the laptop stops being enough, [the machine](12-the-machine.md)
+says where to get a farm, what it costs and the one command that sets it up. Read the parallel lanes chapter before running more than one agent at
 once. Read the coordination and identity chapter before two agents need to
 know about each other at all.
 
