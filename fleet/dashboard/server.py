@@ -281,6 +281,43 @@ _accounts_lock = threading.Lock()
 _accounts_snapshot = {"at": None, "accounts": [], "errors": {}}
 
 
+# What a card says when the reader cannot be told anything more useful than "it did not work".
+ACCOUNT_TROUBLE_UNKNOWN = "The farm could not read this account's numbers."
+
+
+def account_trouble(raw):
+    """One sentence a person can act on, whatever the reader threw.
+
+    What must never reach a card: an exception class, a traceback, a file path. "FileNotFoundError:
+    [Errno 2] No such file or directory: '/private/tmp/...'" tells the reader nothing about what
+    to do, and here there are only ever three things to do: log in once, log in again, or wait.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    low = text.lower()
+    if "filenotfounderror" in low or "no such file" in low or "never read" in low:
+        return ("This account has no login on the farm yet. Log in once: "
+                f"ssh -t {CA.FARM_ALIAS} claude")
+    if ("401" in low or "403" in low or "expired" in low
+            or "unauthorized" in low or "forbidden" in low):
+        return "The login on this account has expired. Log in again."
+    if "429" in low or "rate-limited" in low or "rate limited" in low:
+        return "The vendor asked the farm to slow down. These numbers refresh by themselves."
+    if any(word in low for word in ("urlerror", "timeout", "timed out", "connection", "refused",
+                                    "unreachable", "gaierror", "socket", "ssl", "http 5")):
+        return "The vendor did not answer the last time the farm asked."
+    return ACCOUNT_TROUBLE_UNKNOWN
+
+
+def plain_account_trouble(rows, errors):
+    """The same rows and errors, with every reason written for a person instead of for a log."""
+    for row in rows:
+        if row.get("stale_error"):
+            row["stale_error"] = account_trouble(row["stale_error"])
+    return rows, {name: account_trouble(text) for name, text in (errors or {}).items()}
+
+
 def _accounts_refresher():
     """Keep the account-limit snapshot warm off the request path.
 
@@ -331,6 +368,7 @@ def _accounts_refresher():
                 rows.append(CX.merge_row(CX.snapshot_row(), previous))
             except Exception:
                 pass  # codex is best-effort; its absence must not blank the claude tiles
+            rows, errors = plain_account_trouble(rows, errors)
             with _accounts_lock:
                 _accounts_snapshot["at"] = time.time()
                 _accounts_snapshot["accounts"] = rows
@@ -1006,6 +1044,20 @@ def _read_agent_record(path):
     }
 
 
+def _apply_polled_checks(record):
+    """Put the last poll's checks on a lane, when the poll actually read some.
+
+    An empty poll is "nothing was read", never "the checks went away": overwriting the lane's
+    own recorded checks with it is how a drawer ended up saying no check had reported while
+    the record on disk held three.
+    """
+    branch = record.get("branch") or ""
+    polled = CI_CACHE.get(branch)
+    if record.get("pr_url") and polled:
+        record["ci"] = polled
+    return record
+
+
 def agents():
     out = []
     for fp in sorted(glob.glob(os.path.join(STATE, "state", "*.json"))):
@@ -1015,9 +1067,7 @@ def agents():
         if s.get("status") == "state_unreadable":
             out.append(s)
             continue
-        br = s.get("branch") or ""
-        if s.get("pr_url") and br in CI_CACHE:
-            s["ci"] = CI_CACHE[br]
+        _apply_polled_checks(s)
         if _is_phantom(s):
             continue
         out.append(s)
@@ -1036,9 +1086,7 @@ def agent_detail(slug):
         return {"error": "not found"}
     if s.get("status") == "state_unreadable":
         return s
-    br = s.get("branch") or ""
-    if s.get("pr_url") and br in CI_CACHE:
-        s["ci"] = CI_CACHE[br]
+    _apply_polled_checks(s)
     logs = os.path.join(STATE, "logs")
 
     def read(ext, cap=40000):
@@ -1673,23 +1721,46 @@ def sweep_status():
                              "Result").get("Result") or None)}
 
 
+# What a forge calls a check that did not pass, mapped onto the five words this page draws.
+CI_FAILED = ("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
+CI_PENDING = ("QUEUED", "IN_PROGRESS", "WAITING", "PENDING", "REQUESTED", "EXPECTED")
+
+
+def _check_state(check):
+    """One check's state: pass, fail, pending, skipped or unknown.
+
+    A check carries either a conclusion (an Actions run) or a state (an older status context),
+    so both are read and the first that says something wins.
+    """
+    concl = str(check.get("conclusion") or "").upper()
+    state = str(check.get("state") or "").upper()
+    status = str(check.get("status") or "").upper()
+    if concl in ("SUCCESS", "NEUTRAL") or state == "SUCCESS":
+        return "pass"
+    if concl in CI_FAILED or state in ("FAILURE", "ERROR"):
+        return "fail"
+    if concl == "SKIPPED" or state == "SKIPPED":
+        return "skipped"
+    if status in CI_PENDING or state in CI_PENDING:
+        return "pending"
+    return "unknown"
+
+
 def _ci_parse(rollup):
-    """A PR's statusCheckRollup -> {backend/frontend/docker: pass|fail|pend}. Matches the
-    three required CI jobs by name; anything not yet concluded reads as pending."""
-    out = {}
-    for c in rollup or []:
-        name = (c.get("name") or c.get("context") or "").lower()
-        concl = (c.get("conclusion") or "").upper()
-        state = (c.get("state") or "").upper()          # StatusContext (non-Actions checks)
-        for job in ("backend", "frontend", "docker"):
-            if job in name:
-                if concl == "SUCCESS" or state == "SUCCESS":
-                    out[job] = "pass"
-                elif concl in ("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED",
-                               "STARTUP_FAILURE") or state in ("FAILURE", "ERROR"):
-                    out[job] = "fail"
-                else:
-                    out[job] = "pend"
+    """A PR's statusCheckRollup -> [{"name": ..., "state": ...}], in the order the forge gave.
+
+    EVERY check is kept, under the name the forge reported it by. This used to keep only names
+    containing backend, frontend or docker, which is one farm's job names baked into the tool:
+    a farm whose jobs are called anything else read as "nothing has reported yet", forever.
+    """
+    out = []
+    for check in rollup or []:
+        if not isinstance(check, dict):
+            continue
+        name = str(check.get("name") or check.get("context") or "").strip()
+        if not name:
+            continue
+        out.append({"name": name, "state": _check_state(check)})
     return out
 
 
@@ -1712,9 +1783,17 @@ def _ci_refresh():
         try:
             r = subprocess.run(["gh", "pr", "view", br, "--json", "statusCheckRollup"],
                                cwd=path, capture_output=True, text=True, timeout=25)
-            fresh[br] = _ci_parse(json.loads(r.stdout or "{}").get("statusCheckRollup"))
+            read = _ci_parse(json.loads(r.stdout or "{}").get("statusCheckRollup"))
+            # An empty reading means nothing was read, not "this change has no checks", so it
+            # must never become the answer: the lane's own record is better than nothing.
+            if read:
+                fresh[br] = read
+            elif CI_CACHE.get(br):
+                fresh[br] = CI_CACHE[br]
         except Exception:
-            fresh[br] = CI_CACHE.get(br, {})            # keep last-known on a transient error
+            keep = CI_CACHE.get(br)                     # keep last-known on a transient error
+            if keep:
+                fresh[br] = keep
     CI_CACHE.clear()
     CI_CACHE.update(fresh)
 

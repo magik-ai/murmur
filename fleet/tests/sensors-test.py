@@ -87,6 +87,35 @@ def main():
     said = result.stderr.count("`auto` is inert")
     check("said exactly once across three ticks", said == 1, f"said {said} times: {result.stderr}")
 
+    print("--- a machine that does not publish memory or load ---")
+    metrics = load("metrics", {"FLEET_LHM_URL": None, "FLEET_NVIDIA_SMI": "",
+                               "FLEET_STATE": state, "PATH": "/nonexistent"})
+    metrics.MEMINFO = os.path.join(state, "no-such-meminfo")
+    metrics.LOADAVG = os.path.join(state, "no-such-loadavg")
+    def absent(name, reader):
+        try:
+            check(f"{name} reads as absent, not as an error", reader() is None)
+        except Exception as exc:                                # noqa: BLE001
+            check(f"{name} reads as absent, not as an error", False, str(exc))
+
+    absent("memory", metrics.mem)
+    absent("load", metrics.loadavg)
+    try:
+        snapshot = metrics.collect()
+        collected = True
+    except Exception as exc:                                    # noqa: BLE001
+        snapshot, collected = {"capacity": {}}, False
+        check("collect answers instead of raising", False, str(exc))
+    if collected:
+        check("collect answers instead of raising", True)
+        check("the answer says the readings are absent",
+              snapshot["mem"] is None and snapshot["load"] is None, str(snapshot.get("mem")))
+        check("the missing reading is a warning, never a block",
+              metrics.NO_MACHINE_READING in snapshot["capacity"]["warnings"]
+              and snapshot["capacity"]["can_spawn"] is True, str(snapshot["capacity"]))
+    metrics = load("metrics", {"FLEET_LHM_URL": None, "FLEET_NVIDIA_SMI": "",
+                               "FLEET_STATE": state, "PATH": "/nonexistent"})
+
     print("--- a sensor that is THERE and fails to answer is not an idle GPU ---")
     broken = pathlib.Path(state) / "nvidia-smi-broken"
     broken.write_text("#!/bin/sh\nexit 1\n")

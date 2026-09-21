@@ -7,7 +7,7 @@ import {
   h, card, panel, emptyState, skeletonStack, toast, activate,
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
-import { apiPost, access } from "../core/api.js";
+import { apiPost, access, serverReason } from "../core/api.js";
 import { mark } from "../core/identity.js";
 
 /* How much of a thread is drawn at once. A mailbox with two thousand messages in it is a
@@ -196,9 +196,10 @@ function composer(context) {
             toast(answer && answer.detail ? answer.detail : `Sent to ${to}.`);
             context.refresh(threadPath(local.box, ""));
           } catch (error) {
-            toast(error && error.status === 503
-              ? "The office is still loading, try again in a moment."
-              : "The office did not take that message.", "bad");
+            toast(serverReason(error)
+              || (error && error.status === 503
+                ? "The office is still loading, try again in a moment."
+                : "The office did not take that message."), "bad");
           }
         },
       }, "Send")));

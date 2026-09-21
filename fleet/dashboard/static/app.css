@@ -706,7 +706,9 @@ button.agent-card {
 .check .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tone-pause); }
 .check.pass .dot { background: var(--tone-done); }
 .check.fail .dot { background: var(--tone-fail); }
-.check.pend .dot { background: var(--tone-wait); }
+.check.pend .dot, .check.pending .dot { background: var(--tone-wait); }
+.check.skipped .dot { background: var(--tone-pause); }
+.check.unknown .dot { background: var(--tone-pause); }
 
 .mail-panes { display: grid; grid-template-columns: 220px minmax(0, 1fr) 260px; gap: 12px; align-items: start; }
 @media (max-width: 1100px) { .mail-panes { grid-template-columns: 190px minmax(0, 1fr); } .mail-who { display: none; } }

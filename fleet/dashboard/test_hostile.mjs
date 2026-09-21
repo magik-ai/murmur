@@ -383,6 +383,181 @@ for (const [route, hash, name] of [
   await context.close();
 }
 
+/* ------------------------------------------------------------ a lane that dropped work */
+
+{
+  const { page, context } = await open({ hash: "#/agents" });
+  const chip = await page.evaluate(() => {
+    const card = document.querySelector('[data-agent-card="storefront-checkout-77c1"]');
+    const tag = card && card.querySelector("[data-scope-dropped]");
+    return tag ? tag.textContent : "";
+  });
+  check("a lane that dropped part of its scope says so on its card",
+    chip === "scope dropped: 1842, 1843", chip);
+  await page.click('[data-agent-card="storefront-checkout-77c1"]');
+  await page.waitForTimeout(1200);
+  const drawer = await page.evaluate(() => {
+    const keys = [...document.querySelectorAll("#drawerBody dt")];
+    const key = keys.find((node) => node.textContent === "Scope dropped");
+    return key ? key.nextElementSibling.textContent : "";
+  });
+  check("and the drawer says which parts", drawer === "1842, 1843", drawer);
+  await context.close();
+}
+
+/* ------------------------------------------------------- the palette, from every tab */
+
+for (const [hash, name] of [["#/system", "system"], ["#/projects", "projects"], ["#/accounts", "accounts"]]) {
+  const { page, context, thrown } = await open({ hash });
+  await page.keyboard.press("Meta+k");
+  await page.waitForTimeout(400);
+  await page.fill("#paletteInput", "demo-api");
+  await page.waitForTimeout(900);
+  const rows = await page.evaluate(() => [...document.querySelectorAll("#paletteList li")].map((node) => node.textContent));
+  check(`${name}: the palette offers a lane from a tab that never read the lanes`,
+    rows.some((row) => row.includes("demo-api-3f2a")), rows.join(" | "));
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(700);
+  const where = await page.evaluate(() => location.hash);
+  check(`${name}: Enter lands on the lane that was typed`, where.includes("agent=demo-api-3f2a"), where);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Meta+k");
+  await page.waitForTimeout(400);
+  await page.fill("#paletteInput", "rubicon");
+  await page.waitForTimeout(900);
+  const boxes = await page.evaluate(() => [...document.querySelectorAll("#paletteList li")].map((node) => node.textContent));
+  check(`${name}: the palette offers a mailbox too`, boxes.some((row) => row.includes("Mailbox")), boxes.join(" | "));
+  check(`${name}: opening the palette breaks nothing`, thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* ----------------------------------------------------- a subscription with no numbers */
+
+{
+  const { page, context, thrown } = await open({
+    hash: "#/accounts",
+    overrides: {
+      "/api/accounts": JSON.stringify({
+        at: Date.now() / 1000,
+        accounts: [
+          { name: "farm-one", label: "farm one", engine: "claude", read_at: null,
+            session: null, weekly: null, scoped: [],
+            stale_error: "This account has no login on the farm yet. Log in once: ssh -t farm claude" },
+          { name: "farm-two", label: "farm two", engine: "claude", read_at: Date.now() / 1000 - 900,
+            session: 42, weekly: 71, scoped: [],
+            stale_error: "The vendor did not answer the last time the farm asked." },
+          { name: "codex", label: "codex", engine: "codex", read_at: null,
+            session: 30, weekly: null, scoped: [],
+            stale_error: "The login on this account has expired. Log in again." },
+        ],
+        errors: {},
+      }),
+    },
+  });
+  const body = await text(page);
+  check("a card with no numbers says so in words", /No numbers yet\. This account has no login on the farm yet\./.test(body), body.slice(0, 200));
+  check("a kept reading says when it was last true",
+    /These numbers are as of 15m ago and have not refreshed\. The vendor did not answer/.test(body));
+  check("a card with no time never writes one",
+    /These numbers have not refreshed\. The login on this account has expired\./.test(body));
+  check("no card ever says \"from not known\"", !/from not known/.test(body));
+  check("no card prints an exception or a path",
+    !/Error:|Errno|\/private\/|\/home\//.test(body), body.slice(0, 200));
+  check("a card with nothing to report breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* --------------------------------------------------------------- switching an engine */
+
+{
+  const writes = [];
+  const { page, context, thrown } = await open({
+    hash: "#/accounts",
+    overrides: {
+      "/api/models": (handler) => {
+        const request = handler.request();
+        if (request.method() !== "POST") return handler.continue();
+        writes.push(JSON.parse(request.postData() || "{}"));
+        return handler.fulfill({
+          status: 200, contentType: "application/json",
+          body: JSON.stringify({ model: { id: "codex" }, error: null }),
+        });
+      },
+    },
+  });
+  const controls = await page.evaluate(() => ({
+    switches: document.querySelectorAll("[data-engine-switch]").length,
+    tests: document.querySelectorAll("[data-engine-test]").length,
+    word: (document.querySelector('[data-engine-switch="codex"]') || {}).textContent || "",
+  }));
+  check("every engine card carries a switch and a test",
+    controls.switches === 3 && controls.tests === 3, JSON.stringify(controls));
+  check("the switch says what pressing it does", controls.word === "Switch off", controls.word);
+  await page.click('[data-engine-switch="codex"]');
+  await page.waitForTimeout(1000);
+  check("switching an engine off posts the action the server understands",
+    writes.some((row) => row.action === "disable" && row.id === "codex"), JSON.stringify(writes));
+  await page.click('[data-engine-test="codex"]');
+  await page.waitForTimeout(1000);
+  check("the test button asks the server to try that engine",
+    writes.some((row) => row.action === "test" && row.id === "codex"), JSON.stringify(writes));
+  check("the engine controls break nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+{
+  const { page, context } = await open({
+    hash: "#/accounts",
+    overrides: {
+      "/api/access": JSON.stringify({ writable: false, reason: "This page was opened without the dashboard token.", token_required: true, loopback: false }),
+    },
+  });
+  const off = await page.evaluate(() => [...document.querySelectorAll("[data-engine-switch], [data-engine-test]")]
+    .every((node) => node.disabled));
+  check("a reader who cannot write cannot switch an engine", off);
+  await context.close();
+}
+
+/* ------------------------------------------------------- what the server said about a refusal */
+
+{
+  const said = "a repository is owner/name";
+  const { page, context, thrown } = await open({
+    hash: "#/projects",
+    overrides: {
+      "/api/projects": (handler) => (handler.request().method() === "POST"
+        ? handler.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: said }) })
+        : handler.continue()),
+    },
+  });
+  await page.fill("#projectName", "broken");
+  await page.fill("#projectRepo", "not a repository");
+  await page.evaluate(() => [...document.querySelectorAll("button")].find((node) => node.textContent === "Add").click());
+  await page.waitForTimeout(1200);
+  const shown = await page.evaluate(() => [...document.querySelectorAll(".readonly-note")].map((node) => node.textContent).join(" | "));
+  check("a refused project shows the reason the server gave", shown.includes(said), shown);
+  check("a refused project breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+{
+  const said = "that lane is not running any more";
+  const { page, context } = await open({
+    hash: "#/agents?agent=demo-api-3f2a",
+    overrides: {
+      "/api/agent/msg": (handler) => handler.fulfill({
+        status: 400, contentType: "application/json", body: JSON.stringify({ error: said }),
+      }),
+    },
+  });
+  await page.fill("#laneMessage", "look at the orders screen");
+  await page.evaluate(() => [...document.querySelectorAll("#drawerBody button")].find((node) => node.textContent === "Send").click());
+  await page.waitForTimeout(1000);
+  const toast = await page.evaluate(() => [...document.querySelectorAll(".toast")].map((node) => node.textContent).join(" | "));
+  check("a refused message to a lane shows the reason the server gave", toast.includes(said), toast);
+  await context.close();
+}
+
 /* ------------------------------------------------------------------ the freshness label */
 
 {
@@ -392,6 +567,39 @@ for (const [route, hash, name] of [
   });
   const label = await page.evaluate(() => document.getElementById("freshness").textContent);
   check("one dead route is enough to stop saying live", /Stale/.test(label), label);
+  await context.close();
+}
+
+{
+  const since = new Date(Date.now() - 300000).toISOString().replace(/\.\d+Z$/, "Z");
+  const { page, context } = await open({
+    hash: "#/mail",
+    overrides: {
+      "/api/mail/boxes": JSON.stringify({
+        at: since, stale_since: since, error: "gh could not reach github.com", pending: null,
+        boxes: [{ name: "all", number: 1, updated_at: Date.now() / 1000 - 600, count_24h: 9, last_at: Date.now() / 1000 - 600 }],
+      }),
+    },
+  });
+  const seen = await page.evaluate(() => ({
+    label: document.getElementById("freshness").textContent,
+    why: document.getElementById("freshness").title,
+    stale: document.getElementById("freshness").classList.contains("stale"),
+    boxes: document.querySelectorAll(".boxlist li").length,
+  }));
+  check("a kept answer from the office stops the header saying live", /^Stale since /.test(seen.label), seen.label);
+  check("the header says on hover which route is old and why",
+    seen.why.includes("/api/mail/boxes") && seen.why.includes("github.com"), seen.why);
+  // Nothing here failed: the request worked, the answer itself said it was a kept copy.
+  check("the header is marked old even though every request worked",
+    seen.stale && seen.boxes > 0, JSON.stringify(seen));
+  await context.close();
+}
+
+{
+  const { page, context } = await open({ hash: "#/agents" });
+  const label = await page.evaluate(() => document.getElementById("freshness").textContent);
+  check("nothing old and nothing failing still reads live", /^Live, as of /.test(label), label);
   await context.close();
 }
 

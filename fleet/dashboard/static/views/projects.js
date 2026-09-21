@@ -3,7 +3,7 @@
 
 import { h, card, panel, emptyState, skeletonStack, toast, activate } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
-import { apiPost, access, list } from "../core/api.js";
+import { apiPost, access, list, serverReason } from "../core/api.js";
 
 const local = { busy: false, error: "" };
 
@@ -85,7 +85,9 @@ async function submit(context) {
       toast(`${name} is registered.`);
     }
   } catch (error) {
-    local.error = "The project was not registered. The server refused the request.";
+    // The server's own words first: they name what is wrong with this form.
+    local.error = serverReason(error)
+      || "The project was not registered. The server refused the request.";
   } finally {
     local.busy = false;
     await context.refresh("/api/projects");

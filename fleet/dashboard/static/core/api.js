@@ -42,7 +42,20 @@ export class ApiError extends Error {
     this.status = status;
     this.payload = payload;
     this.path = path;
+    /* What the server itself said, kept apart from the message so a view can tell a sentence
+       written for a person from this class's own fallback. Empty when it said nothing. */
+    this.reason = payload && typeof payload.error === "string" ? payload.error.trim() : "";
   }
+}
+
+/**
+ * The sentence the server gave for refusing, or "" when it gave none. A refusal is usually the
+ * most useful thing on the screen: "a repository is owner/name" tells the reader what to do,
+ * and "the request was refused" tells them nothing. Every caller of apiPost that has somewhere
+ * to put a sentence shows this one first and keeps its own wording as the fallback.
+ */
+export function serverReason(error) {
+  return error && typeof error.reason === "string" ? error.reason : "";
 }
 
 /* A body the page cannot decode is a failure, not an empty answer. A proxy, a captive portal
@@ -85,6 +98,11 @@ export async function apiGet(path) {
   return parse(response, path);
 }
 
+/**
+ * A write. A refusal throws, and the thrown error carries the server's own sentence on
+ * `reason` whenever the refusal came back as JSON with an `error` in it. Read it with
+ * serverReason(); a caller that swallows it leaves the reader guessing what was wrong.
+ */
 export async function apiPost(path, body) {
   const response = await fetch(path, {
     method: "POST",
@@ -282,4 +300,23 @@ export function anyFailing(paths) {
     const entry = cache.get(path);
     return Boolean(entry && entry.error);
   });
+}
+
+/**
+ * The routes on screen whose answer says it is old. A snapshot route (mail, the prerequisites,
+ * the settings) answers from the server's last good reading and marks it `stale_since` when the
+ * pass behind it failed. That answer reaches this page perfectly well, so the page's own
+ * requests are all fine, and the reader is still looking at old data: the header has to count
+ * it. Each row carries where it came from, since when, and why, for the label to show.
+ */
+export function staleSnapshots(paths) {
+  const out = [];
+  for (const path of new Set(paths)) {
+    const entry = cache.get(path);
+    const data = entry && entry.data;
+    if (!data || typeof data !== "object" || Array.isArray(data)) continue;
+    if (!data.stale_since) continue;
+    out.push({ path, since: data.stale_since, reason: typeof data.error === "string" ? data.error : "" });
+  }
+  return out;
 }

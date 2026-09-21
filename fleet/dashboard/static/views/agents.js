@@ -7,7 +7,7 @@ import {
   openDrawer, closeDrawer, openDrawerKey, toast, safeHref, activate,
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
-import { apiPost, access, list } from "../core/api.js";
+import { apiPost, access, list, serverReason } from "../core/api.js";
 import { mark } from "../core/identity.js";
 
 /* How many lanes are drawn before the reader is asked whether they want the rest. Five hundred
@@ -114,6 +114,7 @@ function agentCard(row, context) {
       h("div", { class: "spacer" }),
       pill(meaning, statusWord(row), row.status || "")),
     statusDetail(row) ? h("span", { class: "tag" }, statusDetail(row)) : null,
+    droppedScope(row) ? h("span", { class: "tag", "data-scope-dropped": "" }, droppedScope(row)) : null,
     h("div", { class: "sub" },
       [row.project, row.lane, row.engine].filter(Boolean).join(" · ") || "no project"),
     row.task ? h("div", { class: "task" }, fmt.shorten(row.task, 150)) : null,
@@ -129,6 +130,15 @@ function statusWord(row) {
   return MEANINGS[agentMeaning(row.status)].label;
 }
 
+/* What a lane was asked for and did not deliver. A lane that drops part of its scope records
+   what it dropped, and that used to be written nowhere on the page: the card said the lane was
+   running and nothing said part of the work had been put down. */
+export function droppedScope(row) {
+  const dropped = (row && row.scope && row.scope.dropped) || [];
+  if (!Array.isArray(dropped) || !dropped.length) return "";
+  return `scope dropped: ${dropped.map((item) => String(item)).join(", ")}`;
+}
+
 /* Why a lane is in the state it is in, when the state alone does not say it. A record the
    server could not read is a failure like any other; what makes it different is the reason,
    and a reason is not a sixth status. */
@@ -138,9 +148,26 @@ function statusDetail(row) {
   return "";
 }
 
+/* The five words a check can be in. Anything else a record happens to carry is drawn as
+   unknown rather than turned into a class name of its own. */
+const CHECK_STATES = ["pass", "fail", "pending", "pend", "skipped", "unknown"];
+
+/** The checks on a change, in the order the server gave them, under their own names.
+
+    The server answers a list of {name, state}. A lane record written before that change holds
+    the older object of name to state, and is still read here, so an old record still draws. */
+export function checkEntries(checks) {
+  const rows = Array.isArray(checks)
+    ? checks.filter((row) => row && typeof row === "object").map((row) => [row.name, row.state])
+    : Object.entries(checks && typeof checks === "object" ? checks : {});
+  return rows
+    .filter(([name]) => typeof name === "string" && name.trim() !== "")
+    .map(([name, state]) => [name, CHECK_STATES.includes(state) ? state : "unknown"]);
+}
+
 /** The names come from the check rollup, so a farm with other jobs reads correctly here. */
 function checkRow(checks) {
-  const entries = Object.entries(checks || {});
+  const entries = checkEntries(checks);
   if (!entries.length) return null;
   const shown = entries.slice(0, 4);
   const rest = entries.slice(4);
@@ -232,6 +259,8 @@ function detailBody(slug, context) {
           fact("Started", fmt.ago(row.started_at)),
           fact("Cost", fmt.money(row.cost_usd)),
           fact("Tokens", `${fmt.num(row.tokens_in)} in, ${fmt.num(row.tokens_out)} out`),
+          droppedScope(row) ? fact("Scope dropped",
+            (row.scope.dropped || []).map((item) => String(item)).join(", ")) : null,
           row.branch ? fact("Branch", row.branch) : null,
           row.worktree ? fact("Worktree", row.worktree) : null),
         row.pr_url ? h("div", { key: "pr" },
@@ -302,7 +331,7 @@ function composer(slug, context) {
             field.value = "";
             toast(answer && answer.detail ? answer.detail : `Sent to ${slug}.`);
           } catch (error) {
-            toast("The message was not delivered.", "bad");
+            toast(serverReason(error) || "The message was not delivered.", "bad");
           }
         },
       }, "Send"),

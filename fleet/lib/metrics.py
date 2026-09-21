@@ -198,17 +198,34 @@ def swap_churn_kbps():
         return 0.0
 
 
+# Where the memory and load readings come from. Named here rather than opened inline so a check
+# can point them somewhere else, and so it is visible that both are Linux and only Linux.
+MEMINFO = "/proc/meminfo"
+LOADAVG = "/proc/loadavg"
+
+
 def mem():
+    """Memory in gigabytes, or None on a machine that does not publish it.
+
+    A machine without /proc (a Mac, a container built without it) is not a broken farm, it is a
+    farm this reading cannot be taken on. Returning None says that; letting the error escape
+    used to take the whole metrics answer down with it, and with it the capacity pill, the
+    machine tiles and the system tiles.
+    """
     d = {}
-    with open("/proc/meminfo") as f:
-        for line in f:
-            k, _, rest = line.partition(":")
-            d[k] = int(rest.strip().split()[0])  # kB
+    try:
+        with open(MEMINFO) as f:
+            for line in f:
+                k, _, rest = line.partition(":")
+                d[k] = int(rest.strip().split()[0])  # kB
+        total, avail = d["MemTotal"], d["MemAvailable"]
+    except (OSError, KeyError, ValueError):
+        return None
     g = 1024 * 1024
     return {
-        "ram_total_gb": round(d["MemTotal"] / g, 1),
-        "ram_avail_gb": round(d["MemAvailable"] / g, 1),
-        "ram_used_gb": round((d["MemTotal"] - d["MemAvailable"]) / g, 1),
+        "ram_total_gb": round(total / g, 1),
+        "ram_avail_gb": round(avail / g, 1),
+        "ram_used_gb": round((total - avail) / g, 1),
         "swap_total_gb": round(d.get("SwapTotal", 0) / g, 1),
         "swap_used_gb": round((d.get("SwapTotal", 0) - d.get("SwapFree", 0)) / g, 1),
         "swap_churn_kbps": swap_churn_kbps(),
@@ -216,10 +233,14 @@ def mem():
 
 
 def loadavg():
-    with open("/proc/loadavg") as f:
-        a = f.read().split()
-    return {"load1": float(a[0]), "load5": float(a[1]), "load15": float(a[2]),
-            "cores": os.cpu_count()}
+    """The load averages, or None where they are not published. See mem()."""
+    try:
+        with open(LOADAVG) as f:
+            a = f.read().split()
+        return {"load1": float(a[0]), "load5": float(a[1]), "load15": float(a[2]),
+                "cores": os.cpu_count()}
+    except (OSError, IndexError, ValueError):
+        return None
 
 
 def disk():
@@ -273,11 +294,19 @@ def agents():
     return n
 
 
+NO_MACHINE_READING = "no memory or load reading on this platform"
+
+
 def verdict(m, pol):
     blocks = []
     warnings = []
-    if m["mem"]["ram_avail_gb"] < pol["ram_min_gb"]:
-        blocks.append(f"free RAM {m['mem']['ram_avail_gb']}GB < {pol['ram_min_gb']}GB")
+    memory = m.get("mem")
+    # No reading is a warning, never a block: a farm must not be stopped from spawning because
+    # the machine under it does not publish a number this tool knows how to read.
+    if memory is None or m.get("load") is None:
+        warnings.append(NO_MACHINE_READING)
+    if memory is not None and memory["ram_avail_gb"] < pol["ram_min_gb"]:
+        blocks.append(f"free RAM {memory['ram_avail_gb']}GB < {pol['ram_min_gb']}GB")
     if m["disk"]["free_gb"] < pol["disk_min_gb"]:
         blocks.append(f"free disk {m['disk']['free_gb']}GB < {pol['disk_min_gb']}GB")
     if m["gpu"] and m["gpu"]["temp_c"] > pol["gpu_temp_max"]:
@@ -287,7 +316,7 @@ def verdict(m, pol):
         blocks.append(f"CPU {ct}C > {pol['cpu_temp_max']}C")
     if ct is None:
         warnings.append("CPU temp UNKNOWN (no FLEET_LHM_URL, or the sensor is unreachable)")
-    if m["mem"]["ram_avail_gb"] < pol["warn_ram_gb"]:
+    if memory is not None and memory["ram_avail_gb"] < pol["warn_ram_gb"]:
         warnings.append(f"free RAM below warning floor ({pol['warn_ram_gb']}GB)")
     if m["disk"]["free_gb"] < pol["warn_disk_gb"]:
         warnings.append(f"free disk below warning floor ({pol['warn_disk_gb']}GB)")

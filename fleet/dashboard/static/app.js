@@ -190,15 +190,36 @@ function badgeFor(view) {
   return value ? h("span", { class: "count" }, String(value)) : null;
 }
 
+/* A moment, however the answer wrote it: seconds since the epoch, or a stamp in ISO. */
+function clockTime(value) {
+  const when = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  return Number.isNaN(when.getTime()) ? String(value) : when.toLocaleTimeString("en-US");
+}
+
+/* Live means two things at once: this page's own requests are working AND nothing on screen is
+   a kept copy of an older reading. Saying Live over a panel that says the office last answered
+   a minute ago is the header contradicting the page under it. */
 function paintFreshness() {
   const node = document.getElementById("freshness");
   if (!node) return;
   const paths = currentPaths();
   const at = api.oldestAt(paths);
   const failing = api.anyFailing(paths);
-  const stamp = at == null ? "not yet" : new Date(at * 1000).toLocaleTimeString("en-US");
-  node.textContent = failing ? `Stale since ${stamp}` : `Live, as of ${stamp}`;
-  node.classList.toggle("stale", failing);
+  const stale = api.staleSnapshots(paths);
+  if (failing) {
+    node.textContent = `Stale since ${at == null ? "not yet" : clockTime(at)}`;
+    node.title = "A request from this page is failing, so what you see is the last answer.";
+  } else if (stale.length) {
+    const oldest = stale.reduce((one, other) => (new Date(other.since) < new Date(one.since) ? other : one));
+    node.textContent = `Stale since ${clockTime(oldest.since)}`;
+    node.title = stale
+      .map((row) => `${row.path}: last good answer at ${clockTime(row.since)}${row.reason ? `, ${row.reason}` : ""}`)
+      .join("\n");
+  } else {
+    node.textContent = `Live, as of ${at == null ? "not yet" : clockTime(at)}`;
+    node.title = "Every panel on this screen is showing a fresh answer.";
+  }
+  node.classList.toggle("stale", failing || stale.length > 0);
 }
 
 function paintCapacity() {
@@ -305,6 +326,13 @@ function storedTheme() {
 
 /* --------------------------------------------------------- the palette */
 
+/* What the palette needs to be able to offer everything, whichever tab is open. Half the tabs
+   never read the lanes or the mailboxes, and the palette used to offer only what the open tab
+   had already asked for: from System, typing a lane name found nothing at all. These go
+   through the same cache as every other read, so opening the palette on the agents tab costs
+   nothing and opening it on System costs one pass. */
+const PALETTE_PATHS = ["/api/fleet", "/api/projects", "/api/mail/boxes"];
+
 /* Everything a reader might want to jump to. A row with no name is not offered: it cannot be
    typed for, and a nameless entry used to stop the list dead on the first keystroke. */
 function paletteItems() {
@@ -360,6 +388,10 @@ function togglePalette(open) {
     input.value = "";
     paintPalette();
     input.focus();
+    // Read what this tab never asked for, then draw the list again with it in.
+    api.pull(PALETTE_PATHS).then((done) => {
+      if (done.length && !document.getElementById("palette").hidden) paintPalette();
+    });
   }
 }
 

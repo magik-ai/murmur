@@ -344,6 +344,42 @@ ok("a failure is turned into a sentence and a command, never a trace", () => {
   }
 });
 
+ok("an answer that says it is old is counted as old, even though it arrived", () => {
+  const fresh = api.resource("/api/health");
+  fresh.data = { at: "2026-09-21T19:00:00Z", stale_since: null, error: null, checks: [] };
+  const old = api.resource("/api/mail/boxes");
+  old.data = { at: "2026-09-21T18:00:00Z", stale_since: "2026-09-21T18:00:00Z",
+    error: "gh could not reach github.com", boxes: [] };
+  const found = api.staleSnapshots(["/api/health", "/api/mail/boxes", "/api/never-asked-for"]);
+  assert.deepEqual(found.map((row) => row.path), ["/api/mail/boxes"]);
+  assert.equal(found[0].reason, "gh could not reach github.com");
+  assert.deepEqual(api.staleSnapshots(["/api/health"]), []);
+  // A route that answers a list has no envelope to be old, and must not throw here.
+  const listed = api.resource("/api/fleet");
+  listed.data = [{ slug: "one" }];
+  assert.deepEqual(api.staleSnapshots(["/api/fleet"]), []);
+  api.forget("/api/health");
+  api.forget("/api/mail/boxes");
+  api.forget("/api/fleet");
+  assert.ok(read("static/app.js").includes("staleSnapshots"),
+    "the header does not look at whether a snapshot on screen is old");
+});
+
+ok("a refusal carries the server's own sentence to whoever has to act on it", () => {
+  const refused = new api.ApiError(400, { error: "a repository is owner/name" }, "/api/projects");
+  assert.equal(api.serverReason(refused), "a repository is owner/name");
+  assert.equal(refused.reason, "a repository is owner/name");
+  // Nothing to say is said as nothing, so the caller falls back to its own wording.
+  assert.equal(api.serverReason(new api.ApiError(500, null, "/api/projects")), "");
+  assert.equal(api.serverReason(new api.ApiError(500, { detail: "x" }, "/api/projects")), "");
+  assert.equal(api.serverReason(new TypeError("fetch failed")), "");
+  assert.equal(api.serverReason(null), "");
+  for (const relative of ["static/views/projects.js", "static/views/agents.js", "static/views/mail.js"]) {
+    assert.ok(read(relative).includes("serverReason"),
+      `${relative} throws the server's reason away and writes its own sentence instead`);
+  }
+});
+
 const VIEWS = await Promise.all(
   ["overview", "agents", "mail", "queue", "projects", "accounts", "system"]
     .map((name) => import(`./static/views/${name}.js`).then((module) => module.default)),
@@ -359,6 +395,63 @@ ok("every view declares the same contract", () => {
     const needs = typeof view.needs === "function" ? view.needs({}) : view.needs;
     assert.ok(Array.isArray(needs), `${view.id} must declare what it reads`);
     for (const route of needs) assert.match(route, /^\/api\//, `${view.id} reads ${route}`);
+  }
+});
+
+await okAsync("a card with no numbers says so in words, and never prints a time it does not have", async () => {
+  const { troubleNote } = await import("./static/views/accounts.js");
+  const said = "This account has no login on the farm yet. Log in once: ssh -t farm claude";
+  const sentence = (node) => words(node);
+
+  // No numbers and no time: the card must not turn a missing time into "from not known".
+  const fresh = sentence(troubleNote({ name: "farm-one", read_at: null, stale_error: said }));
+  assert.equal(fresh, `No numbers yet. ${said}`);
+  assert.ok(!/not known/.test(fresh), fresh);
+
+  // Numbers that have stopped refreshing, with a time behind them.
+  const kept = sentence(troubleNote({
+    name: "farm-two", session: 42, read_at: (Date.now() / 1000) - 900,
+    stale_error: "The vendor did not answer the last time the farm asked.",
+  }));
+  assert.match(kept, /^These numbers are as of 15m ago and have not refreshed\./);
+  assert.match(kept, /The vendor did not answer/);
+
+  // Numbers with no time at all: no "as of" is written.
+  const timeless = sentence(troubleNote({
+    name: "farm-three", weekly: 71, read_at: null,
+    stale_error: "The login on this account has expired. Log in again.",
+  }));
+  assert.equal(timeless, "These numbers have not refreshed. The login on this account has expired. Log in again.");
+  assert.ok(!/as of/.test(timeless), timeless);
+
+  // Nothing wrong: no sentence at all.
+  assert.equal(troubleNote({ name: "farm-four", session: 42, read_at: 1 }), null);
+  assert.equal(troubleNote({ name: "farm-five", stale_error: "   " }), null);
+});
+
+await okAsync("a lane that put part of its work down says so", async () => {
+  const { droppedScope } = await import("./static/views/agents.js");
+  assert.equal(droppedScope({ scope: { delivered: [1841], dropped: [1842, 1843] } }),
+    "scope dropped: 1842, 1843");
+  for (const quiet of [{}, { scope: {} }, { scope: { dropped: [] } }, { scope: { dropped: "some" } }, null]) {
+    assert.equal(droppedScope(quiet), "", JSON.stringify(quiet));
+  }
+});
+
+await okAsync("a check keeps the name the farm gave it, whatever that name is", async () => {
+  const { checkEntries } = await import("./static/views/agents.js");
+  assert.deepEqual(checkEntries([
+    { name: "unit tests", state: "pass" },
+    { name: "typecheck", state: "pass" },
+    { name: "container image", state: "pending" },
+  ]), [["unit tests", "pass"], ["typecheck", "pass"], ["container image", "pending"]]);
+  // A record written before the server answered a list still draws.
+  assert.deepEqual(checkEntries({ "unit tests": "pass", "container image": "pend" }),
+    [["unit tests", "pass"], ["container image", "pend"]]);
+  // A word this page has no colour for is drawn as unknown, not as a class of its own.
+  assert.deepEqual(checkEntries([{ name: "odd", state: "something else" }]), [["odd", "unknown"]]);
+  for (const nothing of [null, undefined, [], {}, "checks", 7]) {
+    assert.deepEqual(checkEntries(nothing), [], `${JSON.stringify(nothing)} is not a check list`);
   }
 });
 

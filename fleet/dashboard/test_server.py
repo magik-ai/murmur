@@ -434,6 +434,198 @@ class DashboardServerTest(unittest.TestCase):
             subprocess.run = real
 
 
+class AccountTroubleTest(unittest.TestCase):
+    """What a subscription card is told when the numbers could not be read.
+
+    The rule: one sentence, for a person, naming what to do. Never an exception class, never a
+    path off this machine's disk. A card that says FileNotFoundError and prints a directory
+    tells the reader nothing, and it tells anyone the screen is shared with where the farm
+    keeps its files.
+    """
+
+    def setUp(self):
+        patcher = mock.patch.object(dashboard.CA, "FARM_ALIAS", "farm")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_missing_login_says_how_to_log_in(self):
+        for raw in ["FileNotFoundError: [Errno 2] No such file or directory: "
+                    "'/private/tmp/e2e/home/.claude/.credentials.json'",
+                    "never read"]:
+            self.assertEqual(
+                dashboard.account_trouble(raw),
+                "This account has no login on the farm yet. Log in once: ssh -t farm claude",
+                raw)
+
+    def test_the_alias_is_the_one_the_operator_reaches_this_farm_by(self):
+        with mock.patch.object(dashboard.CA, "FARM_ALIAS", "big-box"):
+            self.assertIn("ssh -t big-box claude",
+                          dashboard.account_trouble("FileNotFoundError: nope"))
+
+    def test_a_refused_login_says_to_log_in_again(self):
+        for raw in ["HTTP 401", "HTTP 403", "token expired", "HTTPError: 401 Unauthorized"]:
+            self.assertEqual(dashboard.account_trouble(raw),
+                             "The login on this account has expired. Log in again.", raw)
+
+    def test_a_vendor_that_did_not_answer_says_so_plainly(self):
+        for raw in ["URLError: <urlopen error [Errno 61] Connection refused>",
+                    "TimeoutError", "socket.gaierror: name or service not known", "HTTP 503"]:
+            self.assertEqual(dashboard.account_trouble(raw),
+                             "The vendor did not answer the last time the farm asked.", raw)
+
+    def test_being_told_to_slow_down_is_not_an_error_to_act_on(self):
+        self.assertEqual(dashboard.account_trouble("429 rate-limited, 3m to retry"),
+                         "The vendor asked the farm to slow down. "
+                         "These numbers refresh by themselves.")
+
+    def test_anything_else_is_still_a_sentence_and_never_a_traceback(self):
+        raw = "ValueError: could not parse /home/farm/.claude/usage.json line 3"
+        self.assertEqual(dashboard.account_trouble(raw), dashboard.ACCOUNT_TROUBLE_UNKNOWN)
+        self.assertEqual(dashboard.account_trouble(""), "")
+        self.assertEqual(dashboard.account_trouble(None), "")
+
+    def test_no_reason_on_a_card_carries_a_class_name_or_a_path(self):
+        rows = [{"name": "farm-one", "stale_error": "FileNotFoundError: [Errno 2] No such file "
+                                                    "or directory: '/private/tmp/e2e/home'"},
+                {"name": "codex", "stale_error": "HTTP 403"},
+                {"name": "farm-two", "session": 42}]
+        rows, errors = dashboard.plain_account_trouble(
+            rows, {"farm-one": "FileNotFoundError: [Errno 2] '/private/tmp/e2e/home'"})
+        written = " ".join([row.get("stale_error") or "" for row in rows] + list(errors.values()))
+        for forbidden in ["Error:", "Errno", "/private/", "/home/", "Traceback"]:
+            self.assertNotIn(forbidden, written)
+        self.assertIn("ssh -t farm claude", rows[0]["stale_error"])
+        self.assertEqual(rows[1]["stale_error"],
+                         "The login on this account has expired. Log in again.")
+        self.assertNotIn("stale_error", rows[2])
+        self.assertIn("ssh -t farm claude", errors["farm-one"])
+
+
+class MachineReadingTest(unittest.TestCase):
+    """The machine readings are Linux only, and the page must survive being run anywhere else."""
+
+    def test_the_metrics_route_answers_on_a_machine_with_no_proc(self):
+        with tempfile.TemporaryDirectory() as state:
+            with mock.patch.object(dashboard.M, "MEMINFO", os.path.join(state, "nope")), \
+                 mock.patch.object(dashboard.M, "LOADAVG", os.path.join(state, "nope")), \
+                 mock.patch.object(dashboard.M, "STATE", state), \
+                 mock.patch.object(dashboard, "STATE", state):
+                with running_server() as base:
+                    status, body = fetch_json(base, "/api/metrics")
+        self.assertEqual(status, 200)
+        self.assertIsNone(body["mem"])
+        self.assertIsNone(body["load"])
+        self.assertTrue(body["capacity"]["can_spawn"])
+        self.assertIn(dashboard.M.NO_MACHINE_READING, body["capacity"]["warnings"])
+
+
+class ChecksOnAChangeTest(unittest.TestCase):
+    """What the page is told about the checks on a lane's change.
+
+    The rule these hold to: a check belongs to the farm that ran it, so it keeps the name that
+    farm gave it, and a poll that read nothing never replaces what a lane already recorded.
+    """
+
+    ROLLUP = [
+        {"name": "unit tests", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "typecheck", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "container image", "status": "IN_PROGRESS", "conclusion": None},
+    ]
+
+    def setUp(self):
+        dashboard.CI_CACHE.clear()
+        self.addCleanup(dashboard.CI_CACHE.clear)
+
+    def test_every_check_keeps_its_own_name_in_the_order_it_was_reported(self):
+        self.assertEqual(
+            dashboard._ci_parse(self.ROLLUP),
+            [{"name": "unit tests", "state": "pass"},
+             {"name": "typecheck", "state": "pass"},
+             {"name": "container image", "state": "pending"}],
+        )
+
+    def test_a_check_is_one_of_five_states_however_the_forge_words_it(self):
+        rollup = [
+            {"name": "one", "conclusion": "FAILURE"},
+            {"name": "two", "conclusion": "TIMED_OUT"},
+            {"name": "three", "conclusion": "SKIPPED"},
+            {"name": "four", "conclusion": "NEUTRAL"},
+            {"context": "legacy/status", "state": "PENDING"},
+            {"context": "legacy/other", "state": "ERROR"},
+            {"name": "nothing said"},
+            {"name": "   "},
+            "not a check at all",
+        ]
+        self.assertEqual(
+            dashboard._ci_parse(rollup),
+            [{"name": "one", "state": "fail"},
+             {"name": "two", "state": "fail"},
+             {"name": "three", "state": "skipped"},
+             {"name": "four", "state": "pass"},
+             {"name": "legacy/status", "state": "pending"},
+             {"name": "legacy/other", "state": "fail"},
+             {"name": "nothing said", "state": "unknown"}],
+        )
+        self.assertEqual(dashboard._ci_parse(None), [])
+
+    def _farm(self, state, record):
+        path = pathlib.Path(state, "state")
+        path.mkdir(parents=True, exist_ok=True)
+        (path / (record["slug"] + ".json")).write_text(json.dumps(record))
+
+    def test_a_poll_that_read_nothing_leaves_the_lane_its_own_checks(self):
+        record = {"slug": "demo-web-91bd", "project": "demo", "lane": "web", "engine": "claude",
+                  "status": "pr_open", "branch": "demo/web", "pr_url": "https://example.invalid/1",
+                  "ci": [{"name": "unit tests", "state": "pass"}]}
+        with tempfile.TemporaryDirectory() as state:
+            self._farm(state, record)
+            with mock.patch.object(dashboard, "STATE", state):
+                dashboard.CI_CACHE.clear()
+                self.assertEqual(dashboard.agents()[0]["ci"],
+                                 [{"name": "unit tests", "state": "pass"}])
+                self.assertEqual(dashboard.agent_detail("demo-web-91bd")["ci"],
+                                 [{"name": "unit tests", "state": "pass"}])
+                dashboard.CI_CACHE["demo/web"] = dashboard._ci_parse(self.ROLLUP)
+                self.assertEqual([row["name"] for row in dashboard.agents()[0]["ci"]],
+                                 ["unit tests", "typecheck", "container image"])
+
+    def test_a_poll_of_a_farm_whose_jobs_have_other_names_is_not_thrown_away(self):
+        record = {"slug": "demo-web-91bd", "project": "demo", "lane": "web", "engine": "claude",
+                  "status": "pr_open", "branch": "demo/web", "pr_url": "https://example.invalid/1"}
+        answer = types.SimpleNamespace(stdout=json.dumps({"statusCheckRollup": self.ROLLUP}))
+        with tempfile.TemporaryDirectory() as state:
+            self._farm(state, record)
+            registry = pathlib.Path(state, "projects.toml")
+            registry.write_text(f'[demo]\npath = "{state}"\n')
+            with mock.patch.object(dashboard, "STATE", state), \
+                 mock.patch.object(dashboard, "CONFIG", state), \
+                 mock.patch.object(dashboard.subprocess, "run", return_value=answer):
+                dashboard._ci_refresh()
+            self.assertEqual(dashboard.CI_CACHE["demo/web"],
+                             [{"name": "unit tests", "state": "pass"},
+                              {"name": "typecheck", "state": "pass"},
+                              {"name": "container image", "state": "pending"}])
+
+    def test_a_failing_poll_keeps_the_last_reading_rather_than_blanking_it(self):
+        record = {"slug": "demo-web-91bd", "project": "demo", "lane": "web", "engine": "claude",
+                  "status": "pr_open", "branch": "demo/web", "pr_url": "https://example.invalid/1"}
+        known = [{"name": "unit tests", "state": "pass"}]
+        with tempfile.TemporaryDirectory() as state:
+            self._farm(state, record)
+            pathlib.Path(state, "projects.toml").write_text(f'[demo]\npath = "{state}"\n')
+            with mock.patch.object(dashboard, "STATE", state), \
+                 mock.patch.object(dashboard, "CONFIG", state):
+                dashboard.CI_CACHE["demo/web"] = list(known)
+                with mock.patch.object(dashboard.subprocess, "run",
+                                       side_effect=OSError("gh is gone")):
+                    dashboard._ci_refresh()
+                self.assertEqual(dashboard.CI_CACHE["demo/web"], known)
+                empty = types.SimpleNamespace(stdout=json.dumps({"statusCheckRollup": []}))
+                with mock.patch.object(dashboard.subprocess, "run", return_value=empty):
+                    dashboard._ci_refresh()
+                self.assertEqual(dashboard.CI_CACHE["demo/web"], known)
+
+
 class DashboardStaticTest(unittest.TestCase):
     """The front end is a directory of files, so the name comes from the request. These are the
     checks that stop that from becoming "read any file on the machine"."""

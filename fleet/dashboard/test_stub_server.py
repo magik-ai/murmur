@@ -81,6 +81,7 @@ AGENTS = [
         "started_at": ago(18000), "updated_at": ago(5400), "spawned_by": "rubicon",
         "branch": "storefront/checkout-retry", "cost_usd": 0.94, "tokens_in": 96000,
         "tokens_out": 8100,
+        "scope": {"delivered": [1841], "dropped": [1842, 1843]},
         "task": "Retry a failed card charge once, then hand the customer a plain explanation.",
     },
     {
