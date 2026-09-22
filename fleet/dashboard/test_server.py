@@ -582,12 +582,33 @@ exit 1
 
 
 def monotonic_microseconds(ago):
-    """This machine's CLOCK_MONOTONIC, `ago` seconds back, as systemd would print it.
+    """CLOCK_MONOTONIC, `ago` seconds back, as systemd would print it.
 
-    Computed here rather than hardcoded: a fixed number is in the future on a machine that
-    booted a minute ago, and a stamp in the future is no stamp at all.
+    Read from the clock rather than hardcoded, so a stamp is never in the future. Under
+    `steady_clock` the clock is a fixed large number, so a stamp is never before boot either: on
+    a CI runner that booted forty seconds ago, "an hour ago" is before boot, systemd would never
+    print it, and the server rightly reads it as never.
     """
     return str(max(0, int((time.clock_gettime(time.CLOCK_MONOTONIC) - ago) * 1e6)))
+
+
+STEADY_MONOTONIC = 10_000_000.0
+
+
+@contextlib.contextmanager
+def steady_clock():
+    """A monotonic clock that reads as if the machine had been up for months, for every stamp a
+    test builds and for the server that reads them back, so the answer does not depend on how
+    long ago the machine running the suite booted."""
+    real = time.clock_gettime
+
+    def read(clock):
+        if clock == time.CLOCK_MONOTONIC:
+            return STEADY_MONOTONIC
+        return real(clock)
+
+    with mock.patch.object(time, "clock_gettime", read):
+        yield
 # The session this dashboard is asked about is FLEET_DASH_SESSION's to name, so the fake answers
 # for whichever one the test points it at. Hardcoding "fleet-dashboard" here meant the suite
 # failed the moment anyone used the escape hatch it was written for.
@@ -620,7 +641,7 @@ class ServicesTest(unittest.TestCase):
                 yield box
 
     def test_the_four_rows_carry_a_state_a_sentence_and_when_it_last_changed(self):
-        with self.farm() as box:
+        with steady_clock(), self.farm() as box:
             dashboard.services_refresh()
             rows = dashboard.services()["services"]
             self.assertIn("systemctl --user is-active fleet-daemon.service",
@@ -650,9 +671,10 @@ class ServicesTest(unittest.TestCase):
         self.assertEqual(dashboard._systemd_monotonic("0"), 0.0)
         self.assertEqual(dashboard._systemd_monotonic(""), 0.0)
         self.assertEqual(dashboard._systemd_monotonic(None), 0.0)
-        facts = {"LoadState": "loaded",
-                 "ActiveEnterTimestampMonotonic": monotonic_microseconds(3600)}
-        since = dashboard.parse_iso(dashboard._unit_since(facts))
+        with steady_clock():
+            facts = {"LoadState": "loaded",
+                     "ActiveEnterTimestampMonotonic": monotonic_microseconds(3600)}
+            since = dashboard.parse_iso(dashboard._unit_since(facts))
         self.assertIsNotNone(since, "a real systemd stamp must not read as never")
         self.assertAlmostEqual(time.time() - since.timestamp(), 3600, delta=30)
         # a unit that has never been active prints a zero, and that is not a moment
@@ -1621,14 +1643,375 @@ class EnginesTest(unittest.TestCase):
                 self.assertIn(key, row, row["id"])
 
 
+@contextlib.contextmanager
+def own_catalog(text=None, state=None):
+    """A farm with its own models.toml, or with none at all, in a directory that is thrown away.
+
+    The catalog the tests must never touch is the one belonging to the machine running them:
+    everything here points the library at a temporary FLEET_CONFIG and FLEET_STATE.
+    """
+    with tempfile.TemporaryDirectory() as room:
+        config = pathlib.Path(room, "config", "models.toml")
+        store = pathlib.Path(room, "state", "models-state.json")
+        if text is not None:
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text(text)
+        if state is not None:
+            store.parent.mkdir(parents=True, exist_ok=True)
+            store.write_text(json.dumps(state))
+        with mock.patch.object(dashboard.MODELS, "CONFIG", str(config)), \
+                mock.patch.object(dashboard.MODELS, "STATE", str(store)), \
+                mock.patch.dict(os.environ, {"FLEET_STATE": str(pathlib.Path(room, "state"))},
+                                clear=False):
+            yield pathlib.Path(room)
+
+
+def read_toml(path):
+    import tomllib
+    with open(path, "rb") as handle:
+        return tomllib.load(handle)
+
+
+class ModelPresetsRouteTest(unittest.TestCase):
+    """GET /api/models/presets: the services a person can add, and which this farm already has."""
+
+    def test_every_card_the_dialog_draws_is_served_with_what_it_needs_to_say(self):
+        with own_catalog(), running_server() as base:
+            status, rows = fetch_json(base, "/api/models/presets")
+        self.assertEqual(status, 200)
+        self.assertEqual([row["id"] for row in rows],
+                         ["claude", "codex", "gemini", "qwen", "kimi", "opencode", "aider",
+                          "ollama", "custom"])
+        for row in rows:
+            for key in ("label", "color", "kind", "access", "tos", "install_hint", "variants",
+                        "docs", "added"):
+                self.assertIn(key, row, row["id"])
+            self.assertTrue(row["access"].strip(), row["id"])
+            self.assertTrue(row["tos"].strip(), row["id"])
+
+    def test_a_service_this_farm_already_has_is_not_offered_again(self):
+        # No catalog of its own: the farm runs on the shipped example, which is claude and codex.
+        with own_catalog(), running_server() as base:
+            _status, rows = fetch_json(base, "/api/models/presets")
+        added = {row["id"]: row["added"] for row in rows}
+        self.assertTrue(added["claude"])
+        self.assertTrue(added["codex"])
+        self.assertFalse(added["gemini"])
+
+    def test_a_row_added_from_a_preset_marks_that_preset_whatever_it_was_named(self):
+        catalog = ('[mine]\nlabel = "My Gemini"\nengine = "generic"\nbin = "gemini"\n'
+                   'run = "{bin} -p {task}"\npreset = "gemini"\nsource = "added"\n')
+        with own_catalog(catalog), running_server() as base:
+            _status, rows = fetch_json(base, "/api/models/presets")
+        added = {row["id"]: row["added"] for row in rows}
+        self.assertTrue(added["gemini"], "the card must say it is already here")
+        self.assertFalse(added["custom"], "a farm may hold any number of its own commands")
+
+    def test_reading_the_services_never_starts_anything(self):
+        with own_catalog(), \
+                mock.patch.object(dashboard.subprocess, "run",
+                                  side_effect=AssertionError("a GET started a process")), \
+                running_server() as base:
+            self.assertEqual(fetch_json(base, "/api/models/presets")[0], 200)
+
+
+class ModelAddRemoveTest(unittest.TestCase):
+    """POST /api/models/add and /api/models/remove: the writes behind "Add a model"."""
+
+    def add(self, base, body):
+        return fetch_json(base, "/api/models/add", token="s3cret", method="POST", body=body)
+
+    def remove(self, base, body):
+        return fetch_json(base, "/api/models/remove", token="s3cret", method="POST", body=body)
+
+    def test_adding_a_preset_writes_the_catalog_and_answers_the_new_row(self):
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            status, payload = self.add(base, {"preset": "gemini", "id": "gemini",
+                                              "variant": "gemini-2.5-pro"})
+            self.assertEqual(status, 200, payload)
+            row = payload["model"]
+            written = read_toml(dashboard.MODELS.CONFIG)
+        self.assertEqual(row["id"], "gemini")
+        self.assertEqual(row["source"], "added")
+        self.assertEqual(row["variant"], "gemini-2.5-pro")
+        self.assertEqual(row["command"], "gemini")
+        self.assertTrue(row["access"].strip())
+        self.assertIn(row["status"], dashboard.MODEL_STATUSES)
+        # the shipped example came across on the first write, so nothing was lost
+        self.assertEqual(set(written), {"claude", "codex", "gemini"})
+        # the model picked in step 2 is on the command line, not only in the row's variant field
+        self.assertEqual(written["gemini"]["run"],
+                         "{bin} -m {variant} -p {task} --output-format json")
+        self.assertEqual(written["gemini"]["variant"], "gemini-2.5-pro")
+
+    def test_a_key_in_the_body_is_refused_before_anything_is_written(self):
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            status, payload = self.add(base, {"preset": "gemini", "id": "gemini",
+                                              "key": "sk-live-not-a-real-key"})
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"],
+                             "A key never goes through this page. Run: fleet models auth gemini")
+            self.assertFalse(os.path.exists(dashboard.MODELS.CONFIG), "nothing was written")
+            self.assertNotIn("sk-live", json.dumps(payload), "the key is never echoed back")
+            for field in ("api_key", "secret", "credential"):
+                status, payload = self.add(base, {"preset": "gemini", "id": "gemini",
+                                                  field: "sk-live-not-a-real-key"})
+                self.assertEqual(status, 400, field)
+                self.assertIn("never goes through this page", payload["error"], field)
+            # without an id there is still a sentence, with the command's shape in it
+            status, payload = self.add(base, {"key": "sk-live"})
+            self.assertEqual(payload["error"],
+                             "A key never goes through this page. Run: fleet models auth <id>")
+
+    def test_a_key_is_refused_whatever_the_field_is_called(self):
+        """The refusal is on the field's NAME, so the casing a client happens to use, or the
+        punctuation in it, cannot walk a credential past it."""
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            for field in ("apiKey", "API_KEY", "Api-Key", "KEY", "Token", "access_token",
+                          "Secret", "CREDENTIAL", "x-api-key"):
+                status, payload = self.add(base, {"preset": "gemini", "id": "g1",
+                                                  "variant": "gemini-2.5-pro",
+                                                  field: "sk-live-not-a-real-key"})
+                self.assertEqual(status, 400, field)
+                self.assertIn("never goes through this page", payload["error"], field)
+                self.assertNotIn("sk-live", json.dumps(payload), field)
+            self.assertFalse(os.path.exists(dashboard.MODELS.CONFIG), "nothing was written")
+
+    def test_a_key_pasted_into_the_command_line_is_refused_too(self):
+        """The one that was not harmless: a key in `run` was written into models.toml verbatim
+        and echoed back in the row."""
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            for body in (
+                {"preset": "custom", "id": "c1", "bin": "echo",
+                 "run": "{bin} --api-key sk-live-not-a-real-key -p {task}"},
+                {"preset": "custom", "id": "c2", "bin": "echo",
+                 "run": "{bin} --token AAAABBBBCCCCDDDD -p {task}"},
+                {"preset": "custom", "id": "c3", "bin": "echo",
+                 "run": "{bin} -p {task} # sk-ant-0123456789abcdef"},
+            ):
+                status, payload = self.add(base, body)
+                self.assertEqual(status, 400, body)
+                self.assertIn("never goes through this page", payload["error"], body)
+                self.assertNotIn("sk-live", json.dumps(payload), body)
+                self.assertNotIn("AAAABBBB", json.dumps(payload), body)
+            self.assertFalse(os.path.exists(dashboard.MODELS.CONFIG), "nothing was written")
+
+    def test_a_command_that_reads_its_key_from_the_environment_is_still_written(self):
+        """The refusal has to leave the documented way of doing it alone: the command names the
+        variable, `fleet models auth` puts the key in it."""
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            status, payload = self.add(base, {
+                "preset": "custom", "id": "mine", "bin": "mycli",
+                "run": "{bin} --api-key $MY_API_KEY --output-format json -p {task}",
+                "auth_env": "MY_API_KEY"})
+            self.assertEqual(status, 200, payload)
+            written = read_toml(dashboard.MODELS.CONFIG)
+            self.assertEqual(written["mine"]["auth_env"], "MY_API_KEY")
+
+    def test_the_answers_a_person_can_get_wrong_are_sentences_not_tracebacks(self):
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            for body, expect in (
+                ({}, "pick a service"),
+                ({"preset": "nope", "id": "nope"}, "no such preset"),
+                ({"preset": "gemini", "id": "Gemini", "variant": "gemini-2.5-pro"}, "model id"),
+                ({"preset": "gemini", "id": "gemini"}, "gemini-2.5-pro"),
+                ({"preset": "qwen", "id": "qwen", "variant": "qwen3-coder"}, "{variant}"),
+                ({"preset": "ollama", "id": "local"}, "llama3.1"),
+                ({"preset": "custom", "id": "mine"}, "bin"),
+                ({"preset": "custom", "id": "mine", "bin": "x", "run": "x --go"}, "{task}"),
+                ({"preset": "claude", "id": "claude"}, "already"),
+            ):
+                status, payload = self.add(base, body)
+                self.assertEqual(status, 400, body)
+                self.assertIn(expect, payload["error"], (body, payload))
+                self.assertNotIn("Traceback", json.dumps(payload))
+
+    def test_two_custom_commands_are_two_rows_with_two_names(self):
+        """"Custom command" is the name of the card, not of a farm's own command."""
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            self.add(base, {"preset": "custom", "id": "nightly", "bin": "mycli",
+                            "run": "{bin} --do {task}"})
+            self.add(base, {"preset": "custom", "id": "triage", "bin": "othercli",
+                            "run": "{bin} {task}"})
+            status, payload = self.add(base, {"preset": "custom", "id": "notes",
+                                              "bin": "thirdcli", "run": "{bin} {task}",
+                                              "label": "Release notes"})
+            self.assertEqual(status, 200, payload)
+            _status, rows = fetch_json(base, "/api/engines")
+        names = {row["id"]: row["label"] for row in rows}
+        self.assertEqual(names["nightly"], "nightly")
+        self.assertEqual(names["triage"], "triage")
+        self.assertEqual(names["notes"], "Release notes")
+        self.assertEqual(names["claude"], "Claude Code", "a preset keeps its own label")
+
+    def test_a_model_this_farm_added_can_be_removed_and_a_shipped_one_cannot(self):
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            self.add(base, {"preset": "gemini", "id": "gemini", "variant": "gemini-2.5-pro"})
+            secret = pathlib.Path(dashboard.MODELS._secret_path("gemini"))
+            secret.parent.mkdir(parents=True, exist_ok=True)
+            secret.write_text("sk-not-a-real-key\n")
+
+            status, payload = self.remove(base, {"id": "claude"})
+            self.assertEqual(status, 400)
+            self.assertIn("came with fleet", payload["error"])
+
+            status, payload = self.remove(base, {"id": "gemini"})
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(payload, {"ok": True, "removed": "gemini"})
+            self.assertEqual(set(read_toml(dashboard.MODELS.CONFIG)), {"claude", "codex"})
+            self.assertFalse(secret.exists(), "the stored key goes with the row")
+
+            status, payload = self.remove(base, {"id": "gemini"})
+            self.assertEqual(status, 404)
+            self.assertIn("no such model", payload["error"])
+            self.assertEqual(self.remove(base, {})[0], 400)
+
+    def test_neither_write_is_open_to_a_page_that_cannot_write(self):
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            for path in ("/api/models/add", "/api/models/remove"):
+                status, payload = fetch_json(base, path, method="POST",
+                                             body={"preset": "gemini", "id": "gemini"})
+                self.assertEqual(status, 403, path)
+                self.assertIn("token", payload["error"], path)
+                # a page in another tab cannot post it with a token it happens to know either
+                status, _payload = fetch_json(base, path, token="s3cret", method="POST",
+                                              body={"preset": "gemini", "id": "gemini"},
+                                              headers={"Sec-Fetch-Site": "cross-site"})
+                self.assertEqual(status, 403, path)
+            self.assertFalse(os.path.exists(dashboard.MODELS.CONFIG))
+
+    def test_adding_a_model_never_runs_anything(self):
+        """Writing a row is data. Running the CLI is what Test is for, and it costs money."""
+        with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                mock.patch.object(dashboard.subprocess, "run",
+                                  side_effect=AssertionError("adding a model ran a command")), \
+                running_server() as base:
+            self.assertEqual(self.add(base, {"preset": "aider", "id": "aider"})[0], 200)
+
+
+class ModelStatusTest(unittest.TestCase):
+    """GET /api/engines: one word per row, from what this machine and the catalog know."""
+
+    CATALOG = (
+        '[gone]\nlabel = "Gone"\nengine = "generic"\nbin = "gone"\n'
+        'run = "{bin} -p {task}"\nsource = "added"\n\n'
+        '[keyless]\nlabel = "Keyless"\nengine = "generic"\nbin = "keyless"\n'
+        'run = "{bin} -p {task}"\nauth_env = "KEYLESS_API_KEY"\nsource = "added"\n\n'
+        '[broken]\nlabel = "Broken"\nengine = "generic"\nbin = "broken"\n'
+        'run = "{bin} -p {task}"\nsource = "added"\n\n'
+        '[live]\nlabel = "Live"\nengine = "generic"\nbin = "live"\n'
+        'run = "{bin} run {variant} {task}"\nvariant = "llama3.1"\n'
+        'access = "nothing: it runs on this farm\'s own hardware"\nsource = "added"\n\n'
+        '[resting]\nlabel = "Resting"\nengine = "generic"\nbin = "resting"\n'
+        'run = "{bin} -p {task}"\nsource = "added"\n'
+    )
+    STATE = {"broken": {"enabled": True, "health": "fail", "health_detail": "auth rejected"},
+             "live": {"enabled": True, "health": "ok"},
+             "resting": {"enabled": False, "health": "ok"}}
+
+    @contextlib.contextmanager
+    def farm(self, installed, env=None):
+        with own_catalog(self.CATALOG, self.STATE) as room:
+            binaries = room / "bin"
+            binaries.mkdir(exist_ok=True)
+            for name in installed:
+                tool = binaries / name
+                tool.write_text("#!/bin/sh\nexit 0\n")
+                tool.chmod(0o755)
+            environment = {"PATH": str(binaries)}
+            environment.update(env or {})
+            with mock.patch.dict(os.environ, environment, clear=False):
+                for name in ("CLAUDE_BIN", "CODEX_BIN", "KEYLESS_API_KEY"):
+                    if name not in (env or {}):
+                        os.environ.pop(name, None)
+                yield room
+
+    def rows(self, installed, env=None):
+        with self.farm(installed, env):
+            return {row["id"]: row for row in dashboard.engines()}
+
+    def test_each_state_is_decided_from_the_machine_and_the_catalog(self):
+        rows = self.rows(["keyless", "broken", "live", "resting"])
+        self.assertEqual(rows["gone"]["status"], "not_installed")
+        self.assertEqual(rows["keyless"]["status"], "needs_key")
+        self.assertEqual(rows["broken"]["status"], "failing")
+        self.assertEqual(rows["live"]["status"], "on")
+        self.assertEqual(rows["resting"]["status"], "off")
+        self.assertEqual(rows["broken"]["health_detail"], "auth rejected")
+
+    def test_a_missing_command_outranks_every_other_answer(self):
+        """A model nothing on this machine can run is not "needs a key" and not "failing"."""
+        rows = self.rows([])
+        for mid in ("gone", "keyless", "broken", "live", "resting"):
+            self.assertEqual(rows[mid]["status"], "not_installed", mid)
+            self.assertTrue(rows[mid]["install_hint"], mid)
+
+    def test_a_key_in_the_environment_or_on_the_farm_settles_the_key_question(self):
+        rows = self.rows(["keyless"], env={"KEYLESS_API_KEY": "sk-not-a-real-key"})
+        self.assertEqual(rows["keyless"]["status"], "off", "keyed, switched off")
+        with self.farm(["keyless"]) as room:
+            secret = pathlib.Path(dashboard.MODELS._secret_path("keyless"))
+            secret.parent.mkdir(parents=True, exist_ok=True)
+            secret.write_text("sk-not-a-real-key\n")
+            rows = {row["id"]: row for row in dashboard.engines()}
+        self.assertEqual(rows["keyless"]["status"], "off",
+                         "a key stored by `fleet models auth` counts")
+
+    def test_every_row_says_how_it_is_paid_for_and_where_it_came_from(self):
+        rows = self.rows(["live"])
+        self.assertEqual(rows["live"]["access"], "nothing: it runs on this farm's own hardware")
+        self.assertEqual(rows["live"]["variant"], "llama3.1")
+        self.assertEqual(rows["live"]["source"], "added")
+        # a row whose catalog entry never said is given a sentence, never an empty cell
+        self.assertIn("KEYLESS_API_KEY", rows["keyless"]["access"])
+        self.assertTrue(rows["gone"]["access"].strip())
+        self.assertEqual(rows["gone"]["source"], "added")
+
+    def test_a_shipped_catalog_row_says_which_subscription_spends(self):
+        with own_catalog():
+            rows = {row["id"]: row for row in dashboard.engines()}
+        self.assertEqual(rows["claude"]["source"], "shipped")
+        self.assertIn("Claude subscription", rows["claude"]["access"])
+        self.assertIn("ChatGPT subscription", rows["codex"]["access"])
+
+    def test_the_route_answers_the_new_fields_over_http(self):
+        with self.farm(["live"]), running_server() as base:
+            status, body = fetch_json(base, "/api/engines")
+        self.assertEqual(status, 200)
+        for row in body:
+            for key in ("access", "status", "source", "variant"):
+                self.assertIn(key, row, row["id"])
+            self.assertIn(row["status"], dashboard.MODEL_STATUSES, row["id"])
+
+
 class MachineReadingTest(unittest.TestCase):
     """The machine readings are Linux only, and the page must survive being run anywhere else."""
 
     def test_the_metrics_route_answers_on_a_machine_with_no_proc(self):
         with tempfile.TemporaryDirectory() as state:
+            real_disk = dashboard.M.disk
+
+            def roomy_disk():
+                # The question here is the missing /proc, not this runner's disk: a CI box with
+                # nineteen free gigabytes blocked the spawn for the right reason and failed the
+                # wrong test.
+                reading = real_disk()
+                reading["free_gb"] = max(float(reading.get("free_gb") or 0), 500.0)
+                return reading
+
             with mock.patch.object(dashboard.M, "MEMINFO", os.path.join(state, "nope")), \
                  mock.patch.object(dashboard.M, "LOADAVG", os.path.join(state, "nope")), \
                  mock.patch.object(dashboard.M, "STATE", state), \
+                 mock.patch.object(dashboard.M, "disk", roomy_disk), \
                  mock.patch.object(dashboard, "STATE", state), \
                  blank_machine_snapshot():
                 dashboard.machine_refresh()          # the refresher reads it, the route serves it
@@ -3833,6 +4216,26 @@ class HqBinaryFallbackTest(unittest.TestCase):
                 if old_home is not None:
                     os.environ["HOME"] = old_home
 
+
+
+class ModelsContractTest(unittest.TestCase):
+    def test_every_preset_and_every_row_carries_a_terms_word(self):
+        for preset in dashboard.MODEL_PRESETS.presets():
+            self.assertIn(preset.get("tos_kind"), ("safe", "check", "blocked"), preset["id"])
+        for row in dashboard.engines():
+            self.assertIn(row.get("tos_kind"), ("safe", "check", "blocked"), row.get("id"))
+
+    def test_the_terms_word_reads_the_sentence(self):
+        kind = dashboard.MODEL_PRESETS.tos_kind
+        self.assertEqual(kind("its subscription terms forbid non-interactive use"), "blocked")
+        self.assertEqual(kind("HIGH risk of suspension"), "check")
+        self.assertEqual(kind("a documented headless mode"), "safe")
+        self.assertEqual(kind(""), "check")
+
+    def test_config_names_the_farm_for_the_commands_the_page_hands_out(self):
+        payload = dashboard.config_payload()
+        self.assertEqual(payload.get("farm_alias"), dashboard.CA.FARM_ALIAS)
+        self.assertTrue(payload["farm_alias"])
 
 if __name__ == "__main__":
     unittest.main()

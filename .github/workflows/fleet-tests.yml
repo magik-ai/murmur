@@ -21,3 +21,8 @@ jobs:
           cd fleet
           python3 tests/sensors-test.py
           python3 tests/supervisor-test.py lib/supervisor.py
+      - name: Dashboard and the model catalog
+        run: |
+          cd fleet
+          python3 dashboard/test_server.py
+          python3 tests/models-test.py

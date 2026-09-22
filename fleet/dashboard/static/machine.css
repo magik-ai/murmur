@@ -53,6 +53,71 @@
 .m-wait { align-items: center; gap: 8px; flex-wrap: wrap; }
 .m-dialog-actions { gap: 8px; margin-top: 4px; }
 
+/* The models table. Six columns, and the widest thing in any of them is a sentence, so the
+   cells wrap rather than pushing the table into a sideways scroll. */
+.m-models td { vertical-align: top; }
+/* The floors keep the wide screen readable: without them a name column squeezes to two letters
+   per line. Below 640px they are dropped and the row becomes a card, so the floors never turn
+   into a sideways drag (see the card list further down). */
+.m-models th:first-child, .m-models td:first-child { min-width: 150px; }
+.m-models .m-runs { min-width: 190px; }
+.m-models th:nth-child(3), .m-models td:nth-child(3) { min-width: 160px; }
+.m-model-name {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 8px; align-items: start;
+  padding: 0; border: 0; background: none; color: var(--text);
+  text-align: left; cursor: pointer; font: inherit;
+}
+.m-model-name:hover b { color: var(--accent); text-decoration: underline; }
+.m-model-words { display: grid; gap: 1px; min-width: 0; }
+.m-id { font-size: 11px; overflow-wrap: anywhere; }
+.m-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex: none; }
+.m-runs .cmd { margin-top: 4px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.m-detail { font-size: 11px; line-height: 1.4; margin-top: 3px; overflow-wrap: anywhere; }
+.m-row-actions { gap: 6px; flex-wrap: wrap; align-items: center; }
+.m-detail-list dd { overflow-wrap: anywhere; }
+
+/* On a phone the table becomes a card list: one card per model, read in the order a person
+   asks the questions, and no sideways drag at all. The six columns and their floors are 857px
+   wide, which on a 390px screen put Status, Last test and Actions off the edge, and those are
+   two of the columns this section exists for. */
+@media (max-width: 640px) {
+  .m-models, .m-models thead, .m-models tbody, .m-models tr, .m-models td { display: block; }
+  .m-models thead { display: none; }
+  .m-models tr {
+    display: grid; gap: 6px;
+    margin: 0 0 10px; padding: 10px 12px;
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    background: var(--surface);
+  }
+  /* The floors are what made the table wide, and a card has no columns to hold apart. */
+  .m-models td, .m-models td:first-child, .m-models .m-runs, .m-models td:nth-child(3) {
+    min-width: 0; border: 0; padding: 0;
+  }
+  .m-models td[data-col]::before {
+    content: attr(data-col);
+    display: block; color: var(--text-dim); font-size: 11px;
+  }
+  .m-models td.num { text-align: left; }
+  /* The name, then the state, then how it is paid for, then the rest, whatever order the
+     columns are written in. */
+  .m-models td:nth-child(1) { order: 1; }
+  .m-models td:nth-child(4) { order: 2; }
+  .m-models td:nth-child(3) { order: 3; }
+  .m-models td:nth-child(2) { order: 4; }
+  .m-models td:nth-child(5) { order: 5; }
+  .m-models td:nth-child(6) { order: 6; }
+}
+
+/* The add-model dialog: the same numbered steps as the account one, with a card per service. */
+.m-presets { display: grid; gap: 8px; }
+.m-preset { display: grid; gap: 4px; }
+.m-preset.chosen { border-color: var(--accent); background: var(--accent-soft); }
+.m-preset-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-preset .muted { font-size: 12px; line-height: 1.4; }
+.m-field { display: grid; gap: 4px; }
+.m-label { color: var(--text-dim); font-size: 12px; }
+.m-keyline { color: var(--tone-wait); }
+
 .m-login { display: grid; gap: 4px; max-width: 320px; }
 .m-login .muted { overflow-wrap: anywhere; }
 

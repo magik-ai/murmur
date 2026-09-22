@@ -21,6 +21,7 @@ import http.server
 import json
 import os
 import pathlib
+import re
 import socketserver
 import sys
 import threading
@@ -291,29 +292,205 @@ ACCOUNTS = {
     "errors": {},
 }
 
-# The engines, as GET /api/engines answers them: the catalog row plus whether the command is
-# on this machine (`installed` and `path`), what to run if it is not (`install_hint`), whether
-# it is switched on, and when it was last tested.
+# The models, as GET /api/engines answers them: the catalog row plus whether the command is
+# on this machine (`installed` and `path`), what to run if it is not (`install_hint`), how the
+# model is paid for (`access`), the one word the table draws as a pill (`status`), whether the
+# operator added the entry or it shipped with the farm (`source`), and the variant it runs.
+#
+# There are five rows here on purpose, one per status, because the table draws a different set
+# of actions for each. The fields are the ones GET /api/engines really carries: `health` is the
+# state of the last test (ok | fail | unchecked) and `health_prompt` is the tiny prompt a test
+# sends, which is how lib/models.py names them; no row carries `docs`, because nothing on the
+# server writes one into a catalog; and the two rows this farm added carry no role, quality or
+# caps note, because the add route writes none.
 MODELS = [
-    {"id": "claude", "label": "Claude", "glyph": "C", "color": "#d29922", "enabled": True,
-     "role": "builds the change", "models": "opus, sonnet, haiku", "health": "ok",
-     "limits": "two windows, session and weekly", "command": "claude",
+    {"id": "claude", "label": "Claude Code", "glyph": "C", "color": "#D97757", "enabled": True,
+     "engine": "claude", "source": "shipped", "preset": "", "status": "on", "variant": "opus",
+     "access": "Your Claude subscription.",
+     "role": "the workhorse: most lanes, most of the time",
+     "quality": "frontier", "caps": "Two windows, session and weekly.",
+     "tos": "First-party CLI on the Anthropic subscription, made for headless runs.",
+     "run": "claude -p {task}", "auth_env": "",
+     "health": "ok", "health_prompt": "Reply with exactly: OK", "health_detail": "",
+     "routable": True,
+     "models": "opus, sonnet, haiku", "limits": "two windows, session and weekly",
+     "command": "claude",
      "installed": True, "path": "/home/farm/.local/bin/claude", "last_test": ago(1800),
-     "install_hint": "install claude and put it on this farm's PATH"},
-    {"id": "codex", "label": "Codex", "glyph": "X", "color": "#3fb950", "enabled": True,
-     "role": "reviews the change", "models": "gpt-5-codex", "health": "fail",
-     "health_detail": "the last health call timed out", "limits": "five hour window",
-     "command": "codex",
+     "install_hint": "npm install -g @anthropic-ai/claude-code"},
+    # Installed, keyed, switched on, and the last health call did not come back. The table draws
+    # Failing and puts the server's own detail under the pill.
+    {"id": "codex", "label": "Codex", "glyph": "X", "color": "#10A37F", "enabled": True,
+     "engine": "codex", "source": "shipped", "preset": "", "status": "failing",
+     "variant": "gpt-5-codex",
+     "access": "Your ChatGPT subscription.",
+     "role": "frontier tier: architecture, security, migrations",
+     "quality": "frontier, Opus-class on agentic work", "caps": "One five hour window.",
+     "tos": "First-party CLI on the ChatGPT subscription.",
+     "run": "codex exec {task}", "auth_env": "",
+     "health": "fail", "health_prompt": "Reply with exactly: OK",
+     "health_detail": "the last health call timed out", "routable": False,
+     "models": "gpt-5-codex", "limits": "five hour window", "command": "codex",
      "installed": True, "path": "/usr/bin/codex", "last_test": ago(600),
-     "install_hint": "install codex and put it on this farm's PATH"},
-    # The one this machine cannot run. It carries enabled true on purpose: an engine left
-    # switched on in the registry and then uninstalled is exactly the row that must not offer
-    # a switch, because pressing it spawns a lane that cannot start.
-    {"id": "local", "label": "Local model", "enabled": True, "role": "offline experiments",
-     "health": "unchecked", "installed": False, "command": "llama", "path": "",
-     "last_test": None,
-     "install_hint": "curl -fsSL https://example.invalid/local/install.sh | sh"},
+     "install_hint": "npm install -g @openai/codex"},
+    # Added by the operator, installed, keyed, and switched off. This is the only row that can
+    # be switched on, and one of the two that can be removed. It carries no role, quality or
+    # caps note: those are catalog fields a person writes, and lib/model_presets.py does not
+    # write them, so a row this farm added through the dialog has none.
+    {"id": "qwen", "label": "Qwen Code", "color": "#7C5CFC", "enabled": False,
+     "engine": "generic", "source": "added", "preset": "qwen", "status": "off",
+     "variant": "qwen3-coder-plus",
+     "access": "An API key, held on the farm.",
+     "tos": "LOW: a documented headless mode, and the plan is sold for agentic use.",
+     "run": "{bin} -p {task} --output-format stream-json", "auth_env": "QWEN_CODE_API_KEY",
+     "health": "ok", "health_prompt": "Reply with exactly: OK", "health_detail": "",
+     "routable": False, "limits": "", "command": "qwen",
+     "installed": True, "path": "/home/farm/.local/bin/qwen", "last_test": ago(7200),
+     "install_hint": "npm install -g @qwen-code/qwen-code"},
+    # Added, installed, and no key was ever pasted. It cannot be switched on: a model with no
+    # credential spawns a lane that cannot answer. Test is offered, because a key is pasted in a
+    # terminal and this page cannot see it land.
+    {"id": "kimi", "label": "Kimi Code", "color": "#6D5AE6", "enabled": False,
+     "engine": "generic", "source": "added", "preset": "kimi", "status": "needs_key",
+     "variant": "",
+     "access": "An API key, held on the farm.",
+     "tos": "HIGH: the subscription is sold for interactive use only, so a headless farm "
+            "risks suspension.",
+     "run": "{bin} -p {task} --output-format stream-json", "auth_env": "KIMI_API_KEY",
+     "health": "unchecked", "health_prompt": "Reply with exactly: OK", "health_detail": "",
+     "routable": False, "limits": "", "command": "kimi",
+     "installed": True, "path": "/home/farm/.local/bin/kimi", "last_test": None,
+     "install_hint": "npm install -g @moonshot/kimi-code"},
+    # The one this machine cannot run. It carries enabled true on purpose: a model left switched
+    # on in the registry and then uninstalled is exactly the row that must not offer a switch,
+    # because pressing it spawns a lane that cannot start.
+    {"id": "local", "label": "Local model", "color": "#8b949e", "enabled": True,
+     "engine": "generic", "source": "shipped", "preset": "", "status": "not_installed",
+     "variant": "",
+     "access": "Runs on this machine. Nothing is paid.",
+     "role": "offline experiments", "quality": "well under the frontier tier",
+     "caps": "Whatever this machine can hold.",
+     "tos": "Local weights on your own machine, so no service terms apply.",
+     "run": "{bin} run {variant} {task}", "auth_env": "",
+     "health": "unchecked", "health_prompt": "Reply with exactly: OK", "health_detail": "",
+     "routable": False, "limits": "", "command": "llama",
+     "installed": False, "path": "", "last_test": None,
+     "install_hint": "curl -fsSL https://example.invalid/local/install.sh | sh"}
 ]
+
+# The presets GET /api/models/presets serves: one service per card in the add dialog. A preset
+# is a description, never farm state; whether the farm already carries it is the `added` flag,
+# computed per request from the catalog above and whatever this stub has been asked to add.
+#
+# `tos_kind` is the server's own classification of its `tos` sentence, in one word: safe, check
+# or blocked. The page draws it as the card's terms pill, so a sentence nobody has read is never
+# called safe by a page guessing from its wording.
+MODEL_PRESETS = [
+    {"id": "claude", "label": "Claude Code", "color": "#D97757", "kind": "subscription", "tos_kind": "safe", "pull_hint": "",
+     "engine": "claude", "bin": "claude",
+     "install_hint": "npm install -g @anthropic-ai/claude-code", "auth_env": "",
+     "run": "claude -p {task}", "health": "Reply with exactly: OK",
+     "tos": "First-party CLI on the Anthropic subscription, made for headless runs.",
+     "access": "Your Claude subscription.", "variants": ["opus", "sonnet", "haiku"],
+     "docs": "https://example.invalid/docs/claude-code"},
+    {"id": "codex", "label": "Codex", "color": "#10A37F", "kind": "subscription", "tos_kind": "safe", "pull_hint": "",
+     "engine": "codex", "bin": "codex", "install_hint": "npm install -g @openai/codex",
+     "auth_env": "", "run": "codex exec {task}", "health": "Reply with exactly: OK",
+     "tos": "First-party CLI on the ChatGPT subscription.",
+     "access": "Your ChatGPT subscription.", "variants": ["gpt-5-codex"],
+     "docs": "https://example.invalid/docs/codex"},
+    {"id": "gemini", "label": "Gemini CLI", "color": "#4285F4", "kind": "key", "tos_kind": "safe", "pull_hint": "",
+     "engine": "generic", "bin": "gemini", "install_hint": "npm install -g @google/gemini-cli",
+     "auth_env": "GEMINI_API_KEY", "run": "{bin} -p {task}",
+     "health": "Reply with exactly: OK",
+     "tos": "A documented non-interactive mode, billed against the key.",
+     "access": "An API key, billed per token.",
+     "variants": ["gemini-2.5-pro", "gemini-2.5-flash"],
+     "docs": "https://example.invalid/docs/gemini-cli"},
+    {"id": "qwen", "label": "Qwen Code", "color": "#7C5CFC", "kind": "key", "tos_kind": "safe", "pull_hint": "",
+     "engine": "generic", "bin": "qwen",
+     "install_hint": "npm install -g @qwen-code/qwen-code", "auth_env": "QWEN_CODE_API_KEY",
+     "run": "{bin} -p {task} --output-format stream-json", "health": "Reply with exactly: OK",
+     "tos": "LOW: a documented headless mode, and the plan is sold for agentic use.",
+     "access": "An API key, held on the farm.",
+     "variants": ["qwen3-coder-plus", "qwen3-coder-flash"],
+     "docs": "https://example.invalid/docs/qwen-code"},
+    {"id": "kimi", "label": "Kimi Code", "color": "#6D5AE6", "kind": "key", "tos_kind": "blocked", "pull_hint": "",
+     "engine": "generic", "bin": "kimi", "install_hint": "npm install -g @moonshot/kimi-code",
+     "auth_env": "KIMI_API_KEY", "run": "{bin} -p {task} --output-format stream-json",
+     "health": "Reply with exactly: OK",
+     "tos": "HIGH: the subscription is sold for interactive use only, so a headless farm "
+            "risks suspension.",
+     "access": "An API key, held on the farm.", "variants": [],
+     "docs": "https://example.invalid/docs/kimi-code"},
+    {"id": "opencode", "label": "OpenCode", "color": "#F5A623", "kind": "key", "tos_kind": "safe", "pull_hint": "",
+     "engine": "generic", "bin": "opencode", "install_hint": "npm install -g opencode-ai",
+     "auth_env": "OPENCODE_API_KEY", "run": "{bin} run {task}",
+     "health": "Reply with exactly: OK",
+     "tos": "Open source client, so the terms are the provider's behind the key.",
+     "access": "An API key, billed per token.", "variants": [],
+     "docs": "https://example.invalid/docs/opencode"},
+    {"id": "aider", "label": "Aider", "color": "#14B8A6", "kind": "key", "engine": "generic", "tos_kind": "safe", "pull_hint": "",
+     "bin": "aider", "install_hint": "python3 -m pip install aider-install",
+     "auth_env": "OPENAI_API_KEY", "run": "{bin} --message {task} --yes",
+     "health": "Reply with exactly: OK",
+     "tos": "Open source client, so the terms are the provider's behind the key.",
+     "access": "An API key, billed per token.", "variants": [],
+     "docs": "https://example.invalid/docs/aider"},
+    {"id": "ollama", "label": "Ollama local", "color": "#8b949e", "kind": "local", "tos_kind": "safe",
+     "engine": "generic", "bin": "ollama",
+     "install_hint": "curl -fsSL https://example.invalid/local/install.sh | sh",
+     "pull_hint": "ollama pull <variant>", "auth_env": "", "run": "{bin} run {variant} {task}", "health": "Reply with exactly: OK",
+     "tos": "Local weights on your own machine, so no service terms apply.",
+     "access": "Runs on this machine. Nothing is paid.",
+     "variants": ["qwen2.5-coder:14b", "llama3.1:8b"],
+     "docs": "https://example.invalid/docs/ollama"},
+    {"id": "custom", "label": "Custom command", "color": "#6e7681", "kind": "key", "tos_kind": "check", "pull_hint": "",
+     "engine": "generic", "bin": "", "install_hint": "", "auth_env": "", "run": "",
+     "health": "Reply with exactly: OK",
+     "tos": "Whatever the terms of the service behind your command are.",
+     "access": "However the command you give is paid for.", "variants": [],
+     "docs": ""},
+]
+
+# The words that make a field a credential, and the two sentences the server refuses with. A
+# field name is lowercased and stripped of punctuation first, so key, api_key, apiKey, API_KEY
+# and x-api-key are all the same field: refusing only the exact spelling "key" made this stub
+# weaker than the farm it stands in for. A command line that carries a key is refused too, and
+# a command that READS one ($MY_API_KEY, {placeholder}) is what a person is told to write.
+KEY_WORDS = ("key", "secret", "token", "credential", "password")
+KEY_REFUSAL = "A key never goes through this page. Run: fleet models auth {id}"
+KEY_IN_COMMAND = ("A key never goes through this page: take it out of the command line and name "
+                  "the variable that holds it instead. Run: fleet models auth {id}")
+KEY_FLAG = re.compile(r"--?[a-z0-9_-]*(?:key|secret|token|password)[\s=]+(\S+)", re.I)
+KEY_TOKEN = re.compile(r"(?:\b(?:sk|pk|rk|ghp|gho|ghu|ghs|xox[abopsr])-[A-Za-z0-9_-]{8,}"
+                       r"|\bAIza[A-Za-z0-9_-]{20,})")
+
+
+def key_field(body):
+    """The name of a field in this body that carries a credential, or "" for none."""
+    for name, value in (body or {}).items():
+        if not value:
+            continue
+        flat = re.sub(r"[^a-z0-9]", "", str(name).lower())
+        if any(word in flat for word in KEY_WORDS):
+            return str(name)
+    return ""
+
+
+def key_in_command(value):
+    """Whether a command line a person typed has a credential written into it."""
+    text = str(value or "")
+    if KEY_TOKEN.search(text):
+        return True
+    found = KEY_FLAG.search(text)
+    return bool(found and not found.group(1).lstrip("\"'").startswith(("$", "{")))
+
+
+# The id rule is lib/models.py's own (ID_RE), with its own sentence, so a name this stub takes
+# is a name the farm takes: 2 to 31 characters, lower case, starting with a letter.
+MODEL_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
+MODEL_ID_RULE = ("a model id is lower case letters, digits, - and _, starting with a letter, "
+                 "2 to 31 characters")
 
 MAIL_BOXES = [
     {"name": "all", "number": 1, "updated_at": ago(600), "count_24h": 9, "last_at": ago(600)},
@@ -451,7 +628,15 @@ LOG_LINES = [f"[{time.strftime('%H:%M:%S', time.localtime(ago(1200 - index * 6))
              for index in range(200)]
 
 # Written by the POST routes, so the browser check can prove a form does something.
-SENT = {"messages": [], "mail": [], "projects": []}
+# `removed` holds the ids a person has taken out of the catalog in this run, fixture rows
+# included: a farm can remove anything it added, and two of the five fixtures are rows this farm
+# added. Without it the first Remove anyone tried by hand answered "no such model".
+SENT = {"messages": [], "mail": [], "projects": [], "models": [], "removed": []}
+
+
+def models_now():
+    """The catalog as it stands: the fixtures plus what this run added, less what it removed."""
+    return [row for row in MODELS + SENT["models"] if row["id"] not in SENT["removed"]]
 
 
 # A stage log the server had to cut. The page must say so and name the command that shows the
@@ -619,7 +804,7 @@ def config_for(state):
     if state == "error":
         settings["token"] = {"present": False, "file": "~/.fleet/dash-token"}
     return {"title": "murmur", "version": "2026.09.21-a1b2c3d", "features": features,
-            "hq_agent": "dashboard", "at": iso(), "stale_since": None, "error": None,
+            "hq_agent": "dashboard", "farm_alias": "farm", "at": iso(), "stale_since": None, "error": None,
             "pending": None, "settings": settings}
 
 
@@ -791,8 +976,13 @@ def payload_for(state, path, query):
         if state == "empty":
             return 200, {"at": NOW, "accounts": [], "errors": {}}
         return 200, ACCOUNTS
+    if path == "/api/models/presets":
+        # A preset is a description of a service, the same list in every state. Only `added`
+        # is farm state, and it is computed here from the catalog this state is serving.
+        carried = [] if state == "empty" else [row["id"] for row in models_now()]
+        return 200, [dict(row, added=row["id"] in carried) for row in MODEL_PRESETS]
     if path in ("/api/models", "/api/engines"):
-        return 200, empty_list if state == "empty" else MODELS
+        return 200, empty_list if state == "empty" else models_now()
     if path.startswith("/api/mail/"):
         if state == "error":
             return 200, MAIL_UNAVAILABLE
@@ -1088,7 +1278,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # The real server clones the repository, so it answers with a job (amendment 7).
             job = job_new("add_project", f"registering {body['name']}", seconds=2)
             return self._json(202, {"job": job})
+        if parsed.path == "/api/models/add":
+            return self._json(*self._model_add(body))
+        if parsed.path == "/api/models/remove":
+            wanted = str(body.get("id") or "").strip()
+            row = next((item for item in models_now() if item["id"] == wanted), None)
+            if row is None:
+                return self._json(404, {"error": f"no such model: {wanted}"})
+            # Any row this farm added, fixture or not, and never one that came with fleet: the
+            # two sentences are lib/models.py's own.
+            if row.get("source") != "added":
+                return self._json(400, {"error": f"{wanted} came with fleet: switch it off here, "
+                                                 "or edit this farm's models.toml by hand"})
+            if row in SENT["models"]:
+                SENT["models"].remove(row)
+            SENT["removed"].append(wanted)
+            return self._json(200, {"ok": True, "removed": wanted})
         if parsed.path in ("/api/mode", "/api/models"):
+            # Only a model this run added is mutated here. The five fixture rows are one per
+            # status on purpose, and a check that pressed a switch must not rewrite the table
+            # every later check reads.
+            mine = next((item for item in SENT["models"]
+                         if item["id"] == str(body.get("id") or "")), None)
+            action = str(body.get("action") or "")
+            if mine is not None and action in ("enable", "disable", "test"):
+                if action == "test":
+                    mine["last_test"] = time.time()
+                    mine["health"] = "ok"
+                    mine["health_detail"] = ""
+                    if mine["status"] == "failing":
+                        mine["status"] = "on" if mine["enabled"] else "off"
+                elif mine["status"] in ("on", "off"):
+                    mine["enabled"] = action == "enable"
+                    mine["status"] = "on" if mine["enabled"] else "off"
             return self._json(200, {"ok": True})
         if parsed.path == "/api/services":
             service = body.get("service", "")
@@ -1192,6 +1414,66 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                 f"server port block, {freed}, is free for the "
                                                 "next project."})
         return self._json(404, {"error": "not found"})
+
+    def _model_add(self, body):
+        """POST /api/models/add: the farm's catalog gains one entry, written from a preset.
+
+        A key never arrives here. The dialog sends the name of the environment variable and
+        nothing else, and a body carrying a key is refused with that sentence, so a page that
+        started asking for one would fail this stub before it reached a farm."""
+        mid = str(body.get("id") or "").strip()
+        shown = mid if MODEL_ID_RE.match(mid) else "<id>"
+        if key_field(body):
+            return 400, {"error": KEY_REFUSAL.format(id=shown)}
+        for field in ("bin", "run"):
+            if key_in_command(body.get(field)):
+                return 400, {"error": KEY_IN_COMMAND.format(id=shown)}
+        presets = {row["id"]: row for row in MODEL_PRESETS}
+        preset = str(body.get("preset") or "").strip()
+        if preset not in presets:
+            return 400, {"error": f"there is no preset called {preset or 'that'}"}
+        base = presets[preset]
+        if not MODEL_ID_RE.match(mid):
+            # The farm's own rule and the farm's own sentence: a stub that took a name the
+            # server refuses lets a page ship a rule nothing behind it keeps.
+            return 400, {"error": f"{MODEL_ID_RULE}: {mid!r} is not one" if mid else MODEL_ID_RULE}
+        if any(row["id"] == mid for row in models_now()):
+            return 400, {"error": f"{mid} is already in this farm's catalog"}
+        run = str(body.get("run") or base["run"]).strip()
+        binary = str(body.get("bin") or base["bin"]).strip()
+        if preset == "custom" and (not binary or not run):
+            return 400, {"error": "a custom command needs the command and the line that runs it"}
+        # A custom command is called what the person called it. "Custom command" is the name of
+        # the CARD, not of a farm's own command: two of them would be two identical rows,
+        # separable only by the mono id under the name. model_presets.entry_from() hands the
+        # naming over for that preset and models.add_model() falls back to the id.
+        label = str(body.get("label") or "").strip()
+        if not label:
+            label = mid if preset == "custom" else base["label"]
+        variant = str(body.get("variant") or "").strip()
+        if base["variants"] and variant not in base["variants"]:
+            variant = base["variants"][0]
+        # A key preset with no key pasted yet is exactly that, and says so in the table.
+        status = "needs_key" if base["kind"] == "key" and preset != "custom" else "off"
+        # Exactly the fields model_presets.ENTRY_FIELDS carries into a catalog entry, plus what
+        # engine_row() adds on top. No role, quality, caps or docs: the add route writes none of
+        # them, so a page that leaned on any of them would be leaning on this stub alone.
+        row = {
+            "id": mid, "label": label, "color": base["color"],
+            "engine": base["engine"], "bin": binary, "run": run,
+            "install_hint": base["install_hint"] or f"install {binary}",
+            "auth_env": str(body.get("auth_env") or base["auth_env"]),
+            "tos": base["tos"], "access": base["access"],
+            "preset": preset, "source": "added", "variant": variant,
+            "health": "unchecked", "health_prompt": base["health"], "health_detail": "",
+            "limits": "", "enabled": False, "routable": False, "status": status,
+            "command": binary, "installed": True,
+            "path": f"/home/farm/.local/bin/{binary or mid}", "last_test": None,
+        }
+        SENT["models"].append(row)
+        # The envelope the server uses: {"model": row}, so the page reads the answer the farm
+        # gives it and not a shape only this stub ever had.
+        return 200, {"model": row}
 
     # ------------------------------------------------------------- plumbing
 

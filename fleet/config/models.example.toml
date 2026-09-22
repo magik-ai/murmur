@@ -3,6 +3,11 @@
 # in ~/.fleet/models-state.json and is set by `fleet models enable|disable|test`, so this file
 # stays a clean description and the toggles never rewrite it.
 #
+# This example carries the two models a farm starts with. Every other service (Gemini CLI, Qwen
+# Code, Kimi Code, OpenCode, Aider, Ollama, a command of your own) is a PRESET in
+# lib/model_presets.py: add it from the dashboard's "Add a model", which writes the entry into
+# your own ~/.config/fleet/models.toml with source = "added".
+#
 # Fields per [model]:
 #   label        human name for the catalog
 #   engine       launcher path: "codex" | "claude" (native, existing) | "generic" (a CLI template)
@@ -11,12 +16,18 @@
 #   caps         the subscription's real limits (so nobody is surprised)
 #                A note about what a plan is doing TODAY (an exhausted quota, an outage) is
 #                yours to keep in your own models.toml; nothing dated ships in this example.
+#   access       one sentence: how this model is paid for. The models table shows it as is
 #   default_on   whether it starts enabled before anyone toggles it
 #   bin          (generic) the CLI binary
 #   auth_env     (generic) env var the headless CLI reads for its subscription credential
-#   run          (generic) the exact non-interactive invocation; {task} and {bin} are substituted
+#   run          (generic) the exact non-interactive invocation; {task}, {bin} and {variant}
+#                are substituted
+#   variant      (optional) the model name this row runs, substituted into {variant}
 #   health       a tiny non-interactive prompt used to test the model on enable
 #   tos          headless/automation ToS stance (why it's safe or risky for a farm)
+#   preset       (written by "Add a model") the preset this entry came from
+#   source       "shipped" for an entry that came with fleet, "added" for one you added here.
+#                Only an added entry can be removed from the dashboard
 
 [codex]
 color      = "#10A37F"
@@ -25,6 +36,7 @@ engine     = "codex"
 role       = "frontier tier: architecture, security, migrations, anything where being wrong is expensive."
 quality    = "frontier, Opus-class on agentic work"
 caps       = "ChatGPT subscription; check the plan's own limits before leaning on it"
+access     = "your ChatGPT subscription"
 default_on = true
 tos        = "first-party CLI on the ChatGPT subscription (auth_mode chatgpt)"
 
@@ -38,33 +50,6 @@ engine     = "claude"
 role       = "the workhorse: most lanes, most of the time."
 quality    = "frontier"
 caps       = "Claude subscription; limits visible via `fleet accounts`"
+access     = "your Claude subscription, shared with your own interactive sessions"
 default_on = true
 tos        = "first-party CLI on the Anthropic OAuth subscription"
-
-[qwen]
-color      = "#7C5CFC"
-label      = "Qwen Code"
-engine     = "generic"
-bin        = "qwen"
-role       = "BULK tier behind a review gate: long, mechanical, verifiable work (sweeps, test backfill, inventory, boilerplate). Never architecture, security, migrations or money."
-quality    = "a few points under the frontier tier; strong on well-specified grind"
-caps       = "flat request quota per month, week and five-hour window; no per-token billing"
-default_on = false
-auth_env   = "QWEN_CODE_API_KEY"
-run        = "{bin} -p {task} --output-format stream-json"
-health     = "Reply with exactly: OK"
-tos        = "LOW: a documented headless mode, and the plan is sold for agentic use."
-
-[kimi]
-color      = "#6D5AE6"
-label      = "Kimi Code (PREPARED, do not enable)"
-engine     = "generic"
-bin        = "kimi"
-role       = "PREPARED ONLY. Its subscription terms forbid non-interactive use, so a farm on that subscription risks suspension. Wired for completeness; keep OFF until a permitted path exists."
-quality    = "vendor figures only, no independent confirmation"
-caps       = "shared weekly credit pool"
-default_on = false
-auth_env   = "KIMI_API_KEY"
-run        = "{bin} -p {task} --output-format stream-json"
-health     = "Reply with exactly: OK"
-tos        = "HIGH, BLOCKED: 'subscriptions are for interactive use only'; scripted batches risk account suspension. Do not run a headless fleet on that subscription."

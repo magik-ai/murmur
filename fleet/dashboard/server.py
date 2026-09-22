@@ -47,6 +47,7 @@ import claude_accounts as CA  # noqa: E402
 import codex_usage as CX  # noqa: E402
 import mode as MODE  # noqa: E402
 import models as MODELS  # noqa: E402
+import model_presets as MODEL_PRESETS  # noqa: E402
 
 STATE = os.path.expanduser(os.environ.get("FLEET_STATE", "~/.fleet"))
 CONFIG = os.path.expanduser(os.environ.get("FLEET_CONFIG", "~/.config/fleet"))
@@ -244,6 +245,9 @@ def config_payload():
             "forge": free["forge"],
         },
         "hq_agent": dash_hq_agent(),
+        # The name a person types after `ssh -t` to reach this farm, for every command the page
+        # hands them to run elsewhere. Never a secret: it is the alias in their own ssh config.
+        "farm_alias": CA.FARM_ALIAS,
         # True until the refresher's first pass: the two unit facts above are not known yet and
         # are reported as absent, which is the safe way round for a page deciding what to draw.
         "pending": not snapshot.get("tried"),
@@ -1103,27 +1107,187 @@ def engine_binary(model):
     return (True, found) if found else (False, "")
 
 
+# The five words a row's Status pill can say. The order below is the order they are decided in:
+# a model nothing can run is "not installed" whatever else is true of it, and a model that has
+# no key cannot be failing a test it never ran.
+MODEL_STATUSES = ("not_installed", "needs_key", "failing", "on", "off")
+
+# What a preset-less row says about its money, when its catalog entry never said.
+NATIVE_ACCESS = {"claude": "your Claude subscription", "codex": "your ChatGPT subscription"}
+
+
+def model_has_key(model):
+    """Whether this farm can authenticate this model right now: the variable in the environment
+    the dashboard runs in, or a key stored by `fleet models auth`. The key is never read."""
+    auth_env = str((model or {}).get("auth_env") or "").strip()
+    if not auth_env:
+        return True
+    if os.environ.get(auth_env):
+        return True
+    return MODELS.has_secret(str((model or {}).get("id") or ""))
+
+
+def model_access(model):
+    """One sentence: how this model is paid for. The catalog's own `access` line when it has
+    one, otherwise a sentence built from what the entry does say."""
+    access = str((model or {}).get("access") or "").strip()
+    if access:
+        return access
+    engine = str((model or {}).get("engine") or "")
+    if engine in NATIVE_ACCESS:
+        return NATIVE_ACCESS[engine]
+    auth_env = str((model or {}).get("auth_env") or "").strip()
+    if auth_env:
+        return f"an API key, held on this farm and read as {auth_env}"
+    tos = str((model or {}).get("tos") or "").strip()
+    return tos or "not recorded: add an access line to this model in models.toml"
+
+
+def model_status(model, installed):
+    """One word for the Status pill, from what the machine and the catalog know."""
+    if not installed:
+        return "not_installed"
+    if not model_has_key(model):
+        return "needs_key"
+    if str((model or {}).get("health") or "") == "fail":
+        return "failing"
+    if (model or {}).get("enabled") and (model or {}).get("routable"):
+        return "on"
+    return "off"
+
+
+def engine_row(model):
+    """One catalog entry as the models table reads it: the entry, what this machine has, how it
+    is paid for, and the one word its pill says."""
+    row = dict(model)
+    row["tos_kind"] = str(model.get("tos_kind") or "").strip() or MODEL_PRESETS.tos_kind(model.get("tos"))
+    installed, path = engine_binary(model)
+    command = engine_command(model)
+    checked = model.get("checked_at") or 0
+    row.update({
+        "command": command,
+        "installed": installed,
+        "path": path,
+        "install_hint": str(model.get("install_hint") or "").strip()
+        or f"install {command or model.get('id')} and put it on this farm's PATH",
+        "enabled": bool(model.get("enabled")),
+        "last_test": _iso(checked) if checked else None,
+        "access": model_access(model),
+        "status": model_status(model, installed),
+        "source": "added" if model.get("source") == "added" else "shipped",
+        "variant": str(model.get("variant") or ""),
+    })
+    return row
+
+
 def engines():
     """GET /api/engines: the catalog, each row saying whether its command is on this machine."""
-    rows = []
-    for model in MODELS.listing():
-        if not model:
+    return [engine_row(model) for model in MODELS.listing() if model]
+
+
+# ---------------------------------------------------------------- adding a model
+#
+# A person adds a model by picking a service, naming it and pasting one command. The services
+# are lib/model_presets.py; this page turns one of them plus a few answers into a catalog entry
+# and writes it. Two things it never does: run anything (the entry is data, and Test is what
+# runs the CLI), and touch a credential. A key belongs on a terminal's stdin, where it is not in
+# a browser's memory, a proxy's log or this server's traceback, so a body carrying one is
+# refused before anything else is read.
+
+# The words that make a field a credential. A name is lowercased and stripped of punctuation
+# first, so key, apiKey, API_KEY and x-api-key are all the same field, and none of the fields
+# this route actually reads (preset, id, variant, bin, run, auth_env, label) carries one.
+KEY_WORDS = ("key", "secret", "token", "credential", "password")
+KEY_REFUSAL = "A key never goes through this page. Run: fleet models auth {id}"
+KEY_IN_COMMAND = ("A key never goes through this page: take it out of the command line and name "
+                  "the variable that holds it instead. Run: fleet models auth {id}")
+# A credential pasted into the command itself. That one is not harmless: it is written into
+# models.toml verbatim, echoed back in the row, and re-run on every later Test. A command may of
+# course READ a key, so a value that is a shell variable ($MY_API_KEY) or a {placeholder} is
+# what a person is told to write instead.
+KEY_FLAG = re.compile(r"--?[a-z0-9_-]*(?:key|secret|token|password)[\s=]+(\S+)", re.I)
+KEY_TOKEN = re.compile(r"(?:\b(?:sk|pk|rk|ghp|gho|ghu|ghs|xox[abopsr])-[A-Za-z0-9_-]{8,}"
+                       r"|\bAIza[A-Za-z0-9_-]{20,})")
+
+
+def key_refusal(mid, sentence=KEY_REFUSAL):
+    shown = mid if MODELS.ID_RE.match(str(mid or "")) else "<id>"
+    return sentence.format(id=shown)
+
+
+def key_field(body):
+    """The name of a field in this body that carries a credential, or "" for none."""
+    for name, value in (body or {}).items():
+        if not value:
             continue
-        row = dict(model)
-        installed, path = engine_binary(model)
-        command = engine_command(model)
-        checked = model.get("checked_at") or 0
-        row.update({
-            "command": command,
-            "installed": installed,
-            "path": path,
-            "install_hint": str(model.get("install_hint") or "").strip()
-            or f"install {command or model.get('id')} and put it on this farm's PATH",
-            "enabled": bool(model.get("enabled")),
-            "last_test": _iso(checked) if checked else None,
-        })
-        rows.append(row)
+        flat = re.sub(r"[^a-z0-9]", "", str(name).lower())
+        if any(word in flat for word in KEY_WORDS):
+            return str(name)
+    return ""
+
+
+def key_in_command(value):
+    """Whether a command line a person typed has a credential written into it."""
+    text = str(value or "")
+    if KEY_TOKEN.search(text):
+        return True
+    found = KEY_FLAG.search(text)
+    return bool(found and not found.group(1).lstrip("\"'").startswith(("$", "{")))
+
+
+def model_presets_listing():
+    """GET /api/models/presets: the services, each saying whether this farm already has it."""
+    catalogue = MODELS.catalog()
+    taken = set(catalogue)
+    for mid in catalogue:
+        entry = catalogue.get(mid) or {}
+        if isinstance(entry, dict) and entry.get("preset"):
+            taken.add(str(entry["preset"]))
+    rows = []
+    for preset in MODEL_PRESETS.presets():
+        # Custom command is never "already added": a farm may hold any number of its own.
+        preset["added"] = preset["id"] != MODEL_PRESETS.CUSTOM and preset["id"] in taken
+        rows.append(preset)
     return rows
+
+
+def add_model_request(body):
+    """POST /api/models/add {preset, id, variant?, bin?, run?, auth_env?} -> the new row."""
+    body = body or {}
+    mid = str(body.get("id") or "").strip()
+    if key_field(body):
+        return 400, {"error": key_refusal(mid or body.get("preset"))}
+    for field in ("bin", "run"):
+        if key_in_command(body.get(field)):
+            return 400, {"error": key_refusal(mid or body.get("preset"), KEY_IN_COMMAND)}
+    preset = str(body.get("preset") or "").strip()
+    if not preset:
+        return 400, {"error": "pick a service first"}
+    entry, problem = MODEL_PRESETS.entry_from(preset, body)
+    if problem:
+        return 400, {"error": problem}
+    entry["id"] = mid or preset
+    try:
+        model, problem = MODELS.add_model(entry)
+    except Exception as exc:                       # a write can fail; a traceback is not an answer
+        return 400, {"error": f"the catalog could not be written: {exc.__class__.__name__}"}
+    if problem:
+        return 400, {"error": problem}
+    return 200, {"model": engine_row(model)}
+
+
+def remove_model_request(body):
+    """POST /api/models/remove {id} -> {ok, removed}. Only a model this farm added."""
+    mid = str((body or {}).get("id") or "").strip()
+    if not mid:
+        return 400, {"error": "which model?"}
+    try:
+        removed, problem = MODELS.remove_model(mid)
+    except Exception as exc:
+        return 400, {"error": f"the catalog could not be written: {exc.__class__.__name__}"}
+    if problem:
+        return (404 if problem.startswith("no such model") else 400), {"error": problem}
+    return 200, {"ok": True, "removed": removed}
 
 
 # ---------------------------------------------------------------- services
@@ -3364,6 +3528,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, json.dumps(accounts_login_state()))
             elif path.startswith("/api/accounts"):
                 self._send(200, json.dumps(accounts_snapshot()))
+            elif path == "/api/models/presets":
+                # Above the prefix-matched model route: the services a person can add are not
+                # the models this farm has.
+                self._send(200, json.dumps(model_presets_listing()))
             elif path == "/api/engines":
                 # Above the prefix-matched model route, and its own name: it answers the
                 # catalog plus what this machine actually has installed.
@@ -3463,6 +3631,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(code, json.dumps(payload))
             elif path == "/api/agents/kill":
                 code, payload = agent_kill(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/models/add":
+                code, payload = add_model_request(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/models/remove":
+                code, payload = remove_model_request(body)
                 self._send(code, json.dumps(payload))
             elif self.path.startswith("/api/models"):
                 act, mid = body.get("action", ""), body.get("id", "")

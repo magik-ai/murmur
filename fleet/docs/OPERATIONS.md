@@ -180,6 +180,9 @@ answer says `pending` until the first pass, and keeps the last good values when 
 | `/api/accounts` | GET | each subscription's windows, with the last good numbers when a read failed |
 | `/api/accounts/login-state` | GET | per account: `logged_in`, `waiting_for_login`, `expired`, `rate_limited` or `unknown`, each with a sentence and when it was last read. `waiting_for_login` means the credentials file is ABSENT; one that is there but cannot be read is `unknown`, never an invitation to log in over it |
 | `/api/jobs`, `/api/jobs/<id>` | GET | the long actions in flight, and one action's record |
+| `/api/engines` | GET | the model catalog as the Models table reads it: one row per model with how it is paid for (`access`), one status word (`on`, `off`, `needs_key`, `not_installed`, `failing`), whether this farm added it (`source`), the model it runs (`variant`), and whether its command is on this machine. It starts nothing: running a model is what Test is for |
+| `/api/models` | GET | the catalog as the library sees it, without the machine's own facts |
+| `/api/models/presets` | GET | the services "Add a model" offers (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, OpenCode, Aider, Ollama local, Custom command), each with its install hint, its key variable, its variants, how it is paid for and whether running it headless is permitted. `added` is true for a service this farm already has |
 | `/api/power/preview?action=` | GET | what throttle, drain or resume will do, with the lanes a drain would stop, by name |
 | `/api/mail/boxes` | GET | the head office's mailboxes, with a count for the last day |
 | `/api/mail/thread?box&since` | GET | one mailbox's messages, newest last |
@@ -204,6 +207,8 @@ none is sent to them.
 | `/api/accounts/add`, `/api/accounts/remove` | `{name, engine}` / `{name}` | the login command and its steps; removal moves the account to `dead-account-backups` |
 | `/api/accounts/refresh` | | wakes this server's own account reader, and is refused for sixty seconds afterwards: one press is one request per account to the vendor |
 | `/api/models` | `{action, id}` | enable, disable or test one model, each a real request to the provider |
+| `/api/models/add` | `{preset, id, variant?, label?, bin?, run?, auth_env?}` | writes one entry into this farm's own `models.toml`, creating it from the shipped example on the first write, and answers the new row. It runs nothing. A body carrying a key is refused with `A key never goes through this page. Run: fleet models auth <id>`, whatever the field is called, and so is a key written into `bin` or `run`: a key belongs on a terminal's stdin, not in a browser, a proxy log or this server. A command that names the variable holding it (`--api-key $MY_API_KEY`) is what to write instead. `variant` is required by a service whose command line carries `{variant}`, and refused by one that does not |
+| `/api/models/remove` | `{id}` | deletes one entry this farm added, with its runtime state and its stored key. `404` when there is no such model, `400` when it came with fleet (a shipped model can be switched off, not removed) |
 | `/api/mode` | `{mode}` | the power mode, applied at once |
 | `/api/agent/msg` | `{slug, text}` | `fleet msg`, delivered at the lane's next checkpoint |
 | `/api/mail/send` | `{to, text}` | `hq msg -- <to> <text>` as this dashboard's own name, then wakes the office reader |

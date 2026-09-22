@@ -1,11 +1,11 @@
 /* Machine: the control room. Everything about this farm as a machine lives here, in the order
    a person needs it: power first, then the services that do the work, then the accounts and
-   engines they spend, then the projects they work in, then whether anything is missing, then
+   models they spend, then the projects they work in, then whether anything is missing, then
    the settings and where each one is written. Every action says what it will do before it does
    it, and the dashboard says plainly that it keeps running through all of them. */
 
 import {
-  h, card, panel, pill, emptyState, skeletonStack, toast, widthStyle,
+  h, card, panel, pill, emptyState, skeletonStack, toast, widthStyle, safeHref,
   openDrawer, closeDrawer, openDrawerKey,
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
@@ -53,7 +53,22 @@ const local = {
   projectRepo: "",
   projectPort: "",
   projectError: "",
+  /* The accounts card's footer sentence and the models card's, kept apart: one failed model
+     removal used to print itself under both cards, because the two footers read one field. */
   sectionError: "",
+  modelError: "",
+  modelPreset: "",
+  modelId: "",
+  modelVariant: "",
+  modelBin: "",
+  modelRun: "",
+  modelEnv: "",
+  addModelError: "",
+  modelBusy: false,
+  modelAdded: "",
+  modelRowSeed: null,
+  modelTesting: false,
+  modelPoll: 0,
 };
 
 function afterPaint(work) {
@@ -518,10 +533,17 @@ async function copyCommand(command) {
   }
 }
 
+/* An account is a subscription logged in on this farm, so this dialog offers the two engines
+   that have one. Every other row in the catalog is a model a person adds in the Models
+   section, and listing those here invited a "subscription" for a CLI paid by the token. */
+const ACCOUNT_ENGINES = ["claude", "codex"];
+
 function engineChoices(context) {
-  const engines = list(context.res("/api/engines").data);
+  const engines = list(context.res("/api/engines").data)
+    .filter((model) => model && ACCOUNT_ENGINES.includes(String(model.engine || model.id)));
   if (!engines.length) {
-    return h("p", { class: "muted", key: "no-engines" }, "The farm has not listed its engines yet.");
+    return h("p", { class: "muted", key: "no-engines" },
+      "The farm has not listed an engine an account can be added for.");
   }
   return h("div", { class: "m-engines", role: "radiogroup", "aria-label": "Engine", key: "engines" },
     engines.map((model) => {
@@ -706,92 +728,816 @@ function accountsSection(context) {
     })));
 }
 
-/* ------------------------------------------------------------------- engines */
+/* -------------------------------------------------------------------- models */
 
-async function engineAction(context, model, action) {
+/* Models, not engines (owner review, 2026-09-22 evening). A row is a model the agents can be
+   spawned with, and the table answers the five questions a person actually has: what it is,
+   what it runs, how it is paid for, whether it works, and when that was last proved. The role
+   and the quality notes left the table for the row's own drawer: a table carrying a paragraph
+   per row is a wall, and that is how the owner read it. */
+
+/* The five words a status can be, and the meaning each is drawn in. One pill per row, never
+   two: a row that carried both "installed" and "enabled" made a reader work out the state the
+   page already knew. */
+const STATUS = {
+  on: ["done", "On"],
+  off: ["pause", "Off"],
+  needs_key: ["wait", "Needs a key"],
+  not_installed: ["pause", "Not installed"],
+  failing: ["fail", "Failing"],
+};
+
+/* A farm on last release's server sends no status at all, and any route can answer a word this
+   page has never heard. Both land on the same five, worked out from the fields the route has
+   carried from the beginning: whether the command is here, how the last test went, and whether
+   the row is switched on. Whether a key is held is not among them, because no server has ever
+   said: on this farm that answer arrives as the status word `needs_key`. */
+function statusOf(model) {
+  const said = String((model || {}).status || "");
+  if (STATUS[said]) return said;
+  if (!model || model.installed === false) return "not_installed";
+  if (model.health === "fail") return "failing";
+  return model.enabled ? "on" : "off";
+}
+
+/* How the model is paid for, in the catalog's own sentence. A catalog that does not say falls
+   back to the key it reads, and then to what its terms say, because "unknown" on the one
+   column about money is the answer a person least wants. */
+function accessOf(model) {
+  const said = String((model || {}).access || "").trim();
+  if (said) return said;
+  const env = String((model || {}).auth_env || "").trim();
+  if (env) return `An API key, read from ${env}.`;
+  const terms = String((model || {}).tos || "").trim();
+  return terms || "The catalog does not say how this one is paid for.";
+}
+
+/* The terms of a service, as one of three words. The classification is the server's, sent as
+   `tos_kind`: safe, check or blocked. A page that read the sentence itself and called anything
+   it did not recognise "safe headless" put that green pill on Custom command, whose own terms
+   sentence says nobody here has read the terms for you. */
+const TOS_PILL = {
+  safe: ["done", "safe headless"],
+  check: ["wait", "check the terms"],
+  blocked: ["fail", "not permitted"],
+};
+
+/* A farm on a server that sends the sentence and no word. The sentence's own words are read,
+   and anything that is neither plainly permitted nor plainly refused is "check the terms":
+   unknown terms are a thing to read, never a thing to trust. */
+const TOS_BLOCKED = /\b(forbid|forbids|forbidden|blocked|not permitted|interactive use only)\b/i;
+const TOS_LOOK = /\b(high|risk|risks|suspension|check|unknown|could not be confirmed|nobody here has read)\b/i;
+const TOS_SAFE = /\b(documented|first-party|open source|no service terms|on this machine|own hardware)\b/i;
+
+function tosKind(row) {
+  const said = String((row || {}).tos_kind || "").toLowerCase().trim();
+  if (TOS_PILL[said]) return said;
+  const terms = String((row || {}).tos || "");
+  if (TOS_BLOCKED.test(terms)) return "blocked";
+  if (TOS_LOOK.test(terms)) return "check";
+  return TOS_SAFE.test(terms) ? "safe" : "check";
+}
+
+function tosPill(row) {
+  const [meaning, word] = TOS_PILL[tosKind(row)];
+  return pill(meaning, word, String((row || {}).tos || ""));
+}
+
+/* The one colour on this page that is not a theme token: the provider's own, from the catalog.
+   A value from a route reaching a style attribute is an injection surface, so only a plain hex
+   colour is let through and anything else falls back to a token. */
+function dotStyle(colour) {
+  const written = String(colour || "").trim();
+  return /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(written)
+    ? `background:${written}`
+    : "background:var(--text-dim)";
+}
+
+/* A model that is failing every call is exactly the one an operator wants to stop, so the
+   switch is offered there too. The two statuses left without one are the two where there is
+   nothing to switch on: no command on this machine, and no key to run it with. */
+function canSwitch(status) {
+  return status === "on" || status === "off" || status === "failing";
+}
+
+/* Test runs the model for real, so it is offered wherever there is a command to run. A row
+   with no key yet is exactly the row a person tests next: they run `fleet models auth` in a
+   terminal and come back, and this page cannot see the key land. */
+function canTest(status) {
+  return status !== "not_installed";
+}
+
+function isAdded(model) {
+  return String((model || {}).source || "shipped") === "added";
+}
+
+/* The rows of a models answer this page can draw. A null in the list is a row the farm could
+   not read, and one field read off it emptied the whole card: no table, no Add button, nothing
+   but a heading. The rest of the answer is still a catalog worth drawing. */
+function modelRows(data) {
+  return list(data).filter((row) => row && row.id);
+}
+
+function modelById(context, id) {
+  return modelRows(context.res("/api/engines").data).find((row) => row.id === id) || null;
+}
+
+async function modelAction(context, model, action) {
   local.busy = `${model.id}:${action}`;
+  if (action === "test") local.modelTesting = true;
   context.paint();
   try {
     const answer = await apiPost("/api/models", { action, id: model.id });
     if (answer && answer.error) toast(answer.error, "bad");
-    else toast(action === "test" ? `${model.label || model.id} was asked to answer.`
-      : `${model.label || model.id} is ${action === "enable" ? "on" : "off"}.`);
+    else if (action === "test") toast(`${model.label || model.id} was asked to answer.`);
+    else toast(`${model.label || model.id} is ${action === "enable" ? "on" : "off"}.`);
   } catch (error) {
     toast(serverReason(error) || `${model.label || model.id} did not answer.`, "bad");
   } finally {
     local.busy = "";
+    local.modelTesting = false;
+    stopPolling();
     await context.refresh("/api/engines");
   }
 }
 
-function engineRow(context, model) {
-  /* Installed is a fact the server reads off this machine. Assuming it when nothing says so
-     put an On and Off switch on an engine whose command is not there, and the row told the
-     reader that a command that does not exist is "on the path". */
-  const installed = Boolean(model.installed);
-  const health = model.health === "ok" ? "done" : model.health === "fail" ? "fail" : "pause";
-  const healthWord = model.health === "ok" ? "Answered"
-    : model.health === "fail" ? "Did not answer" : "Not tested";
-  return h("tr", { key: model.id },
-    h("td", null, model.label || model.id),
-    h("td", { class: "wrap" }, installed
-      ? h("span", { class: "mono" }, model.path || "on the path")
-      : [h("span", { class: "muted", key: "no" }, "Not installed. "),
-        h("code", { class: "cmd", key: "hint" }, model.install_hint || `install ${model.id}`)]),
-    h("td", null, installed
-      ? h("button", {
-        class: "button small",
-        "data-engine-switch": model.id,
-        "aria-pressed": String(Boolean(model.enabled)),
-        /* The press this button is about to send, not one of the two: an engine that is on
-           sends "disable", and guarding against "enable" left the switch live while it worked,
-           so a double click sent two real requests. */
-        disabled: access.writable
-          && local.busy !== `${model.id}:${model.enabled ? "disable" : "enable"}` ? null : true,
-        title: blocked() || `Press to switch ${model.label || model.id} `
-          + `${model.enabled ? "off" : "on"}. It sends one real request.`,
-        onclick: () => engineAction(context, model, model.enabled ? "disable" : "enable"),
-      }, model.enabled ? "On" : "Off")
-      : h("span", { class: "muted" }, "no switch until it is installed")),
-    h("td", { class: "wrap" },
-      pill(health, healthWord, model.health_detail || ""),
-      model.last_test ? h("span", { class: "muted" }, ` ${fmt.ago(model.last_test)}`) : null),
-    h("td", null, installed
-      ? h("button", {
-        class: "ghost-button small",
-        "data-engine-test": model.id,
-        disabled: access.writable && local.busy !== `${model.id}:test` ? null : true,
-        title: blocked(),
-        onclick: () => engineAction(context, model, "test"),
-      }, "Test")
-      : null));
+async function removeModel(context, id) {
+  local.modelError = "";
+  try {
+    await apiPost("/api/models/remove", { id });
+    toast(`${id} is gone from this farm's catalog.`);
+  } catch (error) {
+    local.modelError = serverReason(error) || `${id} could not be removed.`;
+  } finally {
+    setConfirm(context, "");
+    await context.refresh("/api/engines");
+    /* Dropped rather than refreshed: the presets are only read while the dialog is open, and
+       the next open reads them again, with this row's service choosable once more. */
+    context.drop("/api/models/presets");
+  }
 }
 
-function enginesSection(context) {
-  const resource = context.res("/api/engines");
-  return h("section", { class: "section", key: "engines" },
-    sectionHead("Engines", "Enable and Test each send one real request to the provider."),
-    card({ key: "engines", "data-write": "" }, panel(resource, {
-      loading: () => h("div", { class: "card-pad" }, skeletonStack(3)),
-      isEmpty: (data) => !list(data).length,
-      empty: () => h("div", { class: "card-pad" }, emptyState({
-        title: "No engines registered",
-        body: "An engine is the command an agent runs. Register one to spawn with it.",
-        command: "fleet models",
+/* The same three actions wherever the model is drawn: in its row, in its drawer, and in the
+   last step of the add dialog. Written once, so the three can never drift apart and offer a
+   switch in one place and not in another. */
+function modelActions(context, model, where) {
+  const status = statusOf(model);
+  const out = [];
+  if (canSwitch(status)) {
+    const next = model.enabled ? "disable" : "enable";
+    out.push(h("button", {
+      key: `${where}:switch`,
+      class: "button small",
+      "data-model-switch": model.id,
+      "aria-pressed": String(Boolean(model.enabled)),
+      /* The press this button is about to send, not one of the two: a model that is on sends
+         "disable", and guarding against "enable" left the switch live while it worked, so a
+         double click sent two real requests. */
+      disabled: access.writable && local.busy !== `${model.id}:${next}` ? null : true,
+      title: blocked() || `Press to switch ${model.label || model.id} `
+        + `${model.enabled ? "off" : "on"}. It sends one real request.`,
+      onclick: () => modelAction(context, model, next),
+    /* The word on a button is the press it makes, never the state the row is already in: a
+       button reading "On" beside a pill reading "Off" is two words for one thing, and the
+       server calls a model off until a test passes, so the two really do disagree. */
+    }, model.enabled ? "Switch off" : "Switch on"));
+  }
+  if (canTest(status)) {
+    out.push(h("button", {
+      key: `${where}:test`,
+      class: "ghost-button small",
+      "data-model-test": model.id,
+      disabled: access.writable && local.busy !== `${model.id}:test` ? null : true,
+      title: blocked() || "One real request to the provider.",
+      onclick: () => modelAction(context, model, "test"),
+    }, local.busy === `${model.id}:test` ? "Testing" : "Test"));
+  }
+  if (isAdded(model)) {
+    out.push(h("button", {
+      key: `${where}:remove`,
+      class: "ghost-button small",
+      "data-model-remove": model.id,
+      disabled: access.writable ? null : true,
+      title: blocked(),
+      onclick: () => setConfirm(context, `remove-model:${model.id}`),
+    }, "Remove"));
+  }
+  if (status === "needs_key") {
+    /* The one command that fixes this row, written where the row is. A cell that offered
+       Remove and nothing else sent a person back to the dialog to find the command it had
+       shown them one step earlier. */
+    out.push(h("code", { key: `${where}:auth`, class: "cmd", "data-model-auth-hint": model.id },
+      `fleet models auth ${model.id}`));
+  }
+  if (!out.length) {
+    out.push(h("span", { key: `${where}:none`, class: "muted" }, "Install it first"));
+  }
+  return out;
+}
+
+function removeModelConfirm(context, id) {
+  const model = modelById(context, id) || { id };
+  const env = String(model.auth_env || "").trim();
+  return h("div", { class: "m-confirm", key: `rm:${id}` },
+    h("h3", null, `Remove ${model.label || id}?`),
+    h("p", null, `The entry for ${id} is deleted from this farm's catalog, and the key stored `
+      /* The variable by name: "the key stored for it" is not something a person can check, and
+         this is the sentence they read before deleting a credential. */
+      + (env ? `for it with fleet models auth (the one read as ${env}) is deleted with it. ` : "for it with fleet models auth is deleted with it. ")
+      + "No agent can be spawned with it again until it is added back."),
+    h("p", { class: "muted" }, "Nothing else on the farm is touched, and no lane that already "
+      + "ran on it is changed."),
+    h("div", { class: "row" },
+      h("button", {
+        class: "button primary",
+        "data-confirm": `remove-model:${id}`,
+        disabled: access.writable ? null : true,
+        title: blocked(),
+        onclick: () => removeModel(context, id),
+      }, "Yes, remove it"),
+      h("button", {
+        class: "ghost-button",
+        onclick: () => setConfirm(context, ""),
+      }, "Keep it")));
+}
+
+/* What the model runs, as the reader would type it. A model that is not on this machine says
+   so and shows the one line that installs it: a page that assumed every catalog row was
+   installed offered to switch on a command that is not there. */
+function runsAs(model) {
+  if (model.installed === false) {
+    /* One row, one state, said once: "Not installed" is the Status pill's word. This cell
+       carries the one thing the pill cannot, the command that puts it on this farm. */
+    return [
+      h("span", { class: "muted", key: "missing" },
+        "Nothing on this farm's PATH. Install it with:"),
+      h("code", { class: "cmd", key: "hint" },
+        model.install_hint || `install ${model.command || model.id}`),
+    ];
+  }
+  return h("span", { class: "mono" }, model.path || model.command || "on the path");
+}
+
+function modelRow(context, model) {
+  const status = statusOf(model);
+  const [meaning, label] = STATUS[status];
+  const detail = String(model.health_detail || "");
+  return h("tr", { key: model.id },
+    h("td", { class: "wrap" }, h("button", {
+      class: "m-model-name",
+      "data-model-open": model.id,
+      title: "Open what this model is for, and its terms.",
+      onclick: () => openModelDrawer(context, model.id),
+    },
+    h("span", { class: "m-dot", style: dotStyle(model.color), "aria-hidden": "true" }),
+    h("span", { class: "m-model-words" },
+      h("b", null, model.label || model.id),
+      h("span", { class: "muted mono m-id" }, model.id)))),
+    /* Every cell but the name carries the name of its column. On a phone the table is a card
+       list, the header row is gone, and this attribute is what each line is called there. */
+    h("td", { class: "wrap m-runs", "data-col": "Runs as" }, runsAs(model)),
+    h("td", { class: "wrap", "data-col": "Access" }, accessOf(model)),
+    h("td", { class: "wrap", "data-col": "Status" },
+      pill(meaning, label, detail),
+      status === "failing" && detail
+        ? h("div", { class: "muted m-detail", key: "why" }, detail) : null),
+    h("td", { class: "num", "data-col": "Last test" },
+      model.last_test ? fmt.ago(model.last_test) : "never"),
+    h("td", { "data-col": "Actions" },
+      h("div", { class: "row m-row-actions" }, modelActions(context, model, "row"))));
+}
+
+/* ------------------------------------------------------- one model, in full */
+
+function detailRow(label, value) {
+  if (!value) return null;
+  return [
+    h("dt", { key: `dt:${label}` }, label),
+    h("dd", { key: `dd:${label}` }, value),
+  ];
+}
+
+function modelDrawerBody(context, id) {
+  const model = modelById(context, id);
+  if (!model) {
+    return h("p", { class: "muted" },
+      `${id} is no longer in this farm's catalog.`);
+  }
+  const link = safeHref(model.docs);
+  const status = statusOf(model);
+  const [meaning, label] = STATUS[status];
+  return [
+    h("div", { class: "row m-wait", key: "status" },
+      pill(meaning, label, model.health_detail || ""),
+      h("span", { class: "muted" }, accessOf(model))),
+    h("dl", { class: "kv m-detail-list", key: "facts" },
+      detailRow("What it is for", model.role),
+      detailRow("Quality", model.quality),
+      detailRow("Limits", model.caps || model.limits),
+      detailRow("Terms", model.tos),
+      detailRow("Variant", model.variant),
+      detailRow("Reads its key from", model.auth_env
+        ? h("span", { class: "mono" }, model.auth_env)
+        : "Nothing. It runs on a subscription already logged in on this farm."),
+      detailRow("Where it came from", isAdded(model)
+        ? "Added on this farm, so it can be removed."
+        : "Shipped with the farm, so it can only be switched off."),
+      detailRow("Documentation", link
+        ? h("a", { href: link, target: "_blank", rel: "noreferrer noopener" }, link)
+        : null)),
+    model.run
+      ? h("div", { key: "run" },
+        h("p", { class: "muted" }, "The line a lane runs. {bin} is the command, {task} is the brief:"),
+        h("code", { class: "cmd", "data-model-run": "" }, model.run))
+      : null,
+    h("div", { class: "row m-dialog-actions", key: "actions" },
+      modelActions(context, model, "drawer")),
+    readOnlyLine("ro-model-drawer"),
+  ];
+}
+
+function openModelDrawer(context, id) {
+  const model = modelById(context, id) || { id };
+  openDrawer({
+    key: `model:${id}`,
+    title: model.label || id,
+    sub: `${id}: what it is for, what it costs, and how it runs.`,
+    body: () => modelDrawerBody(context, id),
+  });
+}
+
+/* ---------------------------------------------------------- adding a model */
+
+/* Adding a model is the accounts dialog's pattern, step for step: numbered steps down the
+   drawer, one thing to do in each, and the commands that touch a credential kept where they
+   belong, in a terminal. Nothing here ever asks for a key. */
+const ADD_MODEL_KEY = "add-model";
+
+const KIND_WORD = {
+  subscription: "A subscription you already pay for.",
+  key: "An API key you hold.",
+  local: "Weights on this machine.",
+};
+
+function presetById(context, id) {
+  return list(context.res("/api/models/presets").data).find((row) => row && row.id === id) || null;
+}
+
+function choosePreset(context, preset) {
+  local.modelPreset = preset.id;
+  local.modelId = preset.id === "custom" ? "" : preset.id;
+  local.modelVariant = list(preset.variants)[0] || "";
+  local.modelBin = preset.bin || "";
+  local.modelRun = preset.run || "";
+  local.modelEnv = preset.auth_env || "";
+  local.addModelError = "";
+  context.paint();
+}
+
+function stepHead(number, title, note) {
+  return h("div", { class: "m-dialog-step", key: `head${number}` },
+    h("div", { class: "m-step-no" }, String(number)),
+    h("div", null,
+      h("h3", null, title),
+      note ? h("p", { class: "muted" }, note) : null));
+}
+
+function commandRow(command, mark, key) {
+  return h("div", { class: "m-cmd-row", key: key || `cmd:${mark}` },
+    h("code", { class: "cmd", [`data-${mark}`]: "" }, command),
+    h("button", {
+      class: "button small",
+      onclick: () => copyCommand(command),
+    }, "Copy"));
+}
+
+function presetCards(context, presets) {
+  return h("div", { class: "m-presets", role: "radiogroup", "aria-label": "Service", key: "presets" },
+    presets.map((preset) => {
+      const chosen = local.modelPreset === preset.id;
+      const added = Boolean(preset.added);
+      return h("button", {
+        key: preset.id,
+        type: "button",
+        class: "choice m-preset" + (chosen ? " chosen" : ""),
+        role: "radio",
+        "aria-checked": String(chosen),
+        "data-preset": preset.id,
+        disabled: added || !access.writable ? true : null,
+        title: added
+          ? `${preset.label || preset.id} is already in this farm's catalog.`
+          : blocked(),
+        onclick: () => choosePreset(context, preset),
+      },
+      h("div", { class: "m-preset-head" },
+        h("span", { class: "m-dot", style: dotStyle(preset.color), "aria-hidden": "true" }),
+        h("b", null, preset.label || preset.id),
+        added ? pill("pause", "already added", "") : tosPill(preset)),
+      h("div", { class: "muted" }, accessOf(preset)),
+      h("div", { class: "muted" }, KIND_WORD[preset.kind] || ""));
+    }));
+}
+
+/* Step two: the name it goes into the catalog under, the variant when the service sells more
+   than one, and, for a command of your own, the three things only you can know. */
+function nameStep(context, preset) {
+  const custom = preset.id === "custom";
+  const variants = list(preset.variants);
+  return [
+    stepHead(2, "Name it", custom
+      ? "A short id for the catalog, plus the command and the line that runs it."
+      : "A short id for the catalog. The preset's own name is filled in; change it if you run two."),
+    h("label", { class: "m-field", key: "name" },
+      h("span", { class: "m-label" }, "Name"),
+      h("input", {
+        type: "text",
+        class: "m-name",
+        "aria-label": "Model name",
+        "data-model-id": "",
+        placeholder: custom ? "my-model" : preset.id,
+        autocomplete: "off",
+        spellcheck: "false",
+        value: local.modelId,
+        disabled: access.writable ? null : true,
+        oninput: (event) => {
+          local.modelId = event.target.value;
+          local.addModelError = "";
+        },
       })),
+    variants.length
+      ? h("label", { class: "m-field", key: "variant" },
+        h("span", { class: "m-label" }, "Which model"),
+        h("select", {
+          class: "m-name",
+          "aria-label": "Model variant",
+          "data-model-variant": "",
+          value: local.modelVariant,
+          disabled: access.writable ? null : true,
+          onchange: (event) => {
+            local.modelVariant = event.target.value;
+            context.paint();
+          },
+        }, variants.map((name) => h("option", {
+          key: name, value: name, selected: local.modelVariant === name,
+        }, name))))
+      : null,
+    custom
+      ? [
+        h("p", { class: "muted", key: "tpl" },
+          "In the line below, {bin} is the command above and {task} is the brief the lane is "
+          + "given. The farm writes both in before it runs anything."),
+        h("label", { class: "m-field", key: "bin" },
+          h("span", { class: "m-label" }, "Command"),
+          h("input", {
+            type: "text",
+            class: "m-name",
+            "aria-label": "Command",
+            "data-model-bin": "",
+            placeholder: "my-cli",
+            autocomplete: "off",
+            spellcheck: "false",
+            value: local.modelBin,
+            disabled: access.writable ? null : true,
+            oninput: (event) => {
+              local.modelBin = event.target.value;
+              local.addModelError = "";
+            },
+          })),
+        h("label", { class: "m-field", key: "run" },
+          h("span", { class: "m-label" }, "How to run it"),
+          h("input", {
+            type: "text",
+            class: "m-name",
+            "aria-label": "Run template",
+            "data-model-run-template": "",
+            placeholder: "{bin} -p {task}",
+            autocomplete: "off",
+            spellcheck: "false",
+            value: local.modelRun,
+            disabled: access.writable ? null : true,
+            oninput: (event) => {
+              local.modelRun = event.target.value;
+              local.addModelError = "";
+            },
+          })),
+        h("label", { class: "m-field", key: "env" },
+          h("span", { class: "m-label" }, "Key is read from"),
+          h("input", {
+            type: "text",
+            class: "m-name",
+            "aria-label": "Key environment variable",
+            "data-model-env": "",
+            placeholder: "MY_MODEL_API_KEY",
+            autocomplete: "off",
+            spellcheck: "false",
+            value: local.modelEnv,
+            disabled: access.writable ? null : true,
+            oninput: (event) => {
+              local.modelEnv = event.target.value;
+              local.addModelError = "";
+            },
+          })),
+      ]
+      : null,
+  ];
+}
+
+/* Step three: how this one gets its credential. Three services, three different answers, and
+   in none of them does a key pass through this page. */
+/* The farm's own ssh name, from the server; "farm" only on a server too old to send one. */
+function farmAlias(context) {
+  const config = context.res("/api/config").data || {};
+  return String(config.farm_alias || "").trim() || "farm";
+}
+
+function accessStep(context, preset) {
+  const name = (local.modelId || preset.id || "the model").trim();
+  const binary = local.modelBin || preset.bin || name;
+  if (preset.kind === "subscription") {
+    return [
+      stepHead(3, "Log it in", "A subscription is logged in once, in a terminal on your own "
+        + "machine, not on this page. Run:"),
+      commandRow(`ssh -t ${farmAlias(context)} ${binary}`, "model-login"),
+      h("ol", { key: "steps" },
+        h("li", { key: "1" }, "Run the command from wherever you reach this farm"),
+        h("li", { key: "2" }, "In the window it opens, type /login"),
+        h("li", { key: "3" }, "Choose the account that holds the subscription"),
+        h("li", { key: "4" }, "Type /exit, then come back here")),
+    ];
+  }
+  if (preset.kind === "local") {
+    /* The pull command is the preset's own, with the model chosen in step 2 written into it.
+       A line this page built itself ("{bin} pull {variant}") matched Ollama by luck and would
+       be wrong for the next local runner a farm adds. */
+    const wanted = local.modelVariant || name;
+    const hint = String(preset.pull_hint || "").trim();
+    const pull = hint
+      ? hint.replace(/<variant>|\{variant\}/g, wanted)
+      : `${binary} pull ${wanted}`;
+    return [
+      stepHead(3, "Install it and pull the weights", "Nothing is paid and nothing leaves this "
+        + "machine. Two commands, in a terminal on the farm:"),
+      commandRow(preset.install_hint || `install ${binary}`, "model-install"),
+      commandRow(pull, "model-pull"),
+      h("p", { class: "muted", key: "note" },
+        "The pull is the slow one. It can be running while you finish here."),
+    ];
+  }
+  /* The command is the model's own name, so there is no command to show until the name is
+     typed. Falling back to the preset's id printed "fleet models auth custom", a command that
+     looks runnable and is not. */
+  const named = local.modelId.trim();
+  return [
+    stepHead(3, "Give it a key", named
+      ? "The farm asks for the key on the command line and holds it itself. Run:"
+      : "The command carries the name you give it in step 2. Name it, and it appears here."),
+    named ? commandRow(`fleet models auth ${named}`, "model-auth") : null,
+    named ? h("p", { key: "paste" }, "Paste the key when it asks.") : null,
+    h("p", { class: "m-keyline", key: "never" }, "A key never goes through this page."),
+  ];
+}
+
+/* The farm's own rule for a model id, which is the only rule that decides: lib/models.py
+   writes the name as a TOML table. A page that taught a looser one let "Gemini", "my.model"
+   and a thirty-five character name through to a refusal nobody could have predicted. */
+const MODEL_ID_RE = /^[a-z][a-z0-9_-]{1,30}$/;
+const MODEL_ID_RULE = "A model id is lower case letters, digits, - and _, starting with a "
+  + "letter, 2 to 31 characters.";
+
+function validateModel(preset) {
+  const name = local.modelId.trim();
+  if (!name) return "Give the model a name, for example gemini.";
+  if (!MODEL_ID_RE.test(name)) return `${MODEL_ID_RULE} ${name} is not one.`;
+  if (preset.id === "custom" && !local.modelBin.trim()) {
+    return "A command of your own needs the command to run, for example my-cli.";
+  }
+  if (preset.id === "custom" && !local.modelRun.trim()) {
+    return "A command of your own needs the line that runs it, with {bin} and {task} in it.";
+  }
+  return "";
+}
+
+async function registerModel(context, preset) {
+  const problem = validateModel(preset);
+  if (problem) {
+    local.addModelError = problem;
+    context.paint();
+    return;
+  }
+  local.addModelError = "";
+  local.modelBusy = true;
+  context.paint();
+  /* The body carries the name of the variable a key is read from, never a key. The server
+     refuses a body that carries one, and this page must never be the reason it has to. */
+  const body = { preset: preset.id, id: local.modelId.trim() };
+  if (local.modelVariant) body.variant = local.modelVariant;
+  if (preset.id === "custom") {
+    body.bin = local.modelBin.trim();
+    body.run = local.modelRun.trim();
+    if (local.modelEnv.trim()) body.auth_env = local.modelEnv.trim();
+  }
+  try {
+    const answer = await apiPost("/api/models/add", body);
+    /* The server answers {"model": row}. Reading the row off the envelope's top level left the
+       seed null on a real farm, so the last step fell back to "this farm has not listed it back
+       yet" for as long as the table's own refresh lagged. A bare row is still read, for a farm
+       on an older build. */
+    const row = (answer && answer.model) || answer;
+    local.modelRowSeed = row && row.id ? row : null;
+    local.modelAdded = (row && row.id) || body.id;
+    await context.refresh("/api/engines");
+    context.refresh("/api/models/presets");
+    /* Section 11, step 4: the dialog runs the test itself once the row exists, so the reader
+       sees an answer without pressing anything. A row that cannot be tested yet (no binary, no
+       key) is left at its status word, which says what to do next. */
+    const fresh = modelById(context, local.modelAdded) || row;
+    const status = fresh && fresh.id ? statusOf(fresh) : "";
+    if (status && status !== "not_installed" && status !== "needs_key") {
+      pollWhileTesting(context);
+      await modelAction(context, fresh, "test");
+    }
+  } catch (error) {
+    local.addModelError = serverReason(error) || "The farm did not write this model to its catalog.";
+  } finally {
+    local.modelBusy = false;
+    context.paint();
+  }
+}
+
+/* A test is one real request to a provider and can take a while. The page's own tick is three
+   seconds and only repaints; this asks for the row again every two, on its own clock, because
+   the flip from "asking" to an answer is the single thing the reader is waiting for. */
+function pollWhileTesting(context) {
+  if (local.modelPoll) return;
+  local.modelPoll = setInterval(() => {
+    if (!local.modelTesting) {
+      clearInterval(local.modelPoll);
+      local.modelPoll = 0;
+      return;
+    }
+    context.refresh("/api/engines");
+  }, 2000);
+}
+
+function stopPolling() {
+  if (!local.modelPoll) return;
+  clearInterval(local.modelPoll);
+  local.modelPoll = 0;
+}
+
+/* The last step, after the catalog was written: what the farm now says about this row, the
+   two things worth doing to it at once, and the door. */
+function registeredStep(context) {
+  const model = modelById(context, local.modelAdded) || local.modelRowSeed;
+  if (!model) {
+    return h("p", { class: "muted", key: "gone" },
+      `${local.modelAdded} was registered, and this farm has not listed it back yet.`);
+  }
+  if (local.modelTesting) pollWhileTesting(context);
+  const status = statusOf(model);
+  const [meaning, label] = STATUS[status];
+  /* A key service ends the dialog with one thing left to do, and it happens in a terminal.
+     Saying "come back later" there left the person on the step that mattered with no command
+     on it and no way to finish. */
+  const keyed = status === "needs_key";
+  return h("div", { class: "m-steps", key: "done" },
+    stepHead(4, `${model.label || model.id} is in the catalog`,
+      keyed
+        ? "It is written to this farm's model list. It has no key yet: run "
+          + `fleet models auth ${model.id} in a terminal, then press Test.`
+        : "It is written to this farm's model list. Test it, switch it on, or come back later."),
+    keyed ? commandRow(`fleet models auth ${model.id}`, "model-auth", "auth") : null,
+    h("div", { class: "row m-wait", key: "state" },
+      pill(meaning, label, model.health_detail || ""),
+      h("span", { class: "muted" }, local.modelTesting
+        ? "Asking the provider to answer. This page is watching for the result."
+        : accessOf(model))),
+    h("div", { class: "row m-dialog-actions", key: "acts" },
+      modelActions(context, model, "added"),
+      h("button", {
+        class: "button primary",
+        "data-model-done": "",
+        onclick: () => closeDrawer(),
+      }, "Done")),
+    readOnlyLine("ro-model-added"));
+}
+
+function addModelSteps(context, presets) {
+  const preset = presetById(context, local.modelPreset);
+  return h("div", { class: "m-steps", key: "steps" },
+    stepHead(1, "Pick a service", "What the agents would be spawned with. A service already in "
+      + "this farm's catalog cannot be added twice."),
+    presetCards(context, presets),
+    preset ? nameStep(context, preset) : null,
+    preset ? accessStep(context, preset) : null,
+    preset ? stepHead(4, "Register it", "This writes the entry to this farm's model catalog. "
+      + "Nothing is spawned and nothing is spent.") : null,
+    local.addModelError
+      ? h("p", { class: "m-bad", key: "err", role: "alert" }, local.addModelError) : null,
+    h("div", { class: "row m-dialog-actions", key: "actions" },
+      h("button", {
+        class: "button primary",
+        "data-model-register": "",
+        disabled: access.writable && preset && !local.modelBusy ? null : true,
+        title: blocked() || (preset ? "" : "Pick a service first."),
+        onclick: () => registerModel(context, preset),
+      }, local.modelBusy ? "Writing the catalog" : "Register"),
+      h("button", { class: "ghost-button", onclick: () => closeDrawer() }, "Cancel")),
+    readOnlyLine("ro-model-add"));
+}
+
+function addModelBody(context) {
+  const resource = context.watch("/api/models/presets");
+  if (local.modelAdded) return registeredStep(context);
+  return panel(resource, {
+    loading: () => skeletonStack(4),
+    isEmpty: (data) => !list(data).length,
+    empty: () => emptyState({
+      title: "This farm offers no services to add",
+      body: "A preset is a service the server knows how to write into the catalog.",
+      command: "fleet models",
+    }),
+    ready: (data) => addModelSteps(context, list(data)),
+  });
+}
+
+function openAddModel(context) {
+  local.modelPreset = "";
+  local.modelId = "";
+  local.modelVariant = "";
+  local.modelBin = "";
+  local.modelRun = "";
+  local.modelEnv = "";
+  local.addModelError = "";
+  local.modelBusy = false;
+  local.modelAdded = "";
+  local.modelRowSeed = null;
+  local.modelTesting = false;
+  openDrawer({
+    key: ADD_MODEL_KEY,
+    title: "Add a model",
+    sub: "A model the agents can be spawned with.",
+    body: () => addModelBody(context),
+    onClose: () => {
+      local.modelAdded = "";
+      local.modelRowSeed = null;
+      local.addModelError = "";
+      local.modelTesting = false;
+      stopPolling();
+      context.refresh("/api/engines");
+      /* The presets are a static list read by this dialog alone, so the page stops asking for
+         them when the dialog shuts. Left in the watch list they were re-fetched on every tick
+         for as long as Machine was open. */
+      context.drop("/api/models/presets");
+    },
+  });
+}
+
+function modelsSection(context) {
+  const resource = context.res("/api/engines");
+  const removing = local.confirm.startsWith("remove-model:");
+  /* The same footer under a full table and under an empty one. A farm with nothing registered
+     is exactly the farm that needs the Add button, and hiding it there left a new operator
+     with a sentence and no way to act on it. */
+  const footer = () => h("div", { class: "card-pad", key: "add" },
+    removing
+      ? removeModelConfirm(context, local.confirm.slice("remove-model:".length))
+      : h("button", {
+        class: "button small",
+        "data-add-model": "",
+        disabled: access.writable ? null : true,
+        title: blocked(),
+        onclick: () => openAddModel(context),
+      }, "Add a model"),
+    h("p", { class: "muted", key: "note" },
+      "A provider key is given on the command line, never in a web form: "
+      + "fleet models auth <id>."),
+    local.modelError ? h("p", { class: "m-bad", key: "err" }, local.modelError) : null,
+    readOnlyLine("ro-models"));
+  return h("section", { class: "section", key: "models" },
+    sectionHead("Models", "What the agents can be spawned with."),
+    card({ key: "models", "data-write": "" }, panel(resource, {
+      loading: () => h("div", { class: "card-pad" }, skeletonStack(3)),
+      isEmpty: (data) => !modelRows(data).length,
+      empty: () => [
+        h("div", { class: "card-pad", key: "none" }, emptyState({
+          title: "No models registered",
+          body: "A model is the command an agent runs. Add one to spawn with it.",
+          command: "fleet models",
+        })),
+        footer(),
+      ],
       ready: (data) => [
-        h("div", { class: "tablewrap", key: "table" }, h("table", null,
+        h("div", { class: "tablewrap", key: "table" }, h("table", { class: "m-models" },
           h("thead", null, h("tr", null,
-            h("th", null, "Engine"),
-            h("th", null, "Installed"),
-            h("th", null, "Enabled"),
+            h("th", null, "Model"),
+            h("th", null, "Runs as"),
+            h("th", null, "Access"),
+            h("th", null, "Status"),
             h("th", null, "Last test"),
-            h("th", null, ""))),
-          h("tbody", null, list(data).map((model) => engineRow(context, model))))),
-        h("div", { class: "card-pad", key: "note" },
-          h("p", { class: "muted" },
-            "A provider key is given on the command line, never in a web form: fleet models auth <id>."),
-          readOnlyLine("ro-engines")),
+            h("th", null, "Actions"))),
+          h("tbody", null, modelRows(data).map((model) => modelRow(context, model))))),
+        footer(),
       ],
     })));
 }
@@ -1115,7 +1861,7 @@ export default {
       powerSection(context),
       servicesSection(context),
       accountsSection(context),
-      enginesSection(context),
+      modelsSection(context),
       projectsSection(context),
       healthSection(context),
       settingsSection(context),
