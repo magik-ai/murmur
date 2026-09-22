@@ -27,9 +27,10 @@ const SENSOR_WORD = { done: "reporting", fail: "no answer", wait: "needs you", p
    each one is the server's; these are only the two words in the pill. */
 const LOGIN = {
   logged_in: ["done", "Logged in"],
-  waiting_first_login: ["wait", "Waiting for the first login"],
+  waiting_for_login: ["wait", "Waiting for the first login"],
   expired: ["fail", "Token expired"],
   rate_limited: ["wait", "Rate limited"],
+  unknown: ["pause", "Cannot tell"],
 };
 
 const REFRESH_QUIET_MS = 60000;
@@ -172,16 +173,16 @@ function confirmBody(context, action) {
     ready: (data) => {
       const lanes = list(data.lanes);
       if (action === "throttle") {
-        const caps = data.caps || {};
+        /* The numbers are the farm's, read from its own power profile, and the server has
+           already written them into one sentence. The page drew a sentence of its own out of
+           a `caps` object nothing sends, so every number in it read "none". */
         return [
-          h("p", { key: "one" },
-            `The agents are capped at ${fmt.percent(caps.cpu_pct)} of the processor `
-            + `(${fmt.decimal(caps.cpu_cores)} of ${fmt.num(caps.cores_total)} cores) and `
-            + `${fmt.gigabytes(caps.mem_high_gb)} of memory, and no new agent starts.`),
-          h("p", { key: "two" }, caps.ci_ram_released
-            ? "The memory the verification database holds is released."
-            : "The verification database keeps its memory."),
-          h("p", { key: "three" }, "Nothing that is running is killed, and this page keeps running."),
+          h("p", { key: "one" }, data.sentence
+            || "This caps the processor and the memory of every agent already running, and "
+            + "stops any new agent from being spawned."),
+          ...list(data.warnings).map((line, index) => h("p", {
+            class: "muted", key: `warn:${index}`,
+          }, line)),
         ];
       }
       if (action === "drain") {
@@ -318,8 +319,8 @@ function servicesSection(context) {
           h("tbody", null, list(data.services).map((row) => h("tr", { key: row.id },
             h("td", null, row.label || row.id),
             h("td", null, pill(serviceMeaning(row.state), fmt.titleCase(row.state || "unknown"), row.detail || "")),
-            h("td", { class: "num" }, row.changed_at ? fmt.ago(row.changed_at) : "not known"),
-            h("td", { class: "wrap" }, row.note || ""),
+            h("td", { class: "num" }, row.since ? fmt.ago(row.since) : "not known"),
+            h("td", { class: "wrap" }, row.what || ""),
             h("td", null, list(row.actions).length
               ? h("div", { class: "row" }, list(row.actions).map((action) => h("button", {
                 key: action,
@@ -329,7 +330,10 @@ function servicesSection(context) {
                 title: blocked(),
                 onclick: () => serviceAction(context, row, action),
               }, fmt.titleCase(action))))
-              : h("code", { class: "cmd" }, row.command || "no command"))))))),
+              /* The row that cannot be worked from here still hands over the command that
+                 works it from a terminal: the server writes that out as `fix`, and names the
+                 command family as `verb` when there is nothing to fix. */
+              : h("code", { class: "cmd" }, row.fix || row.verb || "no command"))))))),
         readOnlyLine("ro-services"),
       ],
     })));
@@ -363,11 +367,17 @@ function windowBars(account) {
     h("span", { class: "num" }, fmt.percent(row.percent)))));
 }
 
+/* Two words and then the whole sentence. The sentence is the server's, it is the only part
+   that says what to do about a login that is not in, and a tooltip is not somewhere a person
+   finds it: it goes in the row. */
 function loginCell(states, name) {
   const found = states.find((row) => row.name === name);
   if (!found) return h("span", { class: "muted" }, "not read yet");
   const [meaning, word] = LOGIN[found.state] || ["pause", fmt.titleCase(found.state || "unknown")];
-  return pill(meaning, word, found.detail || "");
+  const sentence = found.sentence || "";
+  return h("div", { class: "m-login" },
+    pill(meaning, word, sentence),
+    sentence ? h("span", { class: "muted" }, sentence) : null);
 }
 
 async function refreshAccounts(context) {
@@ -461,7 +471,7 @@ function addSteps(context) {
     h("div", { class: "row" },
       pill(waiting ? "wait" : "done",
         waiting ? "Waiting for the first login" : "Logged in",
-        (found && found.detail) || ""),
+        (found && found.sentence) || ""),
       h("span", { class: "muted" }, waiting
         ? "This turns itself into logged in as soon as the credentials file appears."
         : "The account is ready to be spent."),
@@ -514,7 +524,7 @@ function addAccount(context) {
             local.addEngine = event.target.value;
             context.paint();
           },
-        }, list(context.res("/api/models").data).map((model) => h("option", {
+        }, list(context.res("/api/engines").data).map((model) => h("option", {
           key: model.id, value: model.id, selected: local.addEngine === model.id,
         }, model.label || model.id)))),
       h("button", {
@@ -559,7 +569,7 @@ function accountsSection(context) {
           h("tbody", null, list(data.accounts).map((account) => h("tr", { key: account.name },
             h("td", null, account.label || account.name),
             h("td", null, account.engine || "unknown"),
-            h("td", null, loginCell(states, account.name)),
+            h("td", { class: "wrap" }, loginCell(states, account.name)),
             h("td", { class: "wrap" }, windowBars(account)),
             h("td", { class: "num" }, account.read_at ? fmt.ago(account.read_at) : "never"),
             h("td", null, h("button", {
@@ -593,12 +603,15 @@ async function engineAction(context, model, action) {
     toast(serverReason(error) || `${model.label || model.id} did not answer.`, "bad");
   } finally {
     local.busy = "";
-    await context.refresh("/api/models");
+    await context.refresh("/api/engines");
   }
 }
 
 function engineRow(context, model) {
-  const installed = model.installed !== false;
+  /* Installed is a fact the server reads off this machine. Assuming it when nothing says so
+     put an On and Off switch on an engine whose command is not there, and the row told the
+     reader that a command that does not exist is "on the path". */
+  const installed = Boolean(model.installed);
   const health = model.health === "ok" ? "done" : model.health === "fail" ? "fail" : "pause";
   const healthWord = model.health === "ok" ? "Answered"
     : model.health === "fail" ? "Did not answer" : "Not tested";
@@ -625,7 +638,7 @@ function engineRow(context, model) {
       : h("span", { class: "muted" }, "no switch until it is installed")),
     h("td", { class: "wrap" },
       pill(health, healthWord, model.health_detail || ""),
-      model.health_at ? h("span", { class: "muted" }, ` ${fmt.ago(model.health_at)}`) : null),
+      model.last_test ? h("span", { class: "muted" }, ` ${fmt.ago(model.last_test)}`) : null),
     h("td", null, installed
       ? h("button", {
         class: "ghost-button small",
@@ -638,7 +651,7 @@ function engineRow(context, model) {
 }
 
 function enginesSection(context) {
-  const resource = context.res("/api/models");
+  const resource = context.res("/api/engines");
   return h("section", { class: "section", key: "engines" },
     sectionHead("Engines", "Enable and Test each send one real request to the provider."),
     card({ key: "engines", "data-write": "" }, panel(resource, {
@@ -676,18 +689,11 @@ function ports(row) {
   return parts.length ? parts.join(", ") : "none";
 }
 
-/** The next free block above the highest one registered, in tens, as the farm hands them out. */
-export function nextPortBase(rows, fallback = 5200) {
-  const numbers = list(rows).flatMap((row) => Object.values((row && row.ports) || {}))
-    .map(Number).filter((value) => Number.isFinite(value));
-  if (!numbers.length) return fallback;
-  return Math.ceil((Math.max(...numbers) + 1) / 10) * 10;
-}
-
 async function addProject(context, suggestion) {
   const name = local.projectName.trim();
   const repo = local.projectRepo.trim();
-  const base = Number(String(local.projectPort || suggestion).trim());
+  const typed = String(local.projectPort || "").trim();
+  const base = Number(typed);
   if (!name || !repo) {
     local.projectError = "A project needs a name and a repository, for example demo and your-org/demo.";
     context.paint();
@@ -695,18 +701,22 @@ async function addProject(context, suggestion) {
   }
   /* The port block is checked here as the name and the repository are: a field that reads
      "not a port" was posted as port_base null, and the registry was asked to make sense of it. */
-  if (!Number.isInteger(base) || base <= 0) {
-    local.projectError = `A port block is a whole number, for example ${suggestion}. `
-      + "Leave the field empty to take that one.";
+  if (typed && (!Number.isInteger(base) || base <= 0)) {
+    local.projectError = `A port block is a whole number, for example ${suggestion || 5200}. `
+      + "Leave the field empty to take the farm's own next free block.";
     context.paint();
     return;
   }
   local.projectError = "";
+  /* An empty field sends no port block at all, so the farm hands out the next free one itself.
+     The page used to put its own arithmetic in the field instead, and that number was worked
+     out of every port in the table, the api and end-to-end bases included. */
+  const wanted = typed ? { name, repo, port_base: base } : { name, repo };
   /* Registering clones the repository, so the server answers with a job (amendment 7). The
      form clears once the job is accepted and the table refreshes when the job ends; a second
      press while it runs is refused, here and by the server. */
   const before = local.jobError;
-  await startJob(context, "add_project", { name, repo, port_base: base }, "/api/projects");
+  await startJob(context, "add_project", wanted, "/api/projects");
   if (local.jobs.add_project) {
     local.projectName = "";
     local.projectRepo = "";
@@ -722,7 +732,9 @@ async function addProject(context, suggestion) {
 async function removeProject(context, name) {
   try {
     const answer = await apiPost("/api/projects/remove", { name });
-    toast(`${name} is out of the registry. Ports ${(answer && answer.ports_freed) || "it held"} are free.`);
+    /* The block the server says is free, under the name the server sends it in. Reading a key
+       nothing sends left the message saying only "the ports it held". */
+    toast(`${name} is out of the registry. Ports ${(answer && answer.freed) || "it held"} are free.`);
     setConfirm(context, "");
     local.projectError = "";
   } catch (error) {
@@ -761,7 +773,14 @@ function removeProjectConfirm(context, rows, name) {
 function projectsSection(context) {
   const resource = context.res("/api/projects");
   const rows = list(resource.data);
-  const suggestion = nextPortBase(rows);
+  /* The suggestion is the farm's, read from its own registry, never this page's arithmetic. */
+  const port = context.res("/api/projects/next-port").data || {};
+  const suggestion = port.next_port_base;
+  /* Registering clones a repository, so it runs as a job, and the control that started it
+     stays off until that job ends. Read here rather than inside the panel, so the job is
+     watched on every paint and not only while the table is drawn. */
+  const job = jobFor(context, "add_project");
+  const adding = Boolean(job && job.state === "running");
   return h("section", { class: "section", key: "projects" },
     sectionHead("Projects", "The repositories a lane may be opened in."),
     card({ key: "projects", "data-write": "" }, panel(resource, {
@@ -823,7 +842,7 @@ function projectsSection(context) {
                   type: "text",
                   class: "m-port",
                   "aria-label": "Port base",
-                  placeholder: String(suggestion),
+                  placeholder: suggestion ? String(suggestion) : "port block",
                   disabled: access.writable ? null : true,
                   value: local.projectPort,
                   oninput: (event) => {
@@ -833,13 +852,15 @@ function projectsSection(context) {
                 h("button", {
                   class: "button primary",
                   "data-add-project": "",
-                  disabled: access.writable ? null : true,
+                  disabled: access.writable && !adding ? null : true,
                   title: blocked(),
                   onclick: () => addProject(context, suggestion),
-                }, "Add")),
-              h("p", { class: "muted" },
-                `The next free port block above the ones registered here is ${suggestion}. `
-                + "Leave the field empty to take it.")),
+                }, adding ? "Adding" : "Add")),
+              adding ? h("p", { class: "muted", key: "job" },
+                `Job ${job.id} is running: ${job.detail || "registering the project"}.`) : null,
+              h("p", { class: "muted" }, port.sentence
+                || "Leave the port field empty and the farm gives this project its next free "
+                + "block.")),
           local.projectError ? h("p", { class: "m-bad" }, local.projectError) : null,
           readOnlyLine("ro-projects")),
       ],
@@ -966,7 +987,7 @@ export default {
   title: "Machine",
   needs: [
     "/api/mode", "/api/services", "/api/accounts", "/api/accounts/login-state",
-    "/api/models", "/api/projects", "/api/health", "/api/metrics",
+    "/api/engines", "/api/projects", "/api/projects/next-port", "/api/health", "/api/metrics",
   ],
   badge(context) {
     const checks = list((context.res("/api/health").data || {}).checks);

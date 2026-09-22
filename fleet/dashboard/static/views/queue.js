@@ -45,7 +45,10 @@ const local = {
 
 const LOG_ELEMENT = "queueLog";
 const FIND_LIMIT = 400;
-const RUNNER = "verification-runner";
+/* The server's own identifier for the verification runner, as `/api/services` spells it.
+   A name this page invented instead found no row, and the tab then drew the sentence meant
+   for a server that reports no services at all, on a farm reporting four. */
+const RUNNER = "ci_runner";
 
 const EXPLANATION =
   "This queue verifies a change on top of the current main branch, on this machine. " +
@@ -757,10 +760,14 @@ function filters(context, rows, allowed) {
       : null);
 }
 
+/* The mark sits on the half of this card that writes, not on the card. Two filters and a help
+   button only narrow what is already on screen, and a page that switched off everything inside
+   a card marked as a write would take a reader's only way back to the whole table. */
 function controls(context, rows, allowed) {
-  return card({ class: "card-pad q-controls", key: "controls", "data-write": "" },
+  return card({ class: "card-pad q-controls", key: "controls" },
     filters(context, rows, allowed),
-    h("div", { class: "q-controls-right" }, verifyControl(context), runnerControl(context)),
+    h("div", { class: "q-controls-right", "data-write": "" },
+      verifyControl(context), runnerControl(context)),
     readOnlyLine());
 }
 

@@ -113,6 +113,40 @@ for (const view of ["queue", "machine"]) {
   await context.close();
 }
 
+/* Marking a card as a write marks everything in it. The queue's controls card holds two
+   filters and a help button, which only narrow what is already on screen, so the mark belongs
+   on the half that really writes: switching off a reader's only way back to the whole table is
+   not what "this page may not write" means. */
+{
+  const { page, context } = await open({ view: "queue", overrides: { "/api/access": READ_ONLY } });
+  const seen = await page.evaluate(() => {
+    const inWrite = (selector) => {
+      const node = document.querySelector(`#view ${selector}`);
+      return node ? Boolean(node.closest("[data-write]")) : null;
+    };
+    const live = (selector) => {
+      const node = document.querySelector(`#view ${selector}`);
+      return node ? !node.disabled : null;
+    };
+    return {
+      state: inWrite("select[aria-label='Filter by state']"),
+      project: inWrite("select[aria-label='Filter by project']"),
+      help: inWrite(".q-help"),
+      verify: inWrite("[data-enqueue]"),
+      runner: inWrite(".q-runner"),
+      stateLive: live("select[aria-label='Filter by state']"),
+      helpLive: live(".q-help"),
+    };
+  });
+  check("queue: the two filters and the help button are not marked as writes",
+    seen.state === false && seen.project === false && seen.help === false, JSON.stringify(seen));
+  check("queue: the controls that do write still are",
+    seen.verify === true && seen.runner === true, JSON.stringify(seen));
+  check("queue: and a read-only page can still narrow the table",
+    seen.stateLive === true && seen.helpLive === true, JSON.stringify(seen));
+  await context.close();
+}
+
 /* ----------------------------------------------- a route that is not the shape it claims */
 
 {
@@ -162,7 +196,7 @@ for (const view of ["queue", "machine"]) {
     view: "machine",
     overrides: {
       "/api/accounts/login-state": JSON.stringify([{ name: "farm-one" }]),
-      "/api/models": JSON.stringify({ models: [] }),
+      "/api/engines": JSON.stringify({ models: [] }),
     },
   });
   const body = await text(page);
@@ -357,6 +391,20 @@ for (const view of ["queue", "machine"]) {
 
 /* ------------------------------------------------------------ cancel and runner */
 
+/* The runner row is looked up by the name the server gives it. A name this page invented
+   instead found nothing, and the tab told a farm with four services that it reports none. */
+{
+  const { page, context } = await open({ view: "queue" });
+  const seen = await page.evaluate(() => ({
+    button: Boolean(document.querySelector("[data-runner]")),
+    text: document.querySelector(".q-runner") ? document.querySelector(".q-runner").innerText : "",
+  }));
+  check("queue: the runner is found under the name the server gives it",
+    seen.button && /Runner/.test(seen.text) && !/cannot be switched from here/.test(seen.text),
+    JSON.stringify(seen));
+  await context.close();
+}
+
 {
   const { page, context, posted } = await open({ view: "queue" });
   await page.click("[data-cancel]");
@@ -536,11 +584,12 @@ for (const view of ["queue", "machine"]) {
   await page.waitForTimeout(900);
   const throttle = await page.evaluate(() => document.querySelector(".m-confirm").innerText);
   check("machine: the throttle confirm names the caps and the database it releases",
-    /40% of the processor/.test(throttle) && /24.0 GB of memory/.test(throttle)
-    && /verification database holds is released/.test(throttle), throttle.slice(0, 300));
-  check("machine: the throttle confirm says nothing running is killed",
-    /Nothing that is running is killed/.test(throttle) && /page keeps running/.test(throttle),
-    throttle.slice(0, 300));
+    /40% of the CPU/.test(throttle) && /5.6 of 14 cores/.test(throttle)
+    && /releases the verification database/.test(throttle), throttle.slice(0, 400));
+  check("machine: the throttle confirm carries no number the server did not send",
+    !/none of/.test(throttle), throttle.slice(0, 400));
+  check("machine: the throttle confirm passes on the server's warnings",
+    /Nothing is lost, and nothing is stopped/.test(throttle), throttle.slice(0, 400));
   await page.click("[data-power='resume']");
   await page.waitForTimeout(900);
   const resume = await page.evaluate(() => document.querySelector(".m-confirm").innerText);
@@ -587,6 +636,29 @@ for (const view of ["queue", "machine"]) {
   await context.close();
 }
 
+/* Three columns of the services table are three keys of the server's answer. The page once
+   read changed_at, note and command, none of which is sent, so every row said "not known",
+   every description was blank and the row that cannot be switched from here said "no command". */
+{
+  const { page, context } = await open({ view: "machine" });
+  const seen = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#view table tr")];
+    const pick = (word) => {
+      const found = rows.find((node) => node.innerText.startsWith(word));
+      return found ? [...found.querySelectorAll("td")].map((cell) => cell.innerText) : [];
+    };
+    return { runner: pick("agent runner"), dashboard: pick("This dashboard") };
+  });
+  check("machine: a service says when it last changed",
+    seen.runner.length > 2 && /ago/.test(seen.runner[2]) && !/not known/.test(seen.runner[2]),
+    JSON.stringify(seen.runner));
+  check("machine: a service says what it does",
+    /respawns a lane/.test(seen.runner[3] || ""), JSON.stringify(seen.runner));
+  check("machine: the row that cannot be worked here hands over the command that works it",
+    /fleet dashboard restart/.test((seen.dashboard[4] || "")), JSON.stringify(seen.dashboard));
+  await context.close();
+}
+
 /* The queue runner is started by `fleet ci daemon start`. `fleet daemon start` is the agent
    runner, a different service on a different unit, and a fix column that hands a reader the
    wrong one of the two sends them to stop the farm's other half. */
@@ -603,6 +675,66 @@ for (const view of ["queue", "machine"]) {
 }
 
 /* ------------------------------------------------ projects, engines and accounts */
+
+/* The Login column is two words from this page and one sentence from the server. The words
+   are keyed by the server's own state names, and the sentence is the only part that says what
+   to do about an account that is not in, so it is drawn in the row and not hidden in a hover. */
+{
+  const { page, context } = await open({ view: "machine" });
+  const seen = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#view table tr")];
+    const pick = (word) => {
+      const found = rows.find((node) => node.innerText.startsWith(word));
+      return found ? found.innerText : "";
+    };
+    return {
+      waiting: pick("farm three"),
+      unknown: pick("farm unread"),
+      body: document.getElementById("view").innerText,
+    };
+  });
+  check("machine: an account that has never been logged in is told so in full",
+    /Waiting for the first login/.test(seen.waiting), seen.waiting.slice(0, 200));
+  check("machine: a login this farm cannot read is not drawn as one never set up",
+    /Cannot tell/.test(seen.unknown) && !/Waiting for the first login/.test(seen.unknown),
+    seen.unknown.slice(0, 200));
+  check("machine: the sentence that says what to do is in the row",
+    /Log in once: ssh -t farm claude/.test(seen.waiting)
+    && /could not read this account/.test(seen.unknown), seen.waiting.slice(0, 260));
+  check("machine: every account's sentence is on the page",
+    ["Lanes can be spawned", "has expired", "Log in once", "asked the farm to slow down",
+      "could not read this account"].every((line) => seen.body.includes(line)),
+    seen.body.slice(0, 400));
+  await context.close();
+}
+
+/* An engine that is not installed on this machine gets no switch, and the row says what to
+   run to install it. A page that assumed every catalog row was installed offered to switch on
+   an engine whose command is not there, and told the reader it was "on the path". */
+{
+  const { page, context, posted } = await open({ view: "machine" });
+  const seen = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#view table tr")];
+    const found = rows.find((node) => node.innerText.startsWith("Local model"));
+    return {
+      text: found ? found.innerText : "",
+      switch: Boolean(document.querySelector("[data-engine-switch='local']")),
+      claudeSwitch: Boolean(document.querySelector("[data-engine-switch='claude']")),
+      test: Boolean(document.querySelector("[data-engine-test='local']")),
+    };
+  });
+  check("machine: an engine that is not installed has no switch",
+    seen.switch === false && seen.test === false && seen.claudeSwitch === true,
+    JSON.stringify(seen));
+  check("machine: and the row says it is not installed, with what to run",
+    /Not installed/.test(seen.text) && /example.invalid/.test(seen.text)
+    && !/on the path/.test(seen.text), seen.text.slice(0, 200));
+  check("machine: an installed engine says where it is",
+    /\/usr\/bin\/codex/.test(await text(page)), "");
+  check("machine: nothing was switched by drawing the engines table",
+    !posted.some((url) => url.endsWith("/api/models")), posted.join(" "));
+  await context.close();
+}
 
 /* The token can go while a confirm is open: the page is read from a second tab, or the token
    is rotated. Every write control obeys that answer, and a confirm's own button is a write
@@ -673,6 +805,103 @@ for (const view of ["queue", "machine"]) {
     project.there && project.disabled === true, JSON.stringify(project));
   check("machine: so a forced press removes no project",
     !posted.some((url) => url.endsWith("/api/projects/remove")), posted.join(" "));
+  await context.close();
+}
+
+/* The message after a removal names the block that is now free. It read the answer under a
+   key nothing sends, so it only ever said "the ports it held". */
+{
+  const { page, context, thrown } = await open({ view: "machine" });
+  await page.click("[data-remove-project='sandbox']");
+  await page.waitForTimeout(500);
+  await page.click("[data-confirm='remove-project:sandbox']");
+  await page.waitForTimeout(900);
+  const said = await page.evaluate(() => {
+    const node = document.querySelector(".toast, [class*='toast']");
+    return node ? node.innerText : document.body.innerText;
+  });
+  check("machine: the removal message names the block that is now free",
+    /5220 to 5319/.test(said) && !/Ports it held/.test(said), said.slice(0, 200));
+  check("machine: nothing threw around the removal", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* Registering clones a repository, which takes minutes. The button that started it has to
+   hold, or a second press starts a second clone and only the server is there to refuse it. */
+{
+  const { page, context, thrown } = await open({ view: "machine" });
+  const posts = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/api/projects")) posts.push(1);
+  });
+  await page.fill("#view input[aria-label='Project name']", "held");
+  await page.fill("#view input[aria-label='Repository']", "your-org/held");
+  await page.click("[data-add-project]");
+  await page.waitForTimeout(900);
+  const during = await page.evaluate(() => ({
+    disabled: document.querySelector("[data-add-project]").disabled,
+    label: document.querySelector("[data-add-project]").textContent,
+    body: document.getElementById("view").innerText,
+  }));
+  check("machine: the Add button holds while the registration runs",
+    during.disabled === true && /Adding/.test(during.label),
+    JSON.stringify({ disabled: during.disabled, label: during.label }));
+  check("machine: and the running job is named next to it",
+    /Job job-\d+ is running/.test(during.body), during.body.slice(0, 200));
+  await page.click("[data-add-project]", { force: true });
+  await page.waitForTimeout(400);
+  check("machine: so a second press starts no second clone", posts.length === 1,
+    `${posts.length} sent`);
+  let back = true;
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    await page.waitForTimeout(600);
+    back = await page.evaluate(() => document.querySelector("[data-add-project]").disabled);
+    if (back === false) break;
+  }
+  check("machine: the Add button comes back when the job ends", back === false, String(back));
+  check("machine: and the row appeared on its own", /your-org\/held/.test(await text(page)), "");
+  check("machine: nothing threw while the registration ran", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* The port block a new project gets is the farm's to hand out. The page used to work one out
+   of every port in the table, api and end-to-end bases included, put it in the field, and send
+   it, so the farm's own answer was never used. */
+{
+  const { page, context, thrown } = await open({ view: "machine" });
+  const bodies = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/api/projects")) {
+      bodies.push(request.postData() || "");
+    }
+  });
+  const free = await page.evaluate(async () => {
+    const answer = await (await fetch("/api/projects/next-port")).json();
+    return String(answer.next_port_base);
+  });
+  const shown = await page.evaluate(() =>
+    document.querySelector("#view input[aria-label='Port base']").placeholder);
+  check("machine: the port field suggests the block the farm says is free",
+    shown === free, `${shown} shown, ${free} free`);
+  await page.fill("#view input[aria-label='Project name']", "fresh");
+  await page.fill("#view input[aria-label='Repository']", "your-org/fresh");
+  await page.click("[data-add-project]");
+  await page.waitForTimeout(900);
+  check("machine: an empty port field sends no block, so the farm picks one",
+    bodies.length === 1 && !bodies[0].includes("port_base"), bodies.join(" "));
+  /* The table is re-read on its own rhythm, so the row is waited for rather than timed. */
+  let row = "no row for fresh";
+  for (let attempt = 0; attempt < 24 && !row.includes("your-org/fresh"); attempt += 1) {
+    await page.waitForTimeout(1000);
+    row = await page.evaluate(() => {
+      const found = [...document.querySelectorAll("#view table tr")]
+        .find((node) => node.innerText.includes("your-org/fresh"));
+      return found ? found.innerText : "no row for fresh";
+    });
+  }
+  check("machine: and the row lands on the farm's own block",
+    row.includes(`web ${free}`), row.slice(0, 200));
+  check("machine: nothing threw around the port suggestion", thrown.length === 0, thrown[0]);
   await context.close();
 }
 

@@ -708,6 +708,72 @@ await okAsync("a project row says where it is and what it is doing", async () =>
   assert.deepEqual((await get("/api/projects", "empty")).body, []);
 });
 
+await okAsync("the farm says which port block is free, so the page never guesses", async () => {
+  const { body } = await get("/api/projects/next-port");
+  assert.equal(typeof body.next_port_base, "number");
+  assert.equal(typeof body.sentence, "string");
+  const highest = Math.max(...(await get("/api/projects")).body.map((row) => row.ports.web));
+  assert.ok(body.next_port_base > highest, "the next block is above every dev server base");
+  const shared = (await get("/api/projects")).body.map((row) => row.ports.api);
+  assert.ok(body.next_port_base < Math.min(...shared),
+    "the shared api base is not a project's own and must not raise the suggestion");
+});
+
+await okAsync("an engine row says whether this machine can run it", async () => {
+  const { body } = await get("/api/engines");
+  assert.ok(Array.isArray(body));
+  for (const row of body) {
+    for (const field of ["id", "label", "installed", "path", "install_hint", "enabled"]) {
+      assert.ok(field in row, `an engine row has no ${field}`);
+    }
+    assert.equal(typeof row.installed, "boolean");
+    assert.equal(typeof row.enabled, "boolean");
+    assert.ok("last_test" in row, `${row.id} does not say when it was last tested`);
+    if (!row.installed) {
+      assert.equal(row.path, "", `${row.id} is not installed and can have no path`);
+      assert.ok(row.install_hint.length > 0, `${row.id} must say what to run to install it`);
+    }
+  }
+  assert.ok(body.some((row) => row.installed === false), "one engine is not on this machine");
+  assert.deepEqual((await get("/api/engines", "empty")).body, []);
+});
+
+await okAsync("a service row carries when it changed, what it does and what fixes it", async () => {
+  const { body } = await get("/api/services");
+  for (const row of body.services) {
+    for (const field of ["id", "label", "state", "since", "what", "verb", "fix", "actions"]) {
+      assert.ok(field in row, `the ${row.id} service row has no ${field}`);
+    }
+  }
+  const ids = body.services.map((row) => row.id);
+  assert.ok(ids.includes("ci_runner"), "the verification runner keeps the server's own id");
+});
+
+await okAsync("a login row carries the sentence that says what to do about it", async () => {
+  const { body } = await get("/api/accounts/login-state");
+  const states = new Set(body.accounts.map((row) => row.state));
+  for (const row of body.accounts) {
+    assert.ok(["logged_in", "waiting_for_login", "expired", "rate_limited", "unknown"]
+      .includes(row.state), `${row.name} is in the state ${row.state}`);
+    assert.ok(row.sentence.length > 0, `${row.name} carries no sentence`);
+  }
+  assert.ok(states.has("waiting_for_login"), "one account has never been logged in");
+  assert.ok(states.has("unknown"), "one login cannot be read at all");
+});
+
+await okAsync("removing a project answers with the block it frees", async () => {
+  const answer = await fetch(`${BASE}/api/projects/remove`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "sandbox" }),
+  });
+  const body = await answer.json();
+  assert.equal(answer.status, 200);
+  assert.equal(typeof body.freed, "string");
+  assert.ok(body.freed.length > 0, "the answer names the block that is now free");
+  assert.ok(body.sentence.includes(body.freed), "and says it in a sentence");
+});
+
 await okAsync("a lane's log says whether there is a file at all", async () => {
   const { body } = await get("/api/agent/log?slug=demo-api-3f2a&tail=25");
   assert.equal(body.slug, "demo-api-3f2a");

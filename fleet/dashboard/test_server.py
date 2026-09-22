@@ -1490,6 +1490,137 @@ class AccountsRefreshTest(unittest.TestCase):
                                         method="POST")[0], 429)
 
 
+class AccountEngineTest(unittest.TestCase):
+    """Every account row says which engine spends it.
+
+    The page has a column for it. The codex row named itself and the claude rows did not, so the
+    column read "unknown" on every row but one, which is the one thing that column is for.
+    """
+
+    class StopLoop(Exception):
+        """Raised out of the wait at the end of one pass, to run the refresher exactly once."""
+
+    def one_pass(self, summaries, errors, previous=()):
+        wake = mock.Mock()
+        wake.wait.side_effect = self.StopLoop
+        snapshot = {"at": None, "accounts": list(previous), "errors": {}}
+        with mock.patch.object(dashboard, "_accounts_wake", wake), \
+                mock.patch.dict(dashboard._accounts_snapshot, snapshot, clear=True), \
+                mock.patch.object(dashboard.CA, "collect", return_value=(summaries, errors)), \
+                mock.patch.object(dashboard.CA, "account_dirs",
+                                  return_value={name: f"/farm/{name}" for name in
+                                                list(summaries) + list(errors)}), \
+                mock.patch.object(dashboard.CA, "display", side_effect=lambda name: name), \
+                mock.patch.object(dashboard.CA, "write_cache"), \
+                mock.patch.object(dashboard.CA, "token_expiry", return_value=None), \
+                mock.patch.object(dashboard.CX, "snapshot_row",
+                                  return_value={"name": "codex", "engine": "codex",
+                                                "session": 10, "weekly": 20, "scoped": []}), \
+                mock.patch.object(dashboard.CX, "merge_row", side_effect=lambda row, _p: row):
+            with self.assertRaises(self.StopLoop):
+                dashboard._accounts_refresher()
+            return {row["name"]: row for row in dashboard.accounts_snapshot()["accounts"]}
+
+    GOOD = {"session": 40, "weekly": 60, "session_resets": None, "weekly_resets": None,
+            "scoped": []}
+
+    def test_a_claude_account_says_which_engine_spends_it(self):
+        rows = self.one_pass({"farm-one": dict(self.GOOD)}, {})
+        self.assertEqual(rows["farm-one"]["engine"], "claude")
+        self.assertEqual(rows["codex"]["engine"], "codex", "and codex still names itself")
+
+    def test_an_account_that_could_not_be_read_still_says_its_engine(self):
+        """Both of the other two shapes: the one that has never been read, and the one whose
+        last read failed and keeps its previous numbers."""
+        previous = [{"name": "farm-two", "label": "farm-two", "session": 12, "weekly": 30,
+                     "scoped": [], "read_at": 1790000000.0}]
+        rows = self.one_pass({}, {"farm-two": "the vendor answered 429",
+                                  "farm-three": "never read"}, previous=previous)
+        self.assertEqual(rows["farm-two"]["engine"], "claude")
+        self.assertEqual(rows["farm-three"]["engine"], "claude")
+
+
+class EnginesTest(unittest.TestCase):
+    """GET /api/engines: the catalog plus whether this machine can actually run each engine.
+
+    The page draws an On and Off switch only where the command is there, so this answer is what
+    stops the dashboard offering to spawn a lane that cannot start.
+    """
+
+    CATALOG = [
+        {"id": "claude", "label": "Claude Code", "engine": "claude", "enabled": True,
+         "health": "ok", "health_detail": "claude CLI present", "checked_at": 1790000000},
+        {"id": "codex", "label": "Codex", "engine": "codex", "enabled": True,
+         "health": "unchecked", "health_detail": "", "checked_at": 0},
+        {"id": "qwen", "label": "Qwen Code", "engine": "generic", "bin": "qwen",
+         "enabled": False, "health": "unchecked", "health_detail": "", "checked_at": 0},
+    ]
+
+    def rows(self, installed=(), env=None):
+        """The listing as it reads on a machine that has exactly these commands on its PATH."""
+        with tempfile.TemporaryDirectory() as home:
+            binaries = pathlib.Path(home) / "bin"
+            binaries.mkdir()
+            for name in installed:
+                tool = binaries / name
+                tool.write_text("#!/bin/sh\nexit 0\n")
+                tool.chmod(0o755)
+            environment = {"PATH": str(binaries)}
+            environment.update(env or {})
+            with mock.patch.dict(os.environ, environment, clear=False):
+                for name in ("CLAUDE_BIN", "CODEX_BIN"):
+                    if name not in (env or {}):
+                        os.environ.pop(name, None)
+                with mock.patch.object(dashboard.MODELS, "listing", return_value=self.CATALOG):
+                    answer = dashboard.engines()
+            return {row["id"]: row for row in answer}, pathlib.Path(home)
+
+    def test_an_engine_that_is_not_on_this_machine_says_so_and_says_what_to_run(self):
+        rows, _home = self.rows(installed=["claude"])
+        self.assertTrue(rows["claude"]["installed"])
+        self.assertTrue(rows["claude"]["path"].endswith("/claude"))
+        for missing in ("codex", "qwen"):
+            self.assertFalse(rows[missing]["installed"], missing)
+            self.assertEqual(rows[missing]["path"], "", missing)
+            self.assertTrue(rows[missing]["install_hint"], missing)
+        # a generic engine is looked for under its own command, not under its id
+        self.assertIn("qwen", rows["qwen"]["install_hint"])
+
+    def test_the_bin_override_is_the_path_that_counts(self):
+        with tempfile.TemporaryDirectory() as elsewhere:
+            own = pathlib.Path(elsewhere) / "claude-of-my-own"
+            own.write_text("#!/bin/sh\nexit 0\n")
+            own.chmod(0o755)
+            rows, _home = self.rows(installed=["claude"], env={"CLAUDE_BIN": str(own)})
+            self.assertTrue(rows["claude"]["installed"])
+            self.assertEqual(rows["claude"]["path"], str(own))
+            # an override pointing at nothing falls back to the command on the PATH
+            rows, _home = self.rows(installed=["claude"],
+                                    env={"CLAUDE_BIN": str(own) + "-gone"})
+            self.assertTrue(rows["claude"]["installed"])
+            self.assertTrue(rows["claude"]["path"].endswith("/claude"))
+
+    def test_the_row_carries_the_switch_and_the_last_test(self):
+        rows, _home = self.rows(installed=["claude", "codex", "qwen"])
+        self.assertIs(rows["claude"]["enabled"], True)
+        self.assertIs(rows["qwen"]["enabled"], False)
+        self.assertIsNotNone(dashboard.parse_iso(rows["claude"]["last_test"]))
+        self.assertIsNone(rows["codex"]["last_test"], "never tested is not a time")
+
+    def test_reading_the_route_never_starts_an_engine(self):
+        """A GET drawn on every tick of the machine tab must not run three CLIs a tick."""
+        with mock.patch.object(dashboard.MODELS, "listing", return_value=self.CATALOG), \
+                mock.patch.object(dashboard.subprocess, "run",
+                                  side_effect=AssertionError("a GET started a process")):
+            with running_server() as base:
+                status, body = fetch_json(base, "/api/engines")
+        self.assertEqual(status, 200)
+        self.assertEqual([row["id"] for row in body], ["claude", "codex", "qwen"])
+        for row in body:
+            for key in ("installed", "path", "install_hint", "enabled", "last_test"):
+                self.assertIn(key, row, row["id"])
+
+
 class MachineReadingTest(unittest.TestCase):
     """The machine readings are Linux only, and the page must survive being run anywhere else."""
 
@@ -2262,6 +2393,25 @@ class ProjectRemovalTest(unittest.TestCase):
         self.assertEqual(dashboard.next_port_base(), 5500)
         self.registry.write_text("")
         self.assertEqual(dashboard.next_port_base(), 5200)
+
+    def test_the_page_can_ask_which_block_is_free_before_the_form_is_filled_in(self):
+        """The suggestion belongs to the farm. A page working one out of the table it can see
+        counted the api and end-to-end bases too, which are the same numbers for every project
+        here, and suggested a block ten above the port every project's API already uses."""
+        with running_server() as base:
+            status, payload = fetch_json(base, "/api/projects/next-port")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["next_port_base"], 5500)
+        self.assertIn("5500", payload["sentence"])
+        self.assertNotIn("8400", payload["sentence"], "the shared api base is not a suggestion")
+
+    def test_a_farm_with_no_block_left_says_so_rather_than_suggesting_a_number(self):
+        self.registry.write_text(f'[alpha]\nport_base = {dashboard.PORT_BASE_MAX}\n')
+        with running_server() as base:
+            status, payload = fetch_json(base, "/api/projects/next-port")
+        self.assertEqual(status, 200)
+        self.assertIsNone(payload["next_port_base"])
+        self.assertIn(str(dashboard.PORT_BASE_MAX), payload["sentence"])
 
     def test_a_farm_at_the_ceiling_is_refused_rather_than_handed_the_same_block(self):
         """Clamping to PORT_BASE_MAX handed the project at the top and the one after it the same

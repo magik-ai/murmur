@@ -389,6 +389,12 @@ def plain_account_trouble(rows, errors):
     return rows, {name: account_trouble(text) for name, text in (errors or {}).items()}
 
 
+# Which engine spends a subscription. Every account this reader publishes is a claude account:
+# the codex row is appended below by its own module, which names itself. Without this the page's
+# Engine column read "unknown" on every claude row, which is every row but one.
+CLAUDE_ENGINE = "claude"
+
+
 def _accounts_refresher():
     """Keep the account-limit snapshot warm off the request path.
 
@@ -409,6 +415,7 @@ def _accounts_refresher():
                 if name in summaries:
                     s = summaries[name]
                     rows.append({"name": name, "label": CA.display(name),
+                                 "engine": CLAUDE_ENGINE,
                                  "session": s["session"], "weekly": s["weekly"],
                                  "session_resets": s.get("session_resets"),
                                  "weekly_resets": s.get("weekly_resets"),
@@ -423,6 +430,7 @@ def _accounts_refresher():
                     # Dropping the row made "the vendor throttled us" render exactly like "the
                     # account was deleted" - the same defect the CI pane once had.
                     row = dict(previous[name])
+                    row["engine"] = CLAUDE_ENGINE
                     err = errors.get(name, "unreadable")
                     exp = CA.token_expiry(CA.account_dirs().get(name, ""))
                     if "429" in err and exp is not None and exp <= time.time():
@@ -432,6 +440,7 @@ def _accounts_refresher():
                     rows.append(row)
                 else:
                     rows.append({"name": name, "label": CA.display(name),
+                                 "engine": CLAUDE_ENGINE,
                                  "session": None, "weekly": None,
                                  "session_resets": None, "weekly_resets": None,
                                  "read_at": None, "scoped": [],
@@ -1055,6 +1064,66 @@ def health_refresh():
 def health():
     snapshot = _copy_snapshot(_health_snapshot)
     return _envelope(snapshot, {"checks": snapshot.get("checks") or []})
+
+
+# ---------------------------------------------------------------- engines
+#
+# An engine is the command an agent runs. The catalog says which engines this farm knows about;
+# whether the command is on this machine is a fact about the machine, and the page needs it to
+# decide whether a switch belongs on the row at all. Offering On and Off for an engine that is
+# not installed is offering to spawn a lane that cannot start.
+#
+# The check is `shutil.which` and a file test, never a process: this route is read on every tick
+# of the machine tab, and a GET that ran each engine's CLI would be a health check nobody asked
+# for, on every tick, for every engine. Running the engine is what Test is for.
+
+# The variable each native engine's launcher reads instead of the bare command.
+ENGINE_BIN_ENV = {"claude": "CLAUDE_BIN", "codex": "CODEX_BIN"}
+
+
+def engine_command(model):
+    """The command one catalog row runs. A native engine is named by its engine, a generic one
+    carries its own `bin`."""
+    engine = str((model or {}).get("engine") or "").strip()
+    if engine in ENGINE_BIN_ENV:
+        return engine
+    return str((model or {}).get("bin") or (model or {}).get("id") or "").strip()
+
+
+def engine_binary(model):
+    """(installed, path) for one engine, read from this machine without starting anything."""
+    command = engine_command(model)
+    if not command:
+        return False, ""
+    override = os.environ.get(ENGINE_BIN_ENV.get(str((model or {}).get("engine") or ""), ""), "")
+    if override and os.path.isfile(override) and os.access(override, os.X_OK):
+        # The launcher runs this file and nothing else, so this is the path that counts.
+        return True, override
+    found = shutil.which(command)
+    return (True, found) if found else (False, "")
+
+
+def engines():
+    """GET /api/engines: the catalog, each row saying whether its command is on this machine."""
+    rows = []
+    for model in MODELS.listing():
+        if not model:
+            continue
+        row = dict(model)
+        installed, path = engine_binary(model)
+        command = engine_command(model)
+        checked = model.get("checked_at") or 0
+        row.update({
+            "command": command,
+            "installed": installed,
+            "path": path,
+            "install_hint": str(model.get("install_hint") or "").strip()
+            or f"install {command or model.get('id')} and put it on this farm's PATH",
+            "enabled": bool(model.get("enabled")),
+            "last_test": _iso(checked) if checked else None,
+        })
+        rows.append(row)
+    return rows
 
 
 # ---------------------------------------------------------------- services
@@ -1752,6 +1821,26 @@ def next_port_base():
         return DEFAULT_PORTS["web"]
     following = highest + PORT_BLOCK_SIZE
     return following if following <= PORT_BASE_MAX else None
+
+
+def next_port_answer():
+    """GET /api/projects/next-port: the block this farm would hand the next project.
+
+    The page needs this before the form is filled in, and it is the farm's answer rather than
+    the page's arithmetic: a page taking the highest of every port in the table counted the api
+    and end-to-end bases too, which are the same numbers for every project here, and suggested a
+    block ten above the one every project's API already listens on.
+    """
+    base = next_port_base()
+    if base is None:
+        return {"next_port_base": None,
+                "sentence": f"The highest port block on this farm is already at {PORT_BASE_MAX}, "
+                            "so there is no free block above it. Remove a project, or give the "
+                            f"next one a block of its own between {PORT_BASE_MIN} and "
+                            f"{PORT_BASE_MAX}."}
+    return {"next_port_base": base,
+            "sentence": f"The next free port block on this farm is {base}. Leave the field "
+                        "empty to take it."}
 
 
 def add_project(body):
@@ -3275,10 +3364,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, json.dumps(accounts_login_state()))
             elif path.startswith("/api/accounts"):
                 self._send(200, json.dumps(accounts_snapshot()))
+            elif path == "/api/engines":
+                # Above the prefix-matched model route, and its own name: it answers the
+                # catalog plus what this machine actually has installed.
+                self._send(200, json.dumps(engines()))
             elif path.startswith("/api/models"):
                 self._send(200, json.dumps(MODELS.listing()))
             elif path.startswith("/api/mode"):
                 self._send(200, json.dumps(_machine_part("mode")))
+            elif path == "/api/projects/next-port":
+                self._send(200, json.dumps(next_port_answer()))
             elif path == "/api/projects":
                 self._send(200, json.dumps(projects()))
             elif path == "/api/mail/boxes":

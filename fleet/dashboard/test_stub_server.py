@@ -151,15 +151,18 @@ RESULTS = {
                               "no change in query time worth reporting.",
 }
 
+# Only the dev server base is a project's own. The api and end-to-end bases are the same
+# numbers for every project on a farm, which is why a page that took the highest of all three
+# suggested a block far above the one the farm would actually hand out.
 PROJECTS = [
     {"name": "demo", "repo": "your-org/demo", "path": "/home/farm/work/demo",
-     "base_branch": "main", "ports": {"web": 5200, "api": 5201, "e2e": 5202},
+     "base_branch": "main", "ports": {"web": 5200, "api": 8100, "e2e": 9100},
      "lanes_open": 3, "last_activity": ago(40)},
     {"name": "storefront", "repo": "your-org/storefront", "path": "/home/farm/work/storefront",
-     "base_branch": "main", "ports": {"web": 5210, "api": 5211, "e2e": 5212},
+     "base_branch": "main", "ports": {"web": 5210, "api": 8100, "e2e": 9100},
      "lanes_open": 2, "last_activity": ago(5400)},
     {"name": "sandbox", "repo": "your-org/sandbox", "path": "/home/farm/work/sandbox",
-     "base_branch": "main", "ports": {"web": 5220, "api": 5221, "e2e": 5222},
+     "base_branch": "main", "ports": {"web": 5220, "api": 8100, "e2e": 9100},
      "lanes_open": 0, "last_activity": ago(86000)},
 ]
 
@@ -278,21 +281,37 @@ ACCOUNTS = {
          "weekly": 34, "session_resets": NOW + 3000, "weekly_resets": NOW + 250000,
          "read_at": ago(120), "scoped": [],
          "stale_error": "the vendor answered 429, so these numbers stopped refreshing"},
+        # The fifth state: a credentials file that is there and cannot be read. The page must
+        # not draw it as an account that was never set up, which is the one state that sends a
+        # person off to log in again over a credential that was fine.
+        {"name": "farm-unread", "label": "farm unread", "engine": "claude", "session": None,
+         "weekly": None, "session_resets": None, "weekly_resets": None, "read_at": ago(300),
+         "scoped": []},
     ],
     "errors": {},
 }
 
+# The engines, as GET /api/engines answers them: the catalog row plus whether the command is
+# on this machine (`installed` and `path`), what to run if it is not (`install_hint`), whether
+# it is switched on, and when it was last tested.
 MODELS = [
     {"id": "claude", "label": "Claude", "glyph": "C", "color": "#d29922", "enabled": True,
      "role": "builds the change", "models": "opus, sonnet, haiku", "health": "ok",
-     "limits": "two windows, session and weekly",
-     "installed": True, "path": "/home/farm/.local/bin/claude", "health_at": ago(1800)},
+     "limits": "two windows, session and weekly", "command": "claude",
+     "installed": True, "path": "/home/farm/.local/bin/claude", "last_test": ago(1800),
+     "install_hint": "install claude and put it on this farm's PATH"},
     {"id": "codex", "label": "Codex", "glyph": "X", "color": "#3fb950", "enabled": True,
      "role": "reviews the change", "models": "gpt-5-codex", "health": "fail",
      "health_detail": "the last health call timed out", "limits": "five hour window",
-     "installed": True, "path": "/usr/bin/codex", "health_at": ago(600)},
-    {"id": "local", "label": "Local model", "enabled": False, "role": "offline experiments",
-     "health": "unchecked", "installed": False,
+     "command": "codex",
+     "installed": True, "path": "/usr/bin/codex", "last_test": ago(600),
+     "install_hint": "install codex and put it on this farm's PATH"},
+    # The one this machine cannot run. It carries enabled true on purpose: an engine left
+    # switched on in the registry and then uninstalled is exactly the row that must not offer
+    # a switch, because pressing it spawns a lane that cannot start.
+    {"id": "local", "label": "Local model", "enabled": True, "role": "offline experiments",
+     "health": "unchecked", "installed": False, "command": "llama", "path": "",
+     "last_test": None,
      "install_hint": "curl -fsSL https://example.invalid/local/install.sh | sh"},
 ]
 
@@ -442,16 +461,24 @@ TRUNCATED_LOG = "\n".join(
     "compiled one module and wrote its output to the work tree" for index in range(4000)
 )[-256 * 1024:]
 
-# The four login states claude_accounts.py can report, each with the sentence it writes.
+# The five login states the account reader can report, each under the key the server sends it
+# in. The sentence is `sentence`, not `detail`: a page reading the wrong one drew five empty
+# tooltips and told nobody what to do about an account that is not logged in.
 LOGIN_STATES = [
     {"name": "farm-one", "engine": "claude", "state": "logged_in", "read_at": ago(240),
-     "detail": "Logged in. The credentials file was read four minutes ago."},
+     "sentence": "Logged in. Lanes can be spawned on this account."},
     {"name": "farm-two", "engine": "codex", "state": "expired", "read_at": ago(900),
-     "detail": "The token expired. The keepalive timer usually fixes this on its next pass."},
-    {"name": "farm-three", "engine": "claude", "state": "waiting_first_login", "read_at": None,
-     "detail": "Waiting for the first login. No credentials file has been written yet."},
+     "sentence": "The login on this account has expired. The keepalive timer usually refreshes "
+                 "it; log in again if it does not."},
+    {"name": "farm-three", "engine": "claude", "state": "waiting_for_login", "read_at": None,
+     "sentence": "This account has no login on the farm yet. Log in once: ssh -t farm claude, "
+                 "then /login"},
     {"name": "farm-four", "engine": "claude", "state": "rate_limited", "read_at": ago(120),
-     "detail": "The vendor answered 429, so this farm cannot tell whether the account is in."},
+     "sentence": "The vendor asked the farm to slow down, so it cannot tell how much room is "
+                 "left. These numbers refresh by themselves."},
+    {"name": "farm-unread", "engine": "claude", "state": "unknown", "read_at": ago(300),
+     "sentence": "This farm could not read this account's credentials file, so it cannot tell "
+                 "whether the account is logged in."},
 ]
 
 # An account added through the page is waiting for its first login until the fixture clock says
@@ -459,19 +486,23 @@ LOGIN_STATES = [
 ADD_LOGIN_SECONDS = float(os.environ.get("STUB_ADD_LOGIN_SECONDS", "4"))
 ADDED_ACCOUNTS = {}
 
+# The keys are the server's own: `what` the service does, `since` it last became active, and
+# `fix`, the command that puts it right from a terminal. A stub that answered `note`, `command`
+# and `changed_at` let the page read three keys nothing on a real farm sends.
 SERVICE_ROWS = [
-    {"id": "agent-runner", "label": "agent runner", "unit": "fleet-daemon.service",
-     "actions": ["start", "stop", "restart"], "command": "fleet daemon start",
-     "note": "Spawns and respawns the lanes."},
-    {"id": "verification-runner", "label": "verification runner", "unit": "fleet-ci.service",
-     "actions": ["start", "stop", "restart"], "command": "fleet ci daemon start",
-     "note": "Verifies a change on top of the current main branch."},
-    {"id": "sweep-timer", "label": "sweep timer", "unit": "fleet-sweep.timer",
-     "actions": ["start", "stop"], "command": "fleet autosweep --enable",
-     "note": "Buries dead worktrees every ten minutes."},
-    {"id": "dashboard", "label": "dashboard", "unit": "tmux session and a listening socket",
-     "actions": [], "command": "fleet dashboard restart", "read_only": True,
-     "note": "This page. It never stops or restarts itself from here."},
+    {"id": "agent_runner", "label": "agent runner", "unit": "fleet-daemon.service",
+     "actions": ["start", "stop", "restart"], "verb": "fleet daemon", "fix": "fleet daemon start",
+     "what": "respawns a lane that carries a restart policy until it delivers"},
+    {"id": "ci_runner", "label": "verification runner", "unit": "fleet-ci.service",
+     "actions": ["start", "stop", "restart"], "verb": "fleet ci daemon",
+     "fix": "fleet ci daemon start",
+     "what": "verifies one queued change at a time against main"},
+    {"id": "sweep_timer", "label": "sweep timer", "unit": "fleet-sweep.timer",
+     "actions": ["start", "stop"], "verb": "fleet autosweep", "fix": "fleet autosweep on",
+     "what": "buries merged worktrees and resolved cards every few minutes"},
+    {"id": "dashboard", "label": "This dashboard", "unit": "tmux session and a listening socket",
+     "actions": [], "verb": "fleet dashboard", "fix": "fleet dashboard restart",
+     "read_only": True, "what": "serves this page"},
 ]
 
 
@@ -481,8 +512,8 @@ def services_for(state):
     for index, row in enumerate(SERVICE_ROWS):
         if state == "empty":
             live, detail = "inactive", "never started on this machine"
-        elif state == "error" and row["id"] in ("verification-runner", "sweep-timer"):
-            live = "failed" if row["id"] == "verification-runner" else "inactive"
+        elif state == "error" and row["id"] in ("ci_runner", "sweep_timer"):
+            live = "failed" if row["id"] == "ci_runner" else "inactive"
             detail = ("the unit exited with status 1" if live == "failed"
                       else "not enabled on this machine")
         else:
@@ -490,7 +521,7 @@ def services_for(state):
         if row["id"] == "dashboard":
             live, detail = "active", "answering on 127.0.0.1"
         rows.append({**row, "state": live, "detail": detail,
-                     "changed_at": ago(600 + index * 120)})
+                     "since": ago(600 + index * 120)})
     return rows
 
 
@@ -522,22 +553,49 @@ job_new("drain", "salvaged and stopped 3 lanes", seconds=12, started=ago(400))
 
 
 def power_preview(action):
-    """What an action is about to do, in facts. The sentences a person reads are the page's."""
+    """What an action is about to do.
+
+    The server works the numbers out of this farm's own power profile and writes them into one
+    finished sentence, with the rest as warnings. It does not send a `caps` object, so neither
+    does this stub: a page that builds its own sentence out of one reads every number as none.
+    """
     lanes = [{"slug": row["slug"], "project": row["project"],
               "restart": "until-pr" if index % 2 else "",
               "has_pr": bool(row.get("pr_url"))}
              for index, row in enumerate(AGENTS) if row["status"] in ("running", "pr_open")]
     if action == "throttle":
-        return {"action": action, "lanes": [], "caps": {
-            "cpu_pct": 40, "cpu_cores": 5.6, "mem_high_gb": 24.0, "cores_total": 14,
-            "ci_ram_released": True}}
-    if action == "drain":
-        return {"action": action, "lanes": lanes, "stops": ["fleet-daemon.service",
-                                                            "the verification database"]}
-    if action == "resume":
-        return {"action": action, "lanes": [row for row in lanes if row["restart"]],
-                "starts": ["fleet-daemon.service"]}
-    return None
+        payload = {
+            "label": "Throttle the farm and stop new agents",
+            "sentence": "Every agent already running keeps running. This caps every agent "
+                        "already running at 40% of the CPU (about 5.6 of 14 cores) and 40% of "
+                        "this machine's memory, stops any new agent from being spawned, and "
+                        "releases the verification database.",
+            "warnings": ["Nothing is lost, and nothing is stopped."],
+            "lanes": [],
+        }
+    elif action == "drain":
+        payload = {
+            "label": "Drain the farm",
+            "sentence": f"This salvages and then stops the {len(lanes)} lane(s) below, stops "
+                        "the agent runner so nothing is respawned, and stops the verification "
+                        "database.",
+            "warnings": ["A verification in flight loses its verdict.",
+                         "A lane with no restart policy loses whatever salvage could not push.",
+                         "This dashboard keeps running through all of it."],
+            "lanes": lanes,
+        }
+    elif action == "resume":
+        payload = {
+            "label": "Resume the farm",
+            "sentence": "This starts the agent runner again, and it will respawn every until-pr "
+                        "and until-merged lane from its brief, which spends subscription.",
+            "warnings": ["The verification database starts again at the next run."],
+            "lanes": [row for row in lanes if row["restart"]],
+        }
+    else:
+        return None
+    payload.update({"action": action, "lane_count": len(payload["lanes"]), "running_job": None})
+    return payload
 
 
 SETTINGS = {
@@ -713,17 +771,27 @@ def payload_for(state, path, query):
             waiting = time.time() - at < ADD_LOGIN_SECONDS
             rows.append({
                 "name": name, "engine": "claude", "read_at": time.time(),
-                "state": "waiting_first_login" if waiting else "logged_in",
-                "detail": ("Waiting for the first login. No credentials file has been written yet."
-                           if waiting else "Logged in. The credentials file was read just now.")})
+                "state": "waiting_for_login" if waiting else "logged_in",
+                "sentence": ("This account has no login on the farm yet. Log in once: "
+                             "ssh -t farm claude, then /login"
+                             if waiting else "Logged in. Lanes can be spawned on this account.")})
         return 200, envelope(accounts=rows)
+    if path == "/api/projects/next-port":
+        # The farm's own answer, read off the dev server bases alone. The api and end-to-end
+        # bases are the same numbers for every project here, so counting them in would suggest
+        # a block ten above the port every project's API already listens on.
+        rows = [] if state == "empty" else PROJECTS + SENT["projects"]
+        highest = max([row["ports"]["web"] for row in rows] or [5190])
+        return 200, {"next_port_base": highest + 10,
+                     "sentence": f"The next free port block on this farm is {highest + 10}. "
+                                 "Leave the field empty to take it."}
     if path == "/api/projects":
         return 200, empty_list if state == "empty" else PROJECTS + SENT["projects"]
     if path == "/api/accounts":
         if state == "empty":
             return 200, {"at": NOW, "accounts": [], "errors": {}}
         return 200, ACCOUNTS
-    if path == "/api/models":
+    if path in ("/api/models", "/api/engines"):
         return 200, empty_list if state == "empty" else MODELS
     if path.startswith("/api/mail/"):
         if state == "error":
@@ -1005,10 +1073,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/api/projects":
             if not body.get("name") or not body.get("repo"):
                 return self._json(200, {"error": "a project needs a name and a repository"})
+            # A body with no port block is a person leaving the field empty, and the farm
+            # hands out the next free one itself. The real server does the same, which is why
+            # the page must send nothing rather than a number of its own.
+            base = body.get("port_base")
+            if base in (None, ""):
+                base = max([row["ports"]["web"]
+                            for row in PROJECTS + SENT["projects"]] or [5190]) + 10
+            base = int(base)
             row = {"name": body["name"], "repo": body["repo"], "path": f"/home/farm/work/{body['name']}",
-                   "base_branch": "main", "ports": {"web": body.get("port_base", 5300),
-                                                    "api": body.get("port_base", 5300) + 1,
-                                                    "e2e": body.get("port_base", 5300) + 2},
+                   "base_branch": "main", "ports": {"web": base, "api": 8100, "e2e": 9100},
                    "lanes_open": 0, "last_activity": time.time()}
             SENT["projects"].append(row)
             # The real server clones the repository, so it answers with a job (amendment 7).
@@ -1108,10 +1182,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if row.get("lanes_open"):
                 return self._json(409, {"error": f"{name} has {row['lanes_open']} open lanes. "
                                                  "Stop them first, then remove the project."})
-            ports = row.get("ports") or {}
-            block = [value for value in ports.values() if value is not None]
-            return self._json(200, {"ok": True, "name": name,
-                                    "ports_freed": f"{min(block)} to {max(block)}" if block else ""})
+            # The dev server block alone, under the server's own key. api and e2e are shared
+            # across every project here and are not this one's to free.
+            web = (row.get("ports") or {}).get("web")
+            freed = f"{web} to {web + 99}" if web else ""
+            return self._json(200, {"ok": True, "name": name, "freed": freed,
+                                    "port_base": web,
+                                    "sentence": f"{name} is no longer registered. Its dev "
+                                                f"server port block, {freed}, is free for the "
+                                                "next project."})
         return self._json(404, {"error": "not found"})
 
     # ------------------------------------------------------------- plumbing
