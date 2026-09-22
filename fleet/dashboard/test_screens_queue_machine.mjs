@@ -190,7 +190,7 @@ async function openExtra(page, screen, size, state) {
     await page.waitForTimeout(400);
     // One name per screen: the stub remembers the ones already added, and an account that is
     // already logged in is not the panel this picture is of.
-    await page.fill("#view input[aria-label='Account name']", `farm-${state}-${size.width}`);
+    await page.fill("#drawer input[aria-label='Account name']", `farm-${state}-${size.width}`);
     await page.click("[data-add-start]");
     await page.waitForTimeout(1200);
     const step = await page.evaluate(() => {

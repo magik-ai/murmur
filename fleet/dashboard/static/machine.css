@@ -30,15 +30,28 @@
 .m-form { display: grid; gap: 8px; }
 .m-port { width: 120px; }
 
-.m-steps {
-  display: grid; gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--accent); border-radius: var(--radius);
-  background: var(--accent-soft);
+/* The add-account dialog: numbered steps down the drawer, one thing to do per step. */
+.m-steps { display: grid; gap: 14px; }
+.m-steps ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--text-dim); }
+.m-dialog-step { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; }
+.m-dialog-step h3 { font-size: 14px; color: var(--text); margin: 0 0 2px; }
+.m-dialog-step p { margin: 0; }
+.m-step-no {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent);
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
 }
-.m-steps h3 { color: var(--text); }
-.m-steps ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--text-dim); }
-.m-steps .cmd { background: var(--surface); }
+.m-engines { display: grid; gap: 8px; }
+.m-engine { display: grid; gap: 4px; }
+.m-engine.chosen { border-color: var(--accent); background: var(--accent-soft); }
+.m-engine-head { display: flex; align-items: center; gap: 8px; }
+.m-engine .muted { font-size: 12px; line-height: 1.4; }
+.m-name { width: 100%; }
+.m-cmd-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.m-cmd-row .cmd { overflow-wrap: anywhere; white-space: pre-wrap; }
+.m-wait { align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-dialog-actions { gap: 8px; margin-top: 4px; }
 
 .m-login { display: grid; gap: 4px; max-width: 320px; }
 .m-login .muted { overflow-wrap: anywhere; }

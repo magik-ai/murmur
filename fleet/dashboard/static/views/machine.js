@@ -6,6 +6,7 @@
 
 import {
   h, card, panel, pill, emptyState, skeletonStack, toast, widthStyle,
+  openDrawer, closeDrawer, openDrawerKey,
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
 import { apiPost, access, list, serverReason } from "../core/api.js";
@@ -41,6 +42,8 @@ const local = {
   jobError: "",
   busy: "",
   addOpen: false,
+  addBusy: false,
+  addPolledAt: 0,
   addName: "",
   addEngine: "claude",
   addStep: null,
@@ -439,109 +442,223 @@ function removeAccountConfirm(context, name) {
       }, "Keep it")));
 }
 
+/* -------------------------------------------------------- adding an account */
+
+/* Adding an account is a dialog, not a form squeezed under the table (owner review 2026-09-22).
+   Three screens in the drawer: pick the engine and name it, run one command and follow the
+   steps, wait for the login, which the dialog notices by itself. */
+const ADD_KEY = "add-account";
+
+const ENGINE_NOTES = {
+  claude: "One subscription, its own login on the farm. Lanes are spread across the Claude accounts you register here.",
+  codex: "One shared login for the whole farm. This re-logs it in; it does not add a second account.",
+};
+
+function engineNote(model) {
+  return ENGINE_NOTES[model.id] || model.role || "A subscription the agents can spend.";
+}
+
+function openAddDialog(context) {
+  local.addStep = null;
+  local.addError = "";
+  local.addBusy = false;
+  local.addOpen = true;
+  const engines = list(context.res("/api/engines").data);
+  if (!engines.some((model) => model.id === local.addEngine)) {
+    local.addEngine = (engines.find((model) => model.installed !== false) || engines[0] || {}).id || "claude";
+  }
+  openDrawer({
+    key: ADD_KEY,
+    title: "Add an account",
+    sub: "A subscription the agents spend while they work.",
+    body: () => addDialogBody(context),
+    onClose: () => {
+      local.addOpen = false;
+      local.addStep = null;
+      local.addName = "";
+      local.addError = "";
+      context.refresh("/api/accounts");
+      context.refresh("/api/accounts/login-state");
+    },
+  });
+}
+
 async function startAdd(context) {
   const name = local.addName.trim();
   if (local.addEngine !== "codex" && !name) {
-    local.addError = "An account needs a name, for example farm-three.";
+    local.addError = "Give the account a name, for example farm-three.";
+    context.paint();
+    return;
+  }
+  if (local.addEngine !== "codex" && !/^[A-Za-z0-9._-]{1,40}$/.test(name)) {
+    local.addError = "A name is letters, digits, dots, dashes or underscores, up to forty of them.";
     context.paint();
     return;
   }
   local.addError = "";
+  local.addBusy = true;
+  context.paint();
   try {
     local.addStep = await apiPost("/api/accounts/add", { name, engine: local.addEngine });
+    local.addPolledAt = 0;
   } catch (error) {
     local.addError = serverReason(error) || "The farm did not answer with a command to run.";
   } finally {
+    local.addBusy = false;
     context.paint();
   }
 }
 
-/* The step panel: the exact command, the steps in order, and a state that flips to "logged in"
-   by itself when the credentials file appears. Nobody has to press anything to find out. */
-function addSteps(context) {
-  const step = local.addStep;
-  const states = list((context.res("/api/accounts/login-state").data || {}).accounts);
-  const found = states.find((row) => row.name === step.name);
-  const waiting = !found || found.state !== "logged_in";
-  return h("div", { class: "m-steps", key: "steps" },
-    h("h3", null, `Add ${step.name}`),
-    h("p", null, "Run this where you reach the farm from:"),
-    h("code", { class: "cmd" }, step.command || ""),
-    h("ol", null, list(step.steps).map((line, index) => h("li", { key: index }, line))),
-    h("div", { class: "row" },
-      pill(waiting ? "wait" : "done",
-        waiting ? "Waiting for the first login" : "Logged in",
-        (found && found.sentence) || ""),
-      h("span", { class: "muted" }, waiting
-        ? "This turns itself into logged in as soon as the credentials file appears."
-        : "The account is ready to be spent."),
-      h("div", { class: "spacer" }),
-      h("button", {
-        class: "button",
-        "data-add-done": "",
-        onclick: () => {
-          local.addStep = null;
-          local.addOpen = false;
-          local.addName = "";
-          context.refresh("/api/accounts");
-        },
-      }, "Done")));
+async function copyCommand(command) {
+  try {
+    await navigator.clipboard.writeText(String(command || ""));
+    toast("Copied. Paste it in a terminal on your own machine.");
+  } catch (error) {
+    toast("Select the command and copy it by hand: the browser refused the clipboard.", "bad");
+  }
 }
 
-function addAccount(context) {
-  if (local.addStep) return addSteps(context);
-  if (!local.addOpen) {
-    return h("button", {
-      class: "button small",
-      "data-add-account": "",
-      disabled: access.writable ? null : true,
-      title: blocked(),
-      onclick: () => {
-        local.addOpen = true;
-        context.paint();
-      },
-    }, "Add an account");
+function engineChoices(context) {
+  const engines = list(context.res("/api/engines").data);
+  if (!engines.length) {
+    return h("p", { class: "muted", key: "no-engines" }, "The farm has not listed its engines yet.");
   }
-  return h("div", { class: "m-form", key: "addform" },
-    h("div", { class: "row" },
-      h("input", {
+  return h("div", { class: "m-engines", role: "radiogroup", "aria-label": "Engine", key: "engines" },
+    engines.map((model) => {
+      const off = model.installed === false;
+      const chosen = local.addEngine === model.id;
+      return h("button", {
+        key: model.id,
+        type: "button",
+        class: "choice m-engine" + (chosen ? " chosen" : ""),
+        role: "radio",
+        "aria-checked": String(chosen),
+        "data-engine-choice": model.id,
+        disabled: off || !access.writable ? true : null,
+        title: off ? `${model.label || model.id} is not installed on this farm.` : "",
+        onclick: () => {
+          local.addEngine = model.id;
+          local.addError = "";
+          context.paint();
+        },
+      },
+        h("div", { class: "m-engine-head" },
+          h("b", null, model.label || model.id),
+          off ? pill("pause", "not installed", "") : null),
+        h("div", { class: "muted" }, engineNote(model)));
+    }));
+}
+
+/* Screen one: which engine, and what to call it. */
+function addForm(context) {
+  const codex = local.addEngine === "codex";
+  return [
+    h("div", { class: "m-dialog-step", key: "s1" },
+      h("div", { class: "m-step-no" }, "1"),
+      h("div", null,
+        h("h3", null, "Which engine"),
+        h("p", { class: "muted" }, "Pick the subscription this account spends."))),
+    engineChoices(context),
+    h("div", { class: "m-dialog-step", key: "s2" },
+      h("div", { class: "m-step-no" }, "2"),
+      h("div", null,
+        h("h3", null, codex ? "Name" : "Name it"),
+        h("p", { class: "muted" }, codex
+          ? "Codex is one shared login, so it has one name: codex."
+          : "Short and yours, for example farm-three. It becomes the account's folder on the farm."))),
+    codex
+      ? h("code", { class: "cmd", key: "fixed-name" }, "codex")
+      : h("input", {
+        key: "name",
         type: "text",
+        class: "m-name",
         "aria-label": "Account name",
-        placeholder: "name",
+        placeholder: "farm-three",
+        autocomplete: "off",
+        spellcheck: "false",
         value: local.addName,
         disabled: access.writable ? null : true,
         oninput: (event) => {
           local.addName = event.target.value;
+          local.addError = "";
+        },
+        onkeydown: (event) => {
+          if (event.key === "Enter") startAdd(context);
         },
       }),
-      h("label", { class: "field" },
-        h("span", { class: "sr-only" }, "Engine"),
-        h("select", {
-          "aria-label": "Engine",
-          value: local.addEngine,
-          disabled: access.writable ? null : true,
-          onchange: (event) => {
-            local.addEngine = event.target.value;
-            context.paint();
-          },
-        }, list(context.res("/api/engines").data).map((model) => h("option", {
-          key: model.id, value: model.id, selected: local.addEngine === model.id,
-        }, model.label || model.id)))),
+    local.addError ? h("p", { class: "m-bad", key: "err", role: "alert" }, local.addError) : null,
+    h("div", { class: "row m-dialog-actions", key: "actions" },
       h("button", {
         class: "button primary",
         "data-add-start": "",
-        disabled: access.writable ? null : true,
+        disabled: access.writable && !local.addBusy ? null : true,
+        title: blocked(),
         onclick: () => startAdd(context),
-      }, "Next"),
+      }, local.addBusy ? "Asking the farm" : "Get the command"),
+      h("button", { class: "ghost-button", onclick: () => closeDrawer() }, "Cancel")),
+  ];
+}
+
+/* Screens two and three: the command with its steps, then the login the dialog waits for. */
+function addSteps(context) {
+  const step = local.addStep;
+  // Watched, not merely read: the drawer is repainted by the tick, and only a watched route is
+  // pulled by it, so the login state keeps arriving while the dialog waits for it.
+  const states = list((context.watch("/api/accounts/login-state").data || {}).accounts);
+  const found = states.find((row) => row.name === step.name);
+  const waiting = !found || found.state !== "logged_in";
+  // While the dialog waits it asks on its own rhythm, every two seconds, whatever the page's
+  // tick is doing: the flip to "logged in" is the one thing the reader is watching for.
+  if (waiting && Date.now() - (local.addPolledAt || 0) > 2000) {
+    local.addPolledAt = Date.now();
+    context.refresh("/api/accounts/login-state");
+  }
+  return h("div", { class: "m-steps", key: "steps" },
+    h("div", { class: "m-dialog-step" },
+      h("div", { class: "m-step-no" }, "3"),
+      h("div", null,
+        h("h3", null, `Log ${step.name} in`),
+        h("p", { class: "muted" }, "In a terminal on your own machine, not on this page, run:"))),
+    h("div", { class: "m-cmd-row" },
+      h("code", { class: "cmd", "data-add-command": "" }, step.command || ""),
       h("button", {
-        class: "ghost-button",
-        onclick: () => {
-          local.addOpen = false;
-          local.addError = "";
-          context.paint();
-        },
-      }, "Cancel")),
-    local.addError ? h("p", { class: "m-bad" }, local.addError) : null);
+        class: "button small",
+        "data-add-copy": "",
+        onclick: () => copyCommand(step.command),
+      }, "Copy")),
+    h("ol", null, list(step.steps).map((line, index) => h("li", { key: index }, line))),
+    h("div", { class: "m-dialog-step" },
+      h("div", { class: "m-step-no" }, "4"),
+      h("div", null,
+        h("h3", null, waiting ? "Waiting for the login" : "Logged in"),
+        h("div", { class: "row m-wait" },
+          pill(waiting ? "wait" : "done",
+            waiting ? "Waiting for the first login" : "Logged in",
+            (found && found.sentence) || ""),
+          h("span", { class: "muted" }, waiting
+            ? "This page notices the login by itself; nothing to press here."
+            : "The account is ready to be spent.")))),
+    h("div", { class: "row m-dialog-actions" },
+      h("button", {
+        class: waiting ? "ghost-button" : "button primary",
+        "data-add-done": "",
+        onclick: () => closeDrawer(),
+      }, waiting ? "Close, I will finish later" : "Done")));
+}
+
+function addDialogBody(context) {
+  return local.addStep ? [addSteps(context)] : addForm(context);
+}
+
+/* The button under the table; the dialog is the drawer. */
+function addAccount(context) {
+  return h("button", {
+    class: "button small",
+    "data-add-account": "",
+    disabled: access.writable ? null : true,
+    title: blocked(),
+    onclick: () => openAddDialog(context),
+  }, "Add an account");
 }
 
 function accountsSection(context) {

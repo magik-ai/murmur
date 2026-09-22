@@ -859,7 +859,13 @@ for (const view of ["queue", "machine"]) {
     if (back === false) break;
   }
   check("machine: the Add button comes back when the job ends", back === false, String(back));
-  check("machine: and the row appeared on its own", /your-org\/held/.test(await text(page)), "");
+  // The row lands with the table's next refresh, a beat after the button returns.
+  let rowSeen = false;
+  for (let attempt = 0; attempt < 10 && !rowSeen; attempt += 1) {
+    rowSeen = /your-org\/held/.test(await text(page));
+    if (!rowSeen) await page.waitForTimeout(500);
+  }
+  check("machine: and the row appeared on its own", rowSeen, "");
   check("machine: nothing threw while the registration ran", thrown.length === 0, thrown[0]);
   await context.close();
 }
@@ -997,7 +1003,7 @@ for (const view of ["queue", "machine"]) {
     quiet.disabled && /in \d/.test(quiet.label), JSON.stringify(quiet));
   await page.click("[data-add-account]");
   await page.waitForTimeout(400);
-  await page.fill("#view input[aria-label='Account name']", "farm-five");
+  await page.fill("#drawer input[aria-label='Account name']", "farm-five");
   await page.click("[data-add-start]");
   await page.waitForTimeout(1000);
   const step = await page.evaluate(() => document.querySelector(".m-steps").innerText);
@@ -1009,6 +1015,44 @@ for (const view of ["queue", "machine"]) {
   const flipped = await page.evaluate(() => document.querySelector(".m-steps").innerText);
   check("machine: the step panel turns itself into logged in",
     /Logged in/.test(flipped), flipped.slice(0, 200));
+  const dialog = await page.evaluate(() => {
+    const host = document.getElementById("drawer");
+    const title = document.getElementById("drawerTitle");
+    return {
+      open: host && !host.hidden,
+      role: host && host.getAttribute("role"),
+      title: title && title.textContent,
+      inDrawer: Boolean(host && host.querySelector(".m-steps")),
+      copy: Boolean(host && host.querySelector("[data-add-copy]")),
+      command: Boolean(host && host.querySelector("[data-add-command]")),
+      steps: host ? host.querySelectorAll(".m-steps li").length : 0,
+    };
+  });
+  check("machine: adding an account is a dialog with the command, a copy button and the steps",
+    dialog.open && dialog.role === "dialog" && dialog.inDrawer && dialog.copy && dialog.command && dialog.steps >= 3,
+    JSON.stringify(dialog));
+  // The harness wires the drawer's Close button and scrim; the Escape key is the real shell's
+  // and is covered by the sibling suite against index.html.
+  await page.click("#drawerClose");
+  await page.waitForTimeout(300);
+  const closed = await page.evaluate(() => document.getElementById("drawer").hidden);
+  check("machine: Close shuts the add dialog", closed);
+  await page.click("[data-add-account]");
+  await page.waitForTimeout(400);
+  const choices = await page.evaluate(() => {
+    const host = document.getElementById("drawer");
+    const nodes = [...host.querySelectorAll("[data-engine-choice]")];
+    return {
+      count: nodes.length,
+      radios: nodes.every((node) => node.getAttribute("role") === "radio"),
+      offOnes: nodes.filter((node) => node.disabled).map((node) => node.getAttribute("data-engine-choice")),
+      chosen: nodes.filter((node) => node.getAttribute("aria-checked") === "true").length,
+    };
+  });
+  check("machine: the dialog offers the engines as choices, one chosen, uninstalled ones off",
+    choices.count >= 2 && choices.radios && choices.chosen === 1 && choices.offOnes.length >= 1,
+    JSON.stringify(choices));
+  await page.click("#drawerClose");
   check("machine: nothing threw around the add flow", thrown.length === 0, thrown[0]);
   await context.close();
 }
