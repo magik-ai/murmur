@@ -72,11 +72,14 @@ function tile(label, value, note, state, key) {
   /* Every tile has the same three rows in the same places: label at the top, value under it,
      note pinned to the bottom. A long note is cut with an ellipsis and carried in full in its
      title, so a long path or a long sensor name never makes one tile taller than its row. */
+  /* The state pill sits in the note row, never beside the label: beside it, a pill squeezed
+     "Temperature" into "Temper..." on the reference farm. */
   return card({ class: "card-pad tile", key: key || label },
-    h("div", { class: "label" }, h("span", { class: "label-text" }, label),
-      state ? pill(state[0], state[1], note || "") : null),
+    h("div", { class: "label" }, h("span", { class: "label-text" }, label)),
     h("div", { class: "value", "data-flash": "", title: value }, value),
-    h("div", { class: "muted note", title: note || "" }, note || "\u00a0"));
+    h("div", { class: "muted note", title: note || "" },
+      state ? pill(state[0], state[1], note || "") : null,
+      h("span", { class: "note-text" }, note || "\u00a0")));
 }
 
 /* "of 512 GB" when the total is known, else the last part of the path the reading is for. */

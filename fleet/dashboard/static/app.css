@@ -913,7 +913,9 @@ button.account-chip:hover { border-color: var(--line-strong); box-shadow: var(--
 .tile .label { color: var(--text-dim); font-size: 12px; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tile .label .label-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tile .value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tile .note { align-self: end; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.tile .note { align-self: end; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.tile .note .pill { flex: 0 0 auto; }
+.tile .note .note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* One choice out of a short list, with its own line of explanation. A pill cannot hold a
    sentence, so a choice is a plain rectangle that can. */
 .choice {
