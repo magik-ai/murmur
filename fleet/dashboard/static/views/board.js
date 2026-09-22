@@ -4,32 +4,15 @@
    Nothing else belongs here, and nothing here is a summary of a summary. */
 
 import {
-  h, card, panel, pill, emptyState, skeletonStack, widthStyle, splitStyle, splitPercent,
-  SPLIT_MIN, SPLIT_MAX, agentMeaning, queueMeaning, powerLabel,
+  h, card, panel, pill, emptyState, skeletonStack, widthStyle, agentMeaning, powerLabel,
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
 import { list } from "../core/api.js";
 import { agentsPane, spawnCommand } from "./agents.js";
 
-const SPLIT_KEY = "murmur.board.split";
-const SPLIT_STEP = 2;
 
-const local = { split: readSplit(), dragging: false };
+const local = {};
 
-function readSplit() {
-  try {
-    return splitPercent(localStorage.getItem(SPLIT_KEY));
-  } catch (error) {
-    return splitPercent(null);
-  }
-}
-
-function writeSplit(value) {
-  local.split = splitPercent(value);
-  try {
-    localStorage.setItem(SPLIT_KEY, String(local.split));
-  } catch (error) { /* the pane widths simply start again next time */ }
-}
 
 /* ------------------------------------------------- finishing the setup */
 
@@ -86,10 +69,21 @@ function emptyFarm(context) {
    pill is for the tiles whose state is not readable from the number itself: a sensor that is
    silent reads the same as a sensor at zero unless the tile says which it is. */
 function tile(label, value, note, state, key) {
+  /* Every tile has the same three rows in the same places: label at the top, value under it,
+     note pinned to the bottom. A long note is cut with an ellipsis and carried in full in its
+     title, so a long path or a long sensor name never makes one tile taller than its row. */
   return card({ class: "card-pad tile", key: key || label },
-    h("div", { class: "label" }, label, state ? pill(state[0], state[1], note || "") : null),
-    h("div", { class: "value", "data-flash": "" }, value),
-    note ? h("div", { class: "muted" }, note) : null);
+    h("div", { class: "label" }, h("span", { class: "label-text" }, label),
+      state ? pill(state[0], state[1], note || "") : null),
+    h("div", { class: "value", "data-flash": "", title: value }, value),
+    h("div", { class: "muted note", title: note || "" }, note || "\u00a0"));
+}
+
+/* "of 512 GB" when the total is known, else the last part of the path the reading is for. */
+function diskNote(path, total) {
+  if (Number.isFinite(total)) return `of ${fmt.gigabytes(total)}`;
+  const parts = String(path || "").split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
 }
 
 function gpuTile(context, metrics) {
@@ -161,7 +155,8 @@ function machineStrip(context) {
         tile("Load", fmt.decimal((metrics.load || {}).load1, 2), `${fmt.num((metrics.load || {}).cores)} cores`),
         tile("Memory free", fmt.gigabytes((metrics.mem || {}).ram_avail_gb),
           `of ${fmt.gigabytes((metrics.mem || {}).ram_total_gb)}`),
-        tile("Disk free", fmt.gigabytes((metrics.disk || {}).free_gb), (metrics.disk || {}).path || ""),
+        tile("Disk free", fmt.gigabytes((metrics.disk || {}).free_gb),
+          diskNote((metrics.disk || {}).path, (metrics.disk || {}).total_gb)),
         gpuTile(context, metrics),
         heatTile(context, metrics),
         capacityTile(context, metrics),
@@ -249,105 +244,14 @@ function accountsStrip(context) {
 
 /* ------------------------------------------------------------ the queue */
 
-function queueRow(row) {
-  const meaning = queueMeaning(row.state);
-  const started = row.started || row.enqueued;
-  const stages = list(row.tiers);
-  return h("div", { class: `queue-row ${meaning}`, key: row.id || `${row.project}-${row.pr}` },
-    h("div", { class: "row" },
-      h("b", null, `${row.project || "change"}${row.pr ? ` #${row.pr}` : ""}`),
-      h("div", { class: "spacer" }),
-      pill(meaning, fmt.titleCase(row.state || ""), row.reason || "")),
-    h("div", { class: "muted" }, fmt.tail(row.branch || row.repo || "", 42)),
-    h("div", { class: "foot" },
-      row.position != null ? h("span", null, `position ${row.position}`) : null,
-      started ? h("span", { "data-flash": "" }, `started ${fmt.ago(started)}`) : null,
-      stages.length ? h("span", null, `${stages.filter((stage) => stage.state === "passed").length} of ${stages.length} stages done`) : null));
-}
-
-function queuePane(context) {
-  const resource = context.res("/api/ci");
-  const project = context.project;
-  const pick = (rows) => list(rows).filter((row) => !project || row.project === project);
-  return h("section", { class: "pane queue-pane", key: "queue" },
-    h("div", { class: "pane-head" },
-      h("h2", null, "Being verified"),
-      h("div", { class: "spacer" }),
-      h("a", { href: "#/queue" }, "Open the queue")),
-    h("div", { class: "pane-body" }, panel(resource, {
-      loading: () => skeletonStack(3),
-      isEmpty: (data) => !pick(data.running).length && !pick(data.queued).length,
-      empty: (data) => [
-        h("p", { class: "muted", key: "quiet" }, "Nothing is being verified right now."),
-        recentLine(pick(data && data.recent).length),
-      ],
-      ready: (data) => [
-        h("div", { class: "queue-rows", key: "rows" },
-          pick(data.running).map(queueRow),
-          pick(data.queued).map(queueRow)),
-        recentLine(pick(data.recent).length),
-      ],
-    })));
-}
-
-function recentLine(count) {
-  return h("p", { class: "muted pane-foot", key: "recent" },
-    count
-      ? h("a", { href: "#/queue" }, `${count} recent ${count === 1 ? "run" : "runs"}`)
-      : "No run has finished here yet.");
-}
 
 /* ---------------------------------------------------------- the canvas */
 
-function drag(event, context) {
-  const canvas = event.currentTarget.parentNode;
-  if (!canvas || event.button > 0) return;
-  event.preventDefault();
-  local.dragging = true;
-  const move = (moved) => {
-    const box = canvas.getBoundingClientRect();
-    if (!box.width) return;
-    const wanted = splitPercent(((moved.clientX - box.left) / box.width) * 100);
-    local.split = wanted;
-    // The drag writes to the node it is dragging, not through a repaint: a repaint per pointer
-    // move would rebuild sixty cards a second and the splitter would stutter under the hand.
-    canvas.style.setProperty("--split", `${wanted}%`);
-  };
-  const stop = () => {
-    window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", stop);
-    local.dragging = false;
-    writeSplit(local.split);
-    context.paint();
-  };
-  window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", stop);
-}
 
-function nudge(event, context) {
-  const step = { ArrowLeft: -SPLIT_STEP, ArrowRight: SPLIT_STEP, Home: -100, End: 100 }[event.key];
-  if (step == null) return;
-  event.preventDefault();
-  writeSplit(local.split + step);
-  context.paint();
-}
-
+/* The queue lives on its own tab (owner ruling 2026-09-22): the Board is the agents, at full
+   width, under the two strips. */
 function canvas(context) {
-  return h("div", { class: "board-canvas", key: "canvas", style: splitStyle(local.split) },
-    agentsPane(context),
-    h("div", {
-      class: "splitter",
-      role: "separator",
-      tabindex: "0",
-      "aria-orientation": "vertical",
-      "aria-label": "How much of the width the agents take",
-      "aria-valuenow": String(local.split),
-      "aria-valuemin": String(SPLIT_MIN),
-      "aria-valuemax": String(SPLIT_MAX),
-      onpointerdown: (event) => drag(event, context),
-      onkeydown: (event) => nudge(event, context),
-    }),
-    queuePane(context));
+  return h("div", { class: "board-canvas", key: "canvas" }, agentsPane(context));
 }
 
 /* ---------------------------------------------------------------- view */
@@ -355,7 +259,7 @@ function canvas(context) {
 export default {
   id: "board",
   title: "Board",
-  needs: ["/api/fleet", "/api/projects", "/api/metrics", "/api/accounts", "/api/ci", "/api/sweep"],
+  needs: ["/api/fleet", "/api/projects", "/api/metrics", "/api/accounts", "/api/sweep"],
   badge(context) {
     const rows = list(context.res("/api/fleet").data);
     return rows.filter((row) => agentMeaning(row.status) === "run").length || "";

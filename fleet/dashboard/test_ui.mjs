@@ -320,7 +320,7 @@ ok("layout lives in the stylesheet and no route writes a style attribute", () =>
     const source = read(relative);
     const styles = [...source.matchAll(/style:\s*([^,)}]+)/g)].map((found) => found[1].trim());
     for (const value of styles) {
-      assert.match(value, /^(widthStyle|splitStyle)\(/,
+      assert.match(value, /^(widthStyle)\(/,
         `${relative} writes a style attribute instead of using a class: ${value}`);
     }
   }
@@ -455,18 +455,19 @@ ok("the Board is the four things the amendment names", () => {
   assert.match(board, /machineStrip/, "no machine strip");
   assert.match(board, /accountsStrip/, "no accounts strip");
   assert.match(board, /agentsPane/, "the agents pane is not on the Board");
-  assert.match(board, /queuePane/, "the queue pane is not on the Board");
-  assert.match(board, /role: "separator"/, "the splitter is not a separator");
-  assert.match(board, /murmur\.board\.split/, "the splitter position is not kept");
-  assert.match(board, /"#\/queue"/, "the queue pane has no way into the Queue tab");
+  // The queue lives on its own tab (owner ruling 2026-09-22): nothing of it on the Board.
+  assert.ok(!/queuePane|role: "separator"|murmur\.board\.split/.test(board),
+    "the Board still carries the queue pane or the splitter");
+  assert.ok(!/"\/api\/ci"/.test(board), "the Board still reads the queue route");
   // The checklist has no dismiss: the only way to put it away is to fix what it names, so
   // the thing it draws carries no control at all.
   const checklist = board.slice(board.indexOf("function setupChecklist"));
   assert.ok(!checklist.slice(0, checklist.indexOf("\n}\n")).includes('h("button"'),
     "the setup checklist can be dismissed without fixing anything");
   const css = read("static/app.css");
-  assert.match(css, /@media \(max-width: 1100px\) \{[\s\S]*?\.board-canvas \{ grid-template-columns: minmax\(0, 1fr\)/,
-    "the two panes do not stack on a narrow screen");
+  assert.match(css, /\.tile \{[^}]*grid-template-rows: auto auto 1fr/, "tiles are not three fixed rows");
+  assert.match(css, /\.tile \.note \{[^}]*align-self: end/, "the tile note is not pinned to the bottom");
+  assert.match(css, /\.grid\.accounts-row \{[^}]*\/ 6\)/, "the accounts do not share one row");
 });
 
 ok("the agents pane has two selects and a search, and no chips", () => {

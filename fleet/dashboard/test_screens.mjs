@@ -34,13 +34,17 @@ async function measured(page, state, tab, size) {
     const seen = await page.evaluate(() => {
       const canvas = document.querySelector(".board-canvas");
       const agents = document.querySelector(".agents-pane");
-      const queue = document.querySelector(".queue-pane");
+      const tiles = [...document.querySelectorAll(".machine-strip .tile")];
+      const heights = tiles.map((tile) => Math.round(tile.getBoundingClientRect().height));
+      const accounts = [...document.querySelectorAll("[data-account]")];
+      const tops = accounts.map((node) => Math.round(node.getBoundingClientRect().top));
       return {
-        strip: document.querySelectorAll(".machine-strip .tile").length,
-        accounts: document.querySelectorAll("[data-account]").length,
-        splitter: Boolean(document.querySelector(".splitter")),
-        sideBySide: Boolean(canvas && agents && queue)
-          && Math.abs(agents.getBoundingClientRect().top - queue.getBoundingClientRect().top) < 40,
+        strip: tiles.length,
+        accounts: accounts.length,
+        queueOnBoard: Boolean(document.querySelector(".queue-pane, .splitter")),
+        oneHeight: heights.length > 0 && Math.max(...heights) - Math.min(...heights) <= 1,
+        oneRow: tops.length > 0 && Math.max(...tops) - Math.min(...tops) <= 1,
+        agentsFull: Boolean(canvas && agents) && agents.getBoundingClientRect().width >= canvas.getBoundingClientRect().width - 2,
         controls: ["agentSpawner", "agentStatus", "agentSearch"].filter((id) => document.getElementById(id)).length,
         power: document.querySelectorAll("#powerMode button").length,
       };
@@ -48,7 +52,10 @@ async function measured(page, state, tab, size) {
     return [
       ["puts the machine on one strip", seen.strip >= 6, JSON.stringify(seen)],
       ["puts every subscription on the strip under it", seen.accounts >= 2, String(seen.accounts)],
-      ["draws the agents and the queue side by side", size.width === 390 ? !seen.sideBySide : seen.sideBySide, JSON.stringify(seen)],
+      ["keeps the queue off the Board", !seen.queueOnBoard, JSON.stringify(seen)],
+      ["draws every machine tile at one height", seen.oneHeight, JSON.stringify(seen)],
+      ["draws every subscription in one row", size.width === 390 ? true : seen.oneRow, JSON.stringify(seen)],
+      ["gives the agents the full width", seen.agentsFull, JSON.stringify(seen)],
       ["gives the agents two selects and a search", seen.controls === 3, String(seen.controls)],
       ["keeps the power setting in the header", seen.power === 5, String(seen.power)],
     ];
@@ -80,14 +87,13 @@ async function measured(page, state, tab, size) {
         cards: cards.length,
         squeezed: cards.filter((card) => cut(card.querySelector(".pill-text"))).map((card) => card.querySelector(".pill-text").textContent),
         longNames: cards.filter((card) => cut(card.querySelector(".name"))).length,
-        queue: document.querySelector(".queue-pane").innerText.replace(/\s+/g, " "),
+        queueOnBoard: Boolean(document.querySelector(".queue-pane, .splitter")),
       };
     });
     return [
       ["never squeezes a status word", seen.cards > 0 && seen.squeezed.length === 0, seen.squeezed.join(", ")],
       ["cuts the long lane names instead", seen.longNames > 0, `${seen.longNames} cut`],
-      ["says a quiet queue is quiet and counts what finished",
-        /Nothing is being verified right now/.test(seen.queue) && /\d recent runs?/.test(seen.queue), seen.queue.slice(0, 120)],
+      ["keeps the queue off the Board", !seen.queueOnBoard, JSON.stringify(seen)],
     ];
   }
   if (tab === "mail" && (state === "ready" || state === "quiet")) {

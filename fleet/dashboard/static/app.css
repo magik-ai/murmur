@@ -734,24 +734,8 @@ button.agent-card {
 
 /* -------------------------------------------------------- 10a. the board */
 
-/* Two panes and a bar the reader can drag between them. The position is this browser's, so
-   a farm with a wide queue and a farm with none are both one drag away from being right. */
-.board-canvas {
-  display: grid;
-  grid-template-columns: var(--split, 62%) 12px minmax(0, 1fr);
-  align-items: start;
-}
-.splitter {
-  align-self: stretch; min-height: 120px;
-  background: none; border: 0; cursor: col-resize;
-  display: grid; place-items: center;
-}
-.splitter::before {
-  content: ""; width: 2px; height: 100%; border-radius: 1px;
-  background: var(--line);
-  transition: background var(--motion) var(--ease);
-}
-.splitter:hover::before, .splitter:focus-visible::before { background: var(--accent); }
+/* The Board is one column: the agents at full width under the two strips. */
+.board-canvas { display: grid; grid-template-columns: minmax(0, 1fr); }
 
 .pane { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .pane-head { display: flex; align-items: center; gap: 8px; min-height: 26px; min-width: 0; }
@@ -767,10 +751,12 @@ button.agent-card {
 /* A strip is one row of small readings, not a wall of cards: the agents are the reason the
    reader opened this page, and every tall tile above them is a tile in their way. */
 .grid.strip-tiles { grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 8px; }
-.strip-tiles .tile { padding: 9px 11px; gap: 4px; }
+.strip-tiles .tile { padding: 9px 11px; gap: 3px; min-height: 84px; }
 .strip-tiles .tile .value { font-size: 16px; }
 .strip-tiles .tile .label, .strip-tiles .tile .muted { font-size: 11px; }
-.grid.accounts-row { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+/* Every subscription in one row (owner ruling 2026-09-22: four plus an orphan looked wrong).
+   The row divides its width by the count, down to a floor, and only past six does it wrap. */
+.grid.accounts-row { grid-template-columns: repeat(auto-fit, minmax(max(150px, calc((100% - 5 * 12px) / 6)), 1fr)); }
 button.account-chip {
   font: inherit; color: inherit; text-align: left; cursor: pointer;
   display: grid; gap: 8px; align-content: start;
@@ -803,8 +789,7 @@ button.account-chip:hover { border-color: var(--line-strong); box-shadow: var(--
 }
 
 @media (max-width: 1100px) {
-  .board-canvas { grid-template-columns: minmax(0, 1fr); gap: var(--gap); }
-  .splitter { display: none; }
+  .board-canvas { gap: var(--gap); }
 }
 
 /* --------------------------------------------------------- 10b. the mail */
@@ -922,9 +907,13 @@ button.account-chip:hover { border-color: var(--line-strong); box-shadow: var(--
 .stage.fail { color: var(--tone-fail); }
 .stage.run { color: var(--tone-run); }
 
-.tile { display: grid; gap: 6px; padding: 12px 14px; }
-.tile .label { color: var(--text-dim); font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.tile .value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 19px; }
+/* Three rows, always the same three rows: label, value, note. The middle row absorbs the
+   slack so every tile in a strip is the same height, with the note on the bottom edge. */
+.tile { display: grid; grid-template-rows: auto auto 1fr; gap: 4px; padding: 12px 14px; min-height: 92px; }
+.tile .label { color: var(--text-dim); font-size: 12px; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tile .label .label-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .note { align-self: end; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 /* One choice out of a short list, with its own line of explanation. A pill cannot hold a
    sentence, so a choice is a plain rectangle that can. */
 .choice {

@@ -72,7 +72,6 @@ const text = (page) => page.evaluate(() => document.getElementById("view").inner
 
 for (const [route, hash, name] of [
   ["/api/ci", "#/queue", "queue"],
-  ["/api/ci", "#/board", "the board's queue pane"],
   ["/api/metrics", "#/board", "the machine strip"],
   ["/api/accounts", "#/board", "the accounts strip"],
   ["/api/fleet", "#/board", "the agents pane"],
@@ -234,59 +233,40 @@ for (const [from, wanted, name] of [
   await context.close();
 }
 
-/* A queue with nothing running and nothing waiting is a state, not a gap. */
+/* The queue lives on its own tab (owner ruling 2026-09-22). The Board is the two strips and the
+   agents at full width, every machine tile one height with its note on the bottom edge, and
+   every subscription in one row. */
 
 {
-  const finished = [0, 1, 2].map((index) => ({
-    id: `ci-${index}`, project: "demo", pr: 400 + index, branch: `demo/change-${index}`,
-    state: "passed", started: 1, ended: 2, tiers: [],
-  }));
-  const { page, context, thrown } = await open({
-    hash: "#/board",
-    overrides: {
-      "/api/ci": JSON.stringify({ updated: 1, daemon_alive: true, running: [], queued: [], recent: finished }),
-    },
-  });
-  const pane = await page.evaluate(() => {
-    const found = document.querySelector(".queue-pane");
-    return found ? {
-      text: found.innerText,
-      skeletons: found.querySelectorAll(".skeleton").length,
-      link: Boolean(found.querySelector('a[href="#/queue"]')),
-    } : null;
-  });
-  check("a quiet queue says so, counts what finished, and keeps its way in",
-    pane && pane.skeletons === 0 && pane.link
-      && /Nothing is being verified right now/.test(pane.text)
-      && /3 recent runs/.test(pane.text), JSON.stringify(pane));
-  check("a quiet queue threw nothing", thrown.length === 0, thrown.join(" | "));
-  await context.close();
-}
-
-/* The queue pane is running and waiting only. A finished run belongs to the Queue tab, and
-   putting fifty of them on the Board is how the Board stopped being readable. */
-
-{
-  const row = (index, state) => ({
-    id: `ci-${index}`, project: "demo", pr: 400 + index, branch: `demo/change-${index}`,
-    state, started: 1, ended: state === "running" ? null : 2, tiers: [],
-  });
-  const { page, context } = await open({
-    hash: "#/board",
-    overrides: {
-      "/api/ci": JSON.stringify({
-        updated: 1, daemon_alive: true,
-        running: [row(1, "running")], queued: [row(2, "queued")],
-        recent: [3, 4, 5, 6].map((index) => row(index, "passed")),
-      }),
-    },
-  });
+  const { page, context, thrown, asked } = await open({ hash: "#/board" });
+  await page.waitForTimeout(800);
   const seen = await page.evaluate(() => {
-    const found = document.querySelector(".queue-pane");
-    return { rows: found.querySelectorAll(".queue-row").length, text: found.innerText.replace(/\s+/g, " ") };
+    const tiles = [...document.querySelectorAll(".machine-strip .tile")];
+    const heights = tiles.map((tile) => Math.round(tile.getBoundingClientRect().height));
+    const notes = tiles.map((tile) => tile.querySelector(".note"));
+    const bottomsMatch = tiles.every((tile, index) => notes[index]
+      && Math.abs(tile.getBoundingClientRect().bottom - notes[index].getBoundingClientRect().bottom) < 16);
+    const accounts = [...document.querySelectorAll("[data-account]")];
+    const tops = accounts.map((node) => Math.round(node.getBoundingClientRect().top));
+    const canvas = document.querySelector(".board-canvas");
+    const agents = document.querySelector(".agents-pane");
+    return {
+      queue: Boolean(document.querySelector(".queue-pane, .splitter")),
+      tiles: tiles.length,
+      oneHeight: Math.max(...heights) - Math.min(...heights) <= 1,
+      notesAtBottom: bottomsMatch,
+      accounts: accounts.length,
+      oneRow: Math.max(...tops) - Math.min(...tops) <= 1,
+      full: agents.getBoundingClientRect().width >= canvas.getBoundingClientRect().width - 2,
+    };
   });
-  check("the board's queue shows what is running and waiting, and counts the rest",
-    seen.rows === 2 && /4 recent runs/.test(seen.text), JSON.stringify(seen));
+  check("nothing of the queue is on the Board", !seen.queue, JSON.stringify(seen));
+  check("the Board never asks for the queue", !asked.some((url) => url.includes("/api/ci")), asked.join(" "));
+  check("every machine tile is one height with its note on the bottom edge",
+    seen.tiles >= 5 && seen.oneHeight && seen.notesAtBottom, JSON.stringify(seen));
+  check("every subscription sits in one row", seen.accounts >= 4 && seen.oneRow, JSON.stringify(seen));
+  check("the agents take the full width", seen.full, JSON.stringify(seen));
+  check("the Board threw nothing", thrown.length === 0, thrown.join(" | "));
   await context.close();
 }
 
@@ -413,51 +393,12 @@ for (const [from, wanted, name] of [
   const listed = await page.evaluate(() => ({
     listbox: document.querySelector(".conversations") && document.querySelector(".conversations").getAttribute("role"),
     option: document.querySelector(".conversations li") && document.querySelector(".conversations li").getAttribute("tabindex"),
-    splitter: document.querySelector(".splitter"),
   }));
   check("the conversation list is a listbox", listed.listbox === "listbox", JSON.stringify(listed));
   check("a conversation can take focus", listed.option === "0", JSON.stringify(listed));
   await context.close();
 }
 
-{
-  const { page, context } = await open({ hash: "#/board" });
-  const splitter = await page.evaluate(() => {
-    const node = document.querySelector(".splitter");
-    return node ? {
-      role: node.getAttribute("role"),
-      now: node.getAttribute("aria-valuenow"),
-      tab: node.getAttribute("tabindex"),
-      label: node.getAttribute("aria-label"),
-    } : null;
-  });
-  check("the splitter is a separator a keyboard can reach",
-    splitter && splitter.role === "separator" && splitter.tab === "0" && Boolean(splitter.label),
-    JSON.stringify(splitter));
-  await page.focus(".splitter");
-  await page.keyboard.press("ArrowLeft");
-  await page.keyboard.press("ArrowLeft");
-  await page.waitForTimeout(500);
-  const moved = await page.evaluate(() => ({
-    now: document.querySelector(".splitter").getAttribute("aria-valuenow"),
-    kept: localStorage.getItem("murmur.board.split"),
-  }));
-  check("the arrow keys move it and the position is kept",
-    Number(moved.now) < Number(splitter.now) && moved.kept === moved.now, JSON.stringify(moved));
-  await context.close();
-}
-
-{
-  // A reader who dragged the splitter last week opens the page where they left it.
-  const { page, context } = await open({ hash: "#/board", seed: { "murmur.board.split": "34" } });
-  const width = await page.evaluate(() => {
-    const canvas = document.querySelector(".board-canvas");
-    const agents = document.querySelector(".agents-pane");
-    return Math.round((agents.getBoundingClientRect().width / canvas.getBoundingClientRect().width) * 100);
-  });
-  check("the stored splitter position is what the page opens with", Math.abs(width - 34) <= 2, String(width));
-  await context.close();
-}
 
 {
   const { page, context } = await open({ hash: "#/board" });
@@ -495,12 +436,12 @@ for (const [from, wanted, name] of [
     };
   });
   check("the header fits on a phone", header.bar && header.right, JSON.stringify(header));
-  const stacked = await page.evaluate(() => {
+  const fullWidth = await page.evaluate(() => {
     const agents = document.querySelector(".agents-pane").getBoundingClientRect();
-    const queue = document.querySelector(".queue-pane").getBoundingClientRect();
-    return queue.top >= agents.bottom - 1;
+    const canvas = document.querySelector(".board-canvas").getBoundingClientRect();
+    return agents.width >= canvas.width - 2;
   });
-  check("the two panes stack on a phone instead of squeezing", stacked);
+  check("the agents take the full width on a phone", fullWidth);
   const clipped = await page.evaluate(() => {
     const bad = [];
     for (const pill of document.querySelectorAll(".agent-card .pill")) {
