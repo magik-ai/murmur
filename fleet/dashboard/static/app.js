@@ -1,33 +1,55 @@
 /* The page: a hash router, a three second tick, the view registry, and the chrome around
-   them (theme, project filter, freshness, capacity, the jump palette, the favicon). */
+   them (theme, project filter, freshness, capacity, the power setting, the jump palette,
+   the favicon). Four tabs, and the addresses the old seven used still work. */
 
 import * as api from "./core/api.js";
 import * as identity from "./core/identity.js";
-import { render, paintDrawer, closeDrawer, openDrawerKey, trapFocus, agentMeaning, h } from "./core/ui.js";
-import overview from "./views/overview.js";
-import agents from "./views/agents.js";
+import {
+  render, paintDrawer, closeDrawer, openDrawerKey, trapFocus, agentMeaning, h,
+  emptyState, toast, POWER_MODES, powerLabel,
+} from "./core/ui.js";
+import board from "./views/board.js";
 import mail from "./views/mail.js";
 import queue from "./views/queue.js";
-import projects from "./views/projects.js";
-import accounts from "./views/accounts.js";
-import system from "./views/system.js";
 
-const VIEWS = [overview, agents, mail, queue, projects, accounts, system];
+/* The machine tab is written in its own lane, in its own file. Until that file is on the
+   farm the tab is here and says so, rather than taking the whole page down with a failed
+   import: a missing module in a static import list is a blank screen, not a missing tab. */
+const machineSoon = {
+  id: "machine",
+  title: "Machine",
+  needs: [],
+  render: () => emptyState({
+    title: "The machine controls are coming from the machine lane",
+    body: "Power, services, accounts, engines, projects, health and settings live here. "
+      + "Until that file is installed, use the command line for them.",
+    command: "fleet status",
+  }),
+};
+
+let VIEWS = [board, mail, queue, machineSoon];
 const BY_ID = new Map(VIEWS.map((view) => [view.id, view]));
 /* Asked for on every tab: the page cannot draw its chrome without them, and the jump
-   palette can only offer a mailbox it has heard of. */
+   palette can only offer a conversation it has heard of. */
 const ALWAYS = ["/api/config", "/api/access", "/api/identities", "/api/health",
-  "/api/metrics", "/api/mail/boxes"];
+  "/api/metrics", "/api/mode", "/api/mail/boxes"];
 const TICK = 3000;
 
+/* An address the old seven tabs answered on, and where that reader is taken now. A bookmark
+   from yesterday must land on the thing it named, not on a blank page. */
+const REDIRECTS = {
+  overview: ["board", null],
+  agents: ["board", null],
+  projects: ["machine", "projects"],
+  accounts: ["machine", "accounts"],
+  system: ["machine", null],
+};
+
 const ICONS = {
-  overview: '<path d="M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z" fill="currentColor"/>',
-  agents: '<path d="M12 12a4 4 0 100-8 4 4 0 000 8zm-8 9a8 8 0 0116 0z" fill="currentColor"/>',
+  board: '<path d="M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z" fill="currentColor"/>',
   mail: '<path d="M3 5h18v14H3zM3 6l9 7 9-7" fill="none" stroke="currentColor" stroke-width="2"/>',
   queue: '<path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-  projects: '<path d="M3 7h6l2 2h10v10H3z" fill="none" stroke="currentColor" stroke-width="2"/>',
-  accounts: '<path d="M3 6h18v12H3zM3 10h18" fill="none" stroke="currentColor" stroke-width="2"/>',
-  system: '<path d="M6 6h12v12H6z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" stroke="currentColor" stroke-width="2"/>',
+  machine: '<path d="M6 6h12v12H6z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" stroke="currentColor" stroke-width="2"/>',
 };
 
 /* The three theme settings, in the order the one control walks through them, each with the
@@ -39,10 +61,11 @@ const THEMES = [
 ];
 
 const state = {
-  view: "overview",
+  view: "board",
   params: new URLSearchParams(),
   project: "",
   extra: new Set(),
+  powerBusy: "",
 };
 
 /* ---------------------------------------------------------- the context */
@@ -89,10 +112,17 @@ const context = {
 /* ---------------------------------------------------------- the router */
 
 function parseHash() {
-  const raw = (location.hash || "#/overview").replace(/^#\/?/, "");
+  const raw = (location.hash || "#/board").replace(/^#\/?/, "");
   const [path, query = ""] = raw.split("?");
-  const id = path.split("/")[0] || "overview";
-  return { view: BY_ID.has(id) ? id : "overview", params: new URLSearchParams(query) };
+  const id = path.split("/")[0] || "board";
+  const params = new URLSearchParams(query);
+  const moved = REDIRECTS[id];
+  if (moved) {
+    const [view, section] = moved;
+    if (section) params.set("section", section);
+    return { view, params, moved: true };
+  }
+  return { view: BY_ID.has(id) ? id : "board", params, moved: false };
 }
 
 export function go(view, params) {
@@ -102,6 +132,12 @@ export function go(view, params) {
 
 function onRoute() {
   const next = parseHash();
+  if (next.moved) {
+    // The address bar is rewritten in place, so a bookmark saved from here is the new one and
+    // the back button does not walk the reader through a redirect they never asked for.
+    const query = next.params.toString();
+    history.replaceState(null, "", `${location.pathname}${location.search}#/${next.view}${query ? `?${query}` : ""}`);
+  }
   if (next.view !== state.view) {
     state.extra.clear();
     closeDrawer();
@@ -154,8 +190,20 @@ async function tick(force = false) {
 export function paint() {
   const view = currentView();
   document.getElementById("viewTitle").textContent = view.title;
-  render(document.getElementById("view"), view.render(context));
+  // One tab holds itself to the window and scrolls inside its own panes. The page may not
+  // scroll under it, or the fixed panes slide away from their header.
+  document.body.classList.toggle("fixed-page", Boolean(view.fixed));
+  render(document.getElementById("view"), [readOnlyNote(), view.render(context)]);
   paintDrawer();
+}
+
+/* A dashboard with no write token is a legitimate way to run this, and it must not look
+   broken: every control that writes is drawn switched off, and this one line, on every tab,
+   says why in the server's own words rather than leaving the reader to guess. */
+function readOnlyNote() {
+  if (api.access.writable) return null;
+  return h("p", { class: "banner readonly-strip", key: "readonly" },
+    api.access.reason || "This dashboard is read-only, so nothing on it can be changed from here.");
 }
 
 /* ----------------------------------------------------------- the chrome */
@@ -164,6 +212,7 @@ function paintChrome() {
   paintNav();
   paintFreshness();
   paintCapacity();
+  paintPower();
   paintProjects();
   paintFavicon();
   const version = api.resource("/api/version").data;
@@ -234,11 +283,58 @@ function paintCapacity() {
   }
   const blocks = metrics.block_reasons || [];
   const warnings = metrics.warnings || [];
-  const word = metrics.can_spawn === false ? "Full" : warnings.length ? "Tight" : "Ready";
+  /* "No room", not "Full": the power setting next to this pill has a setting called Full,
+     and two Fulls in one header that mean opposite things is a header nobody can read. */
+  const word = metrics.can_spawn === false ? "No room" : warnings.length ? "Tight" : "Ready";
   const meaning = metrics.can_spawn === false ? "fail" : warnings.length ? "wait" : "done";
   node.className = `pill ${meaning}`;
   node.querySelector(".pill-text").textContent = word;
   node.title = [...blocks, ...warnings].join("\n") || "There is room for another agent.";
+}
+
+/* The power setting is a control, not a word: the reader changes it from the header of every
+   tab. It is only drawn on a machine that has a slice to cap with, because a switch that
+   cannot do anything is worse than no switch. */
+function paintPower() {
+  const host = document.getElementById("powerMode");
+  if (!host) return;
+  const mode = api.resource("/api/mode").data;
+  if (!context.features.slice || !mode) {
+    host.hidden = true;
+    render(host, []);
+    return;
+  }
+  host.hidden = false;
+  const allowed = api.access.writable;
+  host.title = mode.setting === "auto"
+    ? `The setting is Automatic. Right now the agents are on ${powerLabel(mode.effective)}.`
+    : `The agents are on ${powerLabel(mode.setting)}.`;
+  render(host, POWER_MODES.map(([id, label, line]) => h("button", {
+    key: id,
+    type: "button",
+    "data-power": id,
+    "data-write": "",
+    "aria-pressed": String(mode.setting === id),
+    disabled: allowed && !state.powerBusy ? null : true,
+    title: allowed ? line : api.access.reason || "This dashboard is read-only.",
+    onclick: () => setPower(id, label),
+  }, label)));
+}
+
+async function setPower(id, label) {
+  state.powerBusy = id;
+  paintPower();
+  try {
+    await api.apiPost("/api/mode", { mode: id });
+    toast(`The agents are on ${label}.`);
+  } catch (error) {
+    toast(api.serverReason(error) || "The power setting was not changed.", "bad");
+  } finally {
+    state.powerBusy = "";
+    await api.refresh("/api/mode");
+    paintChrome();
+    paint();
+  }
 }
 
 function paintProjects() {
@@ -327,10 +423,10 @@ function storedTheme() {
 /* --------------------------------------------------------- the palette */
 
 /* What the palette needs to be able to offer everything, whichever tab is open. Half the tabs
-   never read the lanes or the mailboxes, and the palette used to offer only what the open tab
-   had already asked for: from System, typing a lane name found nothing at all. These go
-   through the same cache as every other read, so opening the palette on the agents tab costs
-   nothing and opening it on System costs one pass. */
+   never read the lanes or the conversations, and the palette used to offer only what the open
+   tab had already asked for: from the Machine tab, typing a lane name found nothing at all.
+   These go through the same cache as every other read, so opening the palette on the Board
+   costs nothing and opening it on Machine costs one pass. */
 const PALETTE_PATHS = ["/api/fleet", "/api/projects", "/api/mail/boxes"];
 
 /* Everything a reader might want to jump to. A row with no name is not offered: it cannot be
@@ -341,19 +437,27 @@ function paletteItems() {
     items.push({
       label: row.slug,
       where: `Agent, ${row.project || "no project"}`,
-      go: () => go("agents", { agent: row.slug }),
+      go: () => go("board", { agent: row.slug }),
     });
   }
   for (const row of api.list(api.resource("/api/projects").data)) {
-    items.push({ label: row.name, where: "Project", go: () => go("projects", { project: row.name }) });
+    items.push({
+      label: row.name,
+      where: "Project",
+      go: () => go("machine", { section: "projects", project: row.name }),
+    });
   }
   const boxes = api.resource("/api/mail/boxes").data;
-  // One name is one mailbox, however many inbox issues the office holds under it.
+  // One name is one conversation, however many the office holds under it.
   const offered = new Set();
   for (const box of api.list(boxes && boxes.boxes)) {
     if (offered.has(box.name)) continue;
     offered.add(box.name);
-    items.push({ label: box.name, where: "Mailbox", go: () => go("mail", { box: box.name }) });
+    items.push({
+      label: box.name === "all" ? "Everyone" : box.name,
+      where: "Conversation",
+      go: () => go("mail", { to: box.name }),
+    });
   }
   return items.filter((item) => typeof item.label === "string" && item.label.trim() !== "");
 }
@@ -469,6 +573,20 @@ function wire() {
   });
 }
 
+/* The machine tab, once its lane has installed its file. A tab that is not there yet is a
+   tab that says so; it is never a reason for the other three not to draw. */
+async function adoptMachine() {
+  try {
+    const module = await import("./views/machine.js");
+    const view = module && module.default;
+    if (!view || view.id !== "machine" || typeof view.render !== "function") return;
+    VIEWS = VIEWS.map((entry) => (entry.id === "machine" ? view : entry));
+    BY_ID.set("machine", view);
+    paintChrome();
+    paint();
+  } catch (error) { /* the placeholder above stays, and the other tabs are untouched */ }
+}
+
 function boot() {
   applyTheme(storedTheme());
   try {
@@ -478,6 +596,7 @@ function boot() {
   api.pull(["/api/version"]);
   onRoute();
   timer = setInterval(tick, TICK);
+  adoptMachine();
 }
 
 boot();

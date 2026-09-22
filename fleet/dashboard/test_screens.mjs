@@ -1,6 +1,7 @@
 /* Every tab, in every state, at a desktop width and a phone width. The check is narrow on
-   purpose: nothing may throw, and the page may never scroll sideways. The pictures are the
-   point, so a person can look at a tab they have never seen and say what it is for.
+   purpose: nothing may throw, the page may never scroll sideways, and the two tabs this lane
+   owns must say the things the record fixed. The pictures are the point, so a person can look
+   at a tab they have never seen and say what it is for.
    The pictures are written outside the repository and are never committed. */
 
 import { spawn } from "node:child_process";
@@ -12,62 +13,109 @@ import { loadPlaywright } from "./test_playwright.mjs";
 const OUT = process.env.SHOT_DIR || path.join(os.tmpdir(), "murmur-dash-shots");
 const PORT = Number(process.env.PORT || 7921);
 const STATES = ["ready", "empty", "error", "loading", "quiet"];
-const TABS = ["overview", "agents", "mail", "queue", "projects", "accounts", "system"];
+const TABS = ["board", "mail", "queue", "machine"];
 const SIZES = [{ width: 1440, height: 900 }, { width: 390, height: 844 }];
 
 /* A failed request the state is meant to produce. The browser logs one console line for it;
    that line is the fixture working, not the page breaking. */
 const EXPECTED_REQUEST_FAILURES = { error: ["/api/ci"] };
 
-/* What the live farm showed and no fixture used to: names too long for a card, twenty filters,
-   a queue with nothing running, and an office holding one name twice. The pictures are taken
-   either way; these are the three things a person would otherwise have to spot in them. */
+/* The queue and the machine tabs are written in their own lane, in their own files. Until
+   those files are on the farm the browser reports three 404s for them, which is this lane
+   waiting for that one and not a page that is broken. */
+const OTHER_LANE = ["/static/queue.css", "/static/machine.css", "/static/views/machine.js"];
+
+/* What the live farm showed and no fixture used to: names too long for a card, a queue with
+   nothing running, an office holding one name twice, and the two pages this lane rebuilt.
+   The pictures are taken either way; these are the things a person would otherwise have to
+   spot in them. */
 async function measured(page, state, tab, size) {
-  if (state !== "quiet") return [];
-  if (tab === "overview") {
+  if (tab === "board" && state === "ready") {
     const seen = await page.evaluate(() => {
-      const card = (word) => [...document.querySelectorAll(".card")].find((node) => node.innerText.startsWith(word));
-      const agents = card("Agents");
-      const queue = card("Queue");
+      const canvas = document.querySelector(".board-canvas");
+      const agents = document.querySelector(".agents-pane");
+      const queue = document.querySelector(".queue-pane");
       return {
-        agentSkeletons: agents ? agents.querySelectorAll(".skeleton").length : -1,
-        agentText: agents ? agents.innerText.replace(/\s+/g, " ") : "",
-        queueText: queue ? queue.innerText.replace(/\s+/g, " ") : "",
-        queueSkeletons: queue ? queue.querySelectorAll(".skeleton").length : -1,
+        strip: document.querySelectorAll(".machine-strip .tile").length,
+        accounts: document.querySelectorAll("[data-account]").length,
+        splitter: Boolean(document.querySelector(".splitter")),
+        sideBySide: Boolean(canvas && agents && queue)
+          && Math.abs(agents.getBoundingClientRect().top - queue.getBoundingClientRect().top) < 40,
+        controls: ["agentSpawner", "agentStatus", "agentSearch"].filter((id) => document.getElementById(id)).length,
+        power: document.querySelectorAll("#powerMode button").length,
       };
     });
     return [
-      ["shows the counts with no placeholder left above them",
-        seen.agentSkeletons === 0 && /Running \d/.test(seen.agentText), JSON.stringify(seen)],
-      ["says a quiet queue is quiet and counts what finished",
-        seen.queueSkeletons === 0 && /Nothing is being verified right now/.test(seen.queueText)
-          && /\d finished runs?/.test(seen.queueText), seen.queueText],
+      ["puts the machine on one strip", seen.strip >= 6, JSON.stringify(seen)],
+      ["puts every subscription on the strip under it", seen.accounts >= 2, String(seen.accounts)],
+      ["draws the agents and the queue side by side", size.width === 390 ? !seen.sideBySide : seen.sideBySide, JSON.stringify(seen)],
+      ["gives the agents two selects and a search", seen.controls === 3, String(seen.controls)],
+      ["keeps the power setting in the header", seen.power === 5, String(seen.power)],
     ];
   }
-  if (tab === "agents") {
+  if (tab === "board" && state === "empty") {
+    const body = await page.evaluate(() => document.getElementById("view").innerText.replace(/\s+/g, " "));
+    return [
+      ["a farm with no agent is a page about starting one",
+        /No agent has ever run here/.test(body) && /fleet spawn/.test(body), body.slice(0, 120)],
+    ];
+  }
+  if (tab === "board" && state === "error") {
+    const seen = await page.evaluate(() => ({
+      checklist: Boolean([...document.querySelectorAll(".card")].find((node) => /^Finish setting up/.test(node.innerText))),
+      note: document.getElementById("view").innerText.includes("This page was opened without the dashboard token."),
+      power: [...document.querySelectorAll("#powerMode button")].every((node) => node.disabled),
+    }));
+    return [
+      ["a farm that is not finished says what is missing, first", seen.checklist, JSON.stringify(seen)],
+      ["a page with no token says so and switches its controls off",
+        seen.note && seen.power, JSON.stringify(seen)],
+    ];
+  }
+  if (tab === "board" && state === "quiet") {
     const seen = await page.evaluate(() => {
       const cut = (node) => node.scrollWidth > node.clientWidth + 1;
       const cards = [...document.querySelectorAll(".agent-card")];
-      const heights = [...new Set([...document.querySelectorAll(".chip")].map((node) => Math.round(node.getBoundingClientRect().height)))];
       return {
         cards: cards.length,
         squeezed: cards.filter((card) => cut(card.querySelector(".pill-text"))).map((card) => card.querySelector(".pill-text").textContent),
         longNames: cards.filter((card) => cut(card.querySelector(".name"))).length,
-        heights,
+        queue: document.querySelector(".queue-pane").innerText.replace(/\s+/g, " "),
       };
     });
     return [
       ["never squeezes a status word", seen.cards > 0 && seen.squeezed.length === 0, seen.squeezed.join(", ")],
       ["cuts the long lane names instead", seen.longNames > 0, `${seen.longNames} cut`],
-      ["keeps every filter chip one height", seen.heights.length === 1 && seen.heights[0] === 32,
-        seen.heights.join(", ")],
+      ["says a quiet queue is quiet and counts what finished",
+        /Nothing is being verified right now/.test(seen.queue) && /\d recent runs?/.test(seen.queue), seen.queue.slice(0, 120)],
     ];
   }
-  if (tab === "mail") {
-    const names = await page.evaluate(() => [...document.querySelectorAll(".boxlist li span:first-child")].map((node) => node.textContent));
+  if (tab === "mail" && (state === "ready" || state === "quiet")) {
+    const seen = await page.evaluate(() => ({
+      names: [...document.querySelectorAll(".conversations li")].map((node) => node.dataset.conversation),
+      first: document.querySelector(".conversations li .name")
+        ? document.querySelector(".conversations li .name").textContent : "",
+      pageScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+      composer: Boolean(document.querySelector(".composer-label")),
+      words: document.getElementById("view").innerText,
+    }));
+    const jargon = ["mailbox", "feed", "issue", "thread id"]
+      .filter((word) => new RegExp(`\\b${word}\\b`, "i").test(seen.words));
     return [
-      ["lists one mailbox per name", names.length === new Set(names).size, names.join(", ")],
-      ["pins the box everybody reads to the top", names[0] === "all", names.join(", ")],
+      ["lists one conversation per name",
+        size.width === 390 || seen.names.length === new Set(seen.names).size, seen.names.join(", ")],
+      ["pins the conversation everybody reads to the top",
+        size.width === 390 || (seen.names[0] === "all" && seen.first === "Everyone"), seen.names.join(", ")],
+      ["never scrolls the page under the panes", !seen.pageScrolls, String(seen.pageScrolls)],
+      ["keeps the composer on the screen", seen.composer, String(seen.composer)],
+      ["says none of the words the amendment forbids", jargon.length === 0, jargon.join(", ")],
+    ];
+  }
+  if (tab === "mail" && state === "error") {
+    const body = await page.evaluate(() => document.getElementById("view").innerText.replace(/\s+/g, " "));
+    return [
+      ["a farm with no office says so in one sentence, with the command",
+        /No head office is configured/.test(body) && /hq init/.test(body), body.slice(0, 140)],
     ];
   }
   return [];
@@ -111,7 +159,7 @@ for (const state of STATES) {
     const context = await browser.newContext({ viewport: size, colorScheme: state === "ready" ? "light" : "dark" });
     const page = await context.newPage();
     const problems = [];
-    const allowed = EXPECTED_REQUEST_FAILURES[state] || [];
+    const allowed = [...(EXPECTED_REQUEST_FAILURES[state] || []), ...OTHER_LANE];
     page.on("pageerror", (error) => problems.push(`uncaught: ${error.message}`));
     page.on("console", (message) => {
       if (message.type() !== "error") return;
@@ -119,27 +167,27 @@ for (const state of STATES) {
       if (text.includes("Failed to load resource") && allowed.some((route) => message.location().url.includes(route))) return;
       problems.push(text);
     });
-    await page.goto(`http://127.0.0.1:${PORT}/?state=${state}#/overview`, { waitUntil: "domcontentloaded" });
-    for (const tab of [...TABS, "agents-drawer", "agents-palette"]) {
+    await page.goto(`http://127.0.0.1:${PORT}/?state=${state}#/board`, { waitUntil: "domcontentloaded" });
+    for (const tab of [...TABS, "board-drawer", "board-palette"]) {
       await page.evaluate((next) => {
-        location.hash = next === "agents-drawer" || next === "agents-palette" ? "#/agents" : `#/${next}`;
+        location.hash = next === "board-drawer" || next === "board-palette" ? "#/board" : `#/${next}`;
       }, tab);
       await page.waitForTimeout(state === "loading" ? 600 : 900);
       // The drawer and the palette sit above the page, so the page's own clipping does not
       // reach them. They are measured here for the same reason every tab is.
-      if (tab === "agents-drawer") {
+      if (tab === "board-drawer") {
         const slug = await page.evaluate(() => {
           const card = document.querySelector("[data-agent-card]");
           return card ? card.dataset.agentCard : "";
         });
         if (slug) {
           await page.evaluate((name) => {
-            location.hash = `#/agents?agent=${encodeURIComponent(name)}`;
+            location.hash = `#/board?agent=${encodeURIComponent(name)}`;
           }, slug);
         }
         await page.waitForTimeout(900);
       }
-      if (tab === "agents-palette") {
+      if (tab === "board-palette") {
         await page.keyboard.press("Meta+k");
         await page.waitForTimeout(500);
       }
@@ -155,7 +203,7 @@ for (const state of STATES) {
         check(`${state} ${tab} ${size.width} ${name}`, passed, detail);
       }
       await page.screenshot({ path: path.join(OUT, `${state}-${tab}-${size.width}.png`) });
-      if (tab === "agents-palette") await page.keyboard.press("Escape");
+      if (tab === "board-palette") await page.keyboard.press("Escape");
     }
     check(`${state} ${size.width} logged no error`, problems.length === 0, problems.slice(0, 3).join(" | "));
     await context.close();

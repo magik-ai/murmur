@@ -38,7 +38,8 @@ STATES = ("ready", "empty", "error", "loading", "quiet")
 
 # Routes served from a background snapshot. In the loading state they answer at once and say
 # the first pass has not happened, which is a different thing from a slow request.
-SNAPSHOT_ROUTES = ("/api/config", "/api/health", "/api/mail/")
+SNAPSHOT_ROUTES = ("/api/config", "/api/health", "/api/mail/", "/api/services",
+                   "/api/accounts/login-state")
 
 
 def ago(seconds):
@@ -157,6 +158,9 @@ PROJECTS = [
     {"name": "storefront", "repo": "your-org/storefront", "path": "/home/farm/work/storefront",
      "base_branch": "main", "ports": {"web": 5210, "api": 5211, "e2e": 5212},
      "lanes_open": 2, "last_activity": ago(5400)},
+    {"name": "sandbox", "repo": "your-org/sandbox", "path": "/home/farm/work/sandbox",
+     "base_branch": "main", "ports": {"web": 5220, "api": 5221, "e2e": 5222},
+     "lanes_open": 0, "last_activity": ago(86000)},
 ]
 
 QUEUE_STATES = ["passed", "passed_partial", "failed", "conflict", "ejected", "cancelled", "blocked"]
@@ -182,6 +186,70 @@ def queue_record(index, state, kind):
              "detail": "" if state != "failed" else "one case failed on the orders screen"},
         ],
         "uncovered": ["hosted browser check"] if state == "passed_partial" else [],
+        "failed_tests": [
+            {"tier": "end to end", "test": "orders.spec.ts > an empty basket says so",
+             "log": f"/home/farm/.fleet/ci/logs/ci-{1000 + index}-0000/end-to-end.log"},
+        ] if state == "failed" else [],
+        "base_branch": "main", "head_sha": f"{index:07x}9ab",
+        "enqueued": started - 30,
+        "farm_verdict": state if state in ("passed", "failed") else None,
+        "hosted_verdict": state if state in ("passed", "failed") else None,
+        "divergent": False,
+    }
+
+
+# A farm that has been up for a day holds dozens of finished runs, and the table has to stay
+# readable with all of them in it. These carry the shape the detail panel reads: five stages,
+# failed tests with their names, the gates this queue does not cover, and the two verdicts.
+DEEP_STAGES = ["changed files", "unit tests", "browser", "container image", "documents"]
+DEEP_STATES = ["passed", "failed", "passed_partial", "passed", "cancelled", "passed"]
+
+
+def deep_record(index):
+    state = DEEP_STATES[index % len(DEEP_STATES)]
+    started = ago(7200 + index * 300)
+    project = "demo" if index % 2 else "storefront"
+    stages = []
+    at = started
+    for position, name in enumerate(DEEP_STAGES):
+        span = 40 + position * 45
+        stage_state = "passed"
+        if state == "failed" and name == "browser":
+            stage_state = "failed"
+        elif state == "failed" and position > 2:
+            stage_state = "skipped"
+        elif state == "cancelled" and position > 1:
+            stage_state = "cancelled"
+        elif state == "passed_partial" and name == "container image":
+            stage_state = "skipped"
+        stages.append({
+            "name": name, "state": stage_state, "started": at, "ended": at + span,
+            "detail": "one case failed on the orders screen" if stage_state == "failed" else "",
+            "log": f"{name.replace(' ', '-')}.log",
+        })
+        at += span
+    # One run where the two verdicts disagree. It has to be a failed one, or "they disagree"
+    # would be a sentence over two identical words.
+    divergent = state == "failed" and index == 7
+    return {
+        "id": f"ci-{2000 + index}-0000", "project": project, "repo": f"your-org/{project}",
+        "pr": 300 + index, "branch": f"{project}/change-{index}", "state": state,
+        "reason": {"passed_partial": "verified with the hosted browser check left out",
+                   "cancelled": "a person cancelled this run"}.get(state, ""),
+        "started": started, "ended": at, "enqueued": started - 45, "position": None,
+        "base_branch": "main", "head_sha": f"{index:07x}c1d",
+        "tiers": stages,
+        "uncovered": ["hosted browser check", "licence scan", "publish the image"]
+                     if state == "passed_partial" else [],
+        "failed_tests": [
+            {"tier": "browser", "test": "orders.spec.ts > an empty basket says so",
+             "log": f"/home/farm/.fleet/ci/logs/ci-{2000 + index}-0000/browser.log"},
+            {"tier": "browser", "test": "orders.spec.ts > a declined card is explained",
+             "log": f"/home/farm/.fleet/ci/logs/ci-{2000 + index}-0000/browser.log"},
+        ] if state == "failed" else [],
+        "farm_verdict": "failed" if state == "failed" else "passed",
+        "hosted_verdict": "passed" if divergent or state != "failed" else "failed",
+        "divergent": divergent,
     }
 
 
@@ -189,7 +257,8 @@ QUEUE = {
     "updated": NOW, "daemon_alive": True, "refresh_age": 4,
     "running": [queue_record(0, "running", "running")],
     "queued": [queue_record(1, "queued", "queued"), queue_record(2, "queued", "queued")],
-    "recent": [queue_record(index + 3, state, "recent") for index, state in enumerate(QUEUE_STATES)],
+    "recent": [queue_record(index + 3, state, "recent") for index, state in enumerate(QUEUE_STATES)]
+              + [deep_record(index) for index in range(40 - len(QUEUE_STATES))],
 }
 
 ACCOUNTS = {
@@ -202,6 +271,13 @@ ACCOUNTS = {
         {"name": "farm-two", "label": "farm two", "engine": "codex", "session": 96,
          "weekly": 88, "session_resets": NOW + 900, "weekly_resets": NOW + 120000,
          "read_at": ago(900), "scoped": [], "stale_error": "the vendor answered 429"},
+        {"name": "farm-three", "label": "farm three", "engine": "claude", "session": None,
+         "weekly": None, "session_resets": None, "weekly_resets": None, "read_at": None,
+         "scoped": []},
+        {"name": "farm-four", "label": "farm four", "engine": "claude", "session": 18,
+         "weekly": 34, "session_resets": NOW + 3000, "weekly_resets": NOW + 250000,
+         "read_at": ago(120), "scoped": [],
+         "stale_error": "the vendor answered 429, so these numbers stopped refreshing"},
     ],
     "errors": {},
 }
@@ -209,12 +285,15 @@ ACCOUNTS = {
 MODELS = [
     {"id": "claude", "label": "Claude", "glyph": "C", "color": "#d29922", "enabled": True,
      "role": "builds the change", "models": "opus, sonnet, haiku", "health": "ok",
-     "limits": "two windows, session and weekly"},
+     "limits": "two windows, session and weekly",
+     "installed": True, "path": "/home/farm/.local/bin/claude", "health_at": ago(1800)},
     {"id": "codex", "label": "Codex", "glyph": "X", "color": "#3fb950", "enabled": True,
      "role": "reviews the change", "models": "gpt-5-codex", "health": "fail",
-     "health_detail": "the last health call timed out", "limits": "five hour window"},
+     "health_detail": "the last health call timed out", "limits": "five hour window",
+     "installed": True, "path": "/usr/bin/codex", "health_at": ago(600)},
     {"id": "local", "label": "Local model", "enabled": False, "role": "offline experiments",
-     "health": "unchecked"},
+     "health": "unchecked", "installed": False,
+     "install_hint": "curl -fsSL https://example.invalid/local/install.sh | sh"},
 ]
 
 MAIL_BOXES = [
@@ -309,7 +388,7 @@ HEALTH_ERROR = [
     {"id": "cpu_temp_sensor", "label": "temperature sensor", "state": "error",
      "detail": "The sensor package is installed but returned nothing.", "fix": "sudo sensors-detect"},
     {"id": "ci_daemon", "label": "queue runner", "state": "error", "detail": "The runner is not answering.",
-     "fix": "fleet daemon start"},
+     "fix": "fleet ci daemon start"},
     {"id": "sweep_timer", "label": "sweep timer", "state": "off", "detail": "not enabled on this machine",
      "fix": "fleet autosweep --enable"},
     {"id": "office", "label": "head office", "state": "missing", "detail": "no office to reach",
@@ -356,6 +435,121 @@ LOG_LINES = [f"[{time.strftime('%H:%M:%S', time.localtime(ago(1200 - index * 6))
 SENT = {"messages": [], "mail": [], "projects": []}
 
 
+# A stage log the server had to cut. The page must say so and name the command that shows the
+# whole thing, which it cannot be trusted to do until a fixture is actually 256 KB long.
+TRUNCATED_LOG = "\n".join(
+    f"[12:{index // 60 % 60:02d}:{index % 60:02d}] step {index}: "
+    "compiled one module and wrote its output to the work tree" for index in range(4000)
+)[-256 * 1024:]
+
+# The four login states claude_accounts.py can report, each with the sentence it writes.
+LOGIN_STATES = [
+    {"name": "farm-one", "engine": "claude", "state": "logged_in", "read_at": ago(240),
+     "detail": "Logged in. The credentials file was read four minutes ago."},
+    {"name": "farm-two", "engine": "codex", "state": "expired", "read_at": ago(900),
+     "detail": "The token expired. The keepalive timer usually fixes this on its next pass."},
+    {"name": "farm-three", "engine": "claude", "state": "waiting_first_login", "read_at": None,
+     "detail": "Waiting for the first login. No credentials file has been written yet."},
+    {"name": "farm-four", "engine": "claude", "state": "rate_limited", "read_at": ago(120),
+     "detail": "The vendor answered 429, so this farm cannot tell whether the account is in."},
+]
+
+# An account added through the page is waiting for its first login until the fixture clock says
+# the person has finished, which is how the step panel can be seen flipping by itself.
+ADD_LOGIN_SECONDS = float(os.environ.get("STUB_ADD_LOGIN_SECONDS", "4"))
+ADDED_ACCOUNTS = {}
+
+SERVICE_ROWS = [
+    {"id": "agent-runner", "label": "agent runner", "unit": "fleet-daemon.service",
+     "actions": ["start", "stop", "restart"], "command": "fleet daemon start",
+     "note": "Spawns and respawns the lanes."},
+    {"id": "verification-runner", "label": "verification runner", "unit": "fleet-ci.service",
+     "actions": ["start", "stop", "restart"], "command": "fleet ci daemon start",
+     "note": "Verifies a change on top of the current main branch."},
+    {"id": "sweep-timer", "label": "sweep timer", "unit": "fleet-sweep.timer",
+     "actions": ["start", "stop"], "command": "fleet autosweep --enable",
+     "note": "Buries dead worktrees every ten minutes."},
+    {"id": "dashboard", "label": "dashboard", "unit": "tmux session and a listening socket",
+     "actions": [], "command": "fleet dashboard restart", "read_only": True,
+     "note": "This page. It never stops or restarts itself from here."},
+]
+
+
+def services_for(state):
+    """systemctl --user is-active, as the 45 second refresher last read it."""
+    rows = []
+    for index, row in enumerate(SERVICE_ROWS):
+        if state == "empty":
+            live, detail = "inactive", "never started on this machine"
+        elif state == "error" and row["id"] in ("verification-runner", "sweep-timer"):
+            live = "failed" if row["id"] == "verification-runner" else "inactive"
+            detail = ("the unit exited with status 1" if live == "failed"
+                      else "not enabled on this machine")
+        else:
+            live, detail = "active", "running"
+        if row["id"] == "dashboard":
+            live, detail = "active", "answering on 127.0.0.1"
+        rows.append({**row, "state": live, "detail": detail,
+                     "changed_at": ago(600 + index * 120)})
+    return rows
+
+
+JOB_SECONDS = float(os.environ.get("STUB_JOB_SECONDS", "2"))
+JOBS = {}
+
+
+def job_new(action, detail, fails=False, seconds=None, started=None):
+    ident = "job-%04d" % (len(JOBS) + 1)
+    JOBS[ident] = {"id": ident, "action": action, "detail": detail, "fails": fails,
+                   "started": time.time() if started is None else started,
+                   "seconds": JOB_SECONDS if seconds is None else seconds}
+    return job_view(JOBS[ident])
+
+
+def job_view(job):
+    """A job is running until its own span is up, then it is done or it has failed."""
+    elapsed = time.time() - job["started"]
+    running = elapsed < job["seconds"]
+    state = "running" if running else ("failed" if job["fails"] else "done")
+    return {"id": job["id"], "action": job["action"], "detail": job["detail"], "state": state,
+            "started": job["started"], "ended": None if running else job["started"] + job["seconds"],
+            "error": "" if state != "failed" else "the runner refused this request, its log says why"}
+
+
+# One job still running and one that finished, so the list has both without a press.
+job_new("add project", "registering sandbox-two", seconds=3600)
+job_new("drain", "salvaged and stopped 3 lanes", seconds=12, started=ago(400))
+
+
+def power_preview(action):
+    """What an action is about to do, in facts. The sentences a person reads are the page's."""
+    lanes = [{"slug": row["slug"], "project": row["project"],
+              "restart": "until-pr" if index % 2 else "",
+              "has_pr": bool(row.get("pr_url"))}
+             for index, row in enumerate(AGENTS) if row["status"] in ("running", "pr_open")]
+    if action == "throttle":
+        return {"action": action, "lanes": [], "caps": {
+            "cpu_pct": 40, "cpu_cores": 5.6, "mem_high_gb": 24.0, "cores_total": 14,
+            "ci_ram_released": True}}
+    if action == "drain":
+        return {"action": action, "lanes": lanes, "stops": ["fleet-daemon.service",
+                                                            "the verification database"]}
+    if action == "resume":
+        return {"action": action, "lanes": [row for row in lanes if row["restart"]],
+                "starts": ["fleet-daemon.service"]}
+    return None
+
+
+SETTINGS = {
+    "product_name": {"value": "murmur", "file": "FLEET_DASH_TITLE in ~/.fleet/dashboard.env"},
+    "mail_identity": {"value": "dashboard", "file": "FLEET_DASH_HQ_AGENT in ~/.fleet/dashboard.env"},
+    "bind": {"value": "127.0.0.1", "file": "FLEET_DASH_BIND in ~/.fleet/dashboard.env"},
+    "port": {"value": "7878", "file": "FLEET_DASH_PORT in ~/.fleet/dashboard.env"},
+    "token": {"present": True, "file": "~/.fleet/dash-token"},
+    "sweep_interval": {"value": "every 10 minutes", "file": "fleet-sweep.timer"},
+    "respawn_limits": {"value": "6 passes a lane, 40 a day", "file": "~/.fleet/policy.toml"},
+}
+
 # ------------------------------------------------------------------- the server
 
 def config_for(state):
@@ -363,9 +557,12 @@ def config_for(state):
                 "ci_daemon": True, "forge": True}
     if state == "error":
         features.update({"hq": False, "gpu": False, "cpu_temp": True})
+    settings = {name: dict(value) for name, value in SETTINGS.items()}
+    if state == "error":
+        settings["token"] = {"present": False, "file": "~/.fleet/dash-token"}
     return {"title": "murmur", "version": "2026.09.21-a1b2c3d", "features": features,
             "hq_agent": "dashboard", "at": iso(), "stale_since": None, "error": None,
-            "pending": None}
+            "pending": None, "settings": settings}
 
 
 def envelope(stale_since=None, error=None, pending=None, **payload):
@@ -388,7 +585,8 @@ def pending_payload(path):
         answer["pending"] = iso()
         return answer
     key = {"/api/health": "checks", "/api/mail/boxes": "boxes", "/api/mail/thread": "messages",
-           "/api/mail/feed": "events", "/api/mail/who": "sessions"}.get(path, "items")
+           "/api/mail/feed": "events", "/api/mail/who": "sessions",
+           "/api/services": "services", "/api/accounts/login-state": "accounts"}.get(path, "items")
     return envelope(pending=iso(), **{key: []})
 
 
@@ -473,10 +671,52 @@ def payload_for(state, path, query):
             return 500, {"error": "the queue runner is not answering"}
         return 200, QUEUE
     if path == "/api/ci/log":
+        run_id = query.get("id", [""])[0]
+        tier = query.get("tier", [""])[0]
         if state == "empty":
-            return 200, {"id": query.get("id", [""])[0], "tier": query.get("tier", [""])[0], "content": ""}
-        return 200, {"id": query.get("id", [""])[0], "tier": query.get("tier", [""])[0],
-                     "content": "\n".join(LOG_LINES[:40])}
+            return 200, {"id": run_id, "tier": tier, "content": "", "truncated": False,
+                         "missing": True, "message": "No log was recorded for this stage."}
+        if not run_id or not tier:
+            return 400, {"error": "a log needs a run and a stage"}
+        # One stage carries a log the server had to cut, so the page can be made to say so.
+        if tier in ("unit tests", "browser"):
+            return 200, {"id": run_id, "tier": tier, "content": TRUNCATED_LOG,
+                         "truncated": True, "missing": False}
+        return 200, {"id": run_id, "tier": tier, "content": "\n".join(LOG_LINES[:40]),
+                     "truncated": False, "missing": False}
+    if path == "/api/services":
+        if state == "error":
+            # A farm with no systemd user manager is a farm that cannot answer this, and it says
+            # so in a sentence with the command that fixes it. A 500 here would only teach every
+            # other check on this page to expect a failed request.
+            return 200, {"unavailable": "This machine has no user service manager, so services "
+                                        "cannot be read or switched from here.",
+                         "fix": "loginctl enable-linger $USER"}
+        return 200, envelope(services=services_for(state))
+    if path == "/api/jobs":
+        return 200, {"jobs": [job_view(job) for job in JOBS.values()]}
+    if path.startswith("/api/jobs/"):
+        found = JOBS.get(path[len("/api/jobs/"):])
+        if not found:
+            return 404, {"error": "there is no job with that id"}
+        return 200, job_view(found)
+    if path == "/api/power/preview":
+        answer = power_preview(query.get("action", [""])[0])
+        if answer is None:
+            return 400, {"error": "an action is one of throttle, drain, resume"}
+        return 200, answer
+    if path == "/api/accounts/login-state":
+        if state == "empty":
+            return 200, envelope(accounts=[])
+        rows = [dict(row) for row in LOGIN_STATES]
+        for name, at in ADDED_ACCOUNTS.items():
+            waiting = time.time() - at < ADD_LOGIN_SECONDS
+            rows.append({
+                "name": name, "engine": "claude", "read_at": time.time(),
+                "state": "waiting_first_login" if waiting else "logged_in",
+                "detail": ("Waiting for the first login. No credentials file has been written yet."
+                           if waiting else "Logged in. The credentials file was read just now.")})
+        return 200, envelope(accounts=rows)
     if path == "/api/projects":
         return 200, empty_list if state == "empty" else PROJECTS + SENT["projects"]
     if path == "/api/accounts":
@@ -521,6 +761,179 @@ def payload_for(state, path, query):
     return 404, {"error": f"the stub does not serve {path}"}
 
 
+# --------------------------------------------------------------------- the harness
+
+# The Queue and Machine views live in their own files and are registered by index.html and
+# app.js, which another lane owns. This page is the same shell around the same two modules, so
+# the two views can be opened, measured and photographed on their own before the page that
+# links them exists. It reads the same routes, on the same three second tick, through the same
+# core modules: nothing about the views is stubbed here.
+HARNESS = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>murmur</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/queue.css">
+<link rel="stylesheet" href="/static/machine.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar" aria-label="Sections">
+    <div class="side-head"><span class="mark" aria-hidden="true"></span>
+      <span class="mark-name" id="sidebarTitle">murmur</span></div>
+    <nav id="navlinks">
+      <a class="navlink" href="#/queue"><svg viewBox="0 0 24 24" aria-hidden="true"><path
+        d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round"/></svg><span class="label">Queue</span></a>
+      <a class="navlink" href="#/machine"><svg viewBox="0 0 24 24" aria-hidden="true"><path
+        d="M6 6h12v12H6z" fill="none" stroke="currentColor" stroke-width="2"/><path
+        d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" stroke="currentColor"
+        stroke-width="2"/></svg><span class="label">Machine</span></a>
+    </nav>
+    <div class="side-foot"><span id="versionLabel" class="muted">harness</span></div>
+  </aside>
+  <header id="topbar">
+    <h1 id="productTitle">murmur</h1>
+    <span class="crumb-sep" aria-hidden="true">/</span>
+    <span id="viewTitle" class="crumb"></span>
+    <div class="top-right">
+      <span id="capacity" class="pill pause" title="The harness draws no capacity reading."><span
+        class="dot"></span><span class="pill-text">harness</span></span>
+      <label class="field"><span class="sr-only">Project filter</span>
+        <select id="projectFilter"><option value="">All projects</option></select></label>
+      <span id="freshness" class="freshness" aria-live="polite"></span>
+    </div>
+  </header>
+  <main id="view" tabindex="-1"></main>
+</div>
+<div id="drawer" class="drawer" hidden role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+  <div class="drawer-head">
+    <div><h2 id="drawerTitle"></h2><p id="drawerSub" class="muted"></p></div>
+    <button id="drawerClose" class="ghost-button" aria-label="Close">Close</button>
+  </div>
+  <div id="drawerBody" class="drawer-body"></div>
+</div>
+<div id="drawerScrim" class="scrim" hidden></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script type="module">
+import * as api from "/static/core/api.js";
+import * as identity from "/static/core/identity.js";
+import { render, paintDrawer, closeDrawer } from "/static/core/ui.js";
+import queue from "/static/views/queue.js";
+import machine from "/static/views/machine.js";
+
+const VIEWS = new Map([[queue.id, queue], [machine.id, machine]]);
+const ALWAYS = ["/api/config", "/api/access", "/api/identities"];
+const extra = new Set();
+const state = { view: "queue", params: new URLSearchParams(), project: "" };
+
+const context = {
+  get config() { return api.resource("/api/config").data || { title: "murmur", features: {} }; },
+  get features() { return context.config.features || {}; },
+  get access() { return api.access; },
+  get project() { return state.project; },
+  get params() { return state.params; },
+  res: (path) => api.resource(path),
+  watch(path) {
+    if (!extra.has(path)) {
+      extra.add(path);
+      api.pull([path]).then((done) => { if (done.length) paint(); });
+    }
+    return api.resource(path);
+  },
+  drop(path) { extra.delete(path); api.forget(path); },
+  go(view, params) {
+    const query = params ? new URLSearchParams(params).toString() : "";
+    location.hash = "#/" + view + (query ? "?" + query : "");
+  },
+  paint,
+  identity,
+  async refresh(path) { await api.refresh(path); paint(); },
+};
+
+function current() { return VIEWS.get(state.view) || queue; }
+
+function paths() {
+  const view = current();
+  const needs = typeof view.needs === "function" ? view.needs(context) : view.needs || [];
+  return [...ALWAYS, ...needs, ...extra];
+}
+
+function paint() {
+  const view = current();
+  document.getElementById("viewTitle").textContent = view.title;
+  render(document.getElementById("view"), view.render(context));
+  paintDrawer();
+}
+
+async function tick(force) {
+  await api.pull(paths(), Boolean(force));
+  const access = api.resource("/api/access").data;
+  if (access) {
+    api.access.writable = access.writable !== false;
+    api.access.reason = access.reason || "";
+    api.access.loopback = access.loopback !== false;
+    api.access.checked = true;
+    document.body.classList.toggle("readonly", !api.access.writable);
+  }
+  const ids = api.resource("/api/identities").data;
+  if (ids) identity.setRegistry(ids);
+  fillProjects();
+  const label = document.getElementById("freshness");
+  const at = api.oldestAt(paths());
+  label.textContent = at == null ? "Not yet" : "Live";
+  paint();
+}
+
+function route() {
+  const raw = (location.hash || "#/queue").replace(/^#\/?/, "");
+  const [path, query = ""] = raw.split("?");
+  const id = path.split("/")[0] || "queue";
+  if (!VIEWS.has(id)) return;
+  if (id !== state.view) { extra.clear(); closeDrawer(); }
+  state.view = id;
+  state.params = new URLSearchParams(query);
+  for (const link of document.querySelectorAll(".navlink")) {
+    if (link.getAttribute("href") === "#/" + id) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+  paint();
+  tick(true);
+}
+
+/* The real shell fills this select from the project registry and narrows the page to the one
+   picked. The harness does the same, so a view can be measured with the header set. */
+const projectFilter = document.getElementById("projectFilter");
+projectFilter.addEventListener("change", () => { state.project = projectFilter.value; paint(); });
+
+function fillProjects() {
+  const data = api.resource("/api/projects").data;
+  const names = (Array.isArray(data) ? data : []).map((row) => row && row.name).filter(Boolean);
+  if (projectFilter.dataset.names === names.join("|")) return;
+  projectFilter.dataset.names = names.join("|");
+  projectFilter.replaceChildren();
+  for (const [value, label] of [["", "All projects"], ...names.map((name) => [name, name])]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    projectFilter.append(option);
+  }
+  projectFilter.value = state.project;
+}
+
+document.getElementById("drawerClose").addEventListener("click", () => { closeDrawer(); paint(); });
+document.getElementById("drawerScrim").addEventListener("click", () => { closeDrawer(); paint(); });
+window.addEventListener("hashchange", route);
+route();
+setInterval(tick, 3000);
+</script>
+</body>
+</html>
+"""
+
+
 def _epoch(value):
     try:
         return float(value)
@@ -559,6 +972,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._static(path[len("/static/"):])
         if path in ("/", "/index.html"):
             return self._file(PAGE, "text/html; charset=utf-8")
+        if path == "/harness":
+            body = HARNESS.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -590,9 +1011,107 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                     "e2e": body.get("port_base", 5300) + 2},
                    "lanes_open": 0, "last_activity": time.time()}
             SENT["projects"].append(row)
-            return self._json(200, row)
+            # The real server clones the repository, so it answers with a job (amendment 7).
+            job = job_new("add_project", f"registering {body['name']}", seconds=2)
+            return self._json(202, {"job": job})
         if parsed.path in ("/api/mode", "/api/models"):
             return self._json(200, {"ok": True})
+        if parsed.path == "/api/services":
+            service = body.get("service", "")
+            action = body.get("action", "")
+            row = next((item for item in SERVICE_ROWS if item["id"] == service), None)
+            if row is None:
+                return self._json(404, {"error": f"there is no service called {service or 'that'}"})
+            if row.get("read_only"):
+                return self._json(403, {"error": "the dashboard does not stop or restart itself "
+                                                 "from this page"})
+            if action not in row["actions"]:
+                return self._json(400, {"error": f"{service} takes one of "
+                                                 f"{', '.join(row['actions'])}"})
+            return self._json(200, {"ok": True, "service": service, "action": action,
+                                    "state": "inactive" if action == "stop" else "active"})
+        if parsed.path == "/api/agents/kill":
+            slug = body.get("slug", "")
+            if not any(row["slug"] == slug for row in AGENTS + LONG_AGENTS):
+                return self._json(404, {"error": "there is no lane with that name"})
+            return self._json(200, {"ok": True, "slug": slug, "retire": bool(body.get("retire"))})
+        if parsed.path == "/api/power":
+            action = body.get("action", "")
+            if action not in ("throttle", "drain", "resume"):
+                return self._json(400, {"error": "an action is one of throttle, drain, resume"})
+            detail = {"throttle": "capping the farm and stopping new agents",
+                      "drain": "salvaging and stopping every lane",
+                      "resume": "starting the agent runner again"}[action]
+            return self._json(200, {"ok": True,
+                                    "job": job_new(action, detail, fails=self.state() == "error")})
+        if parsed.path == "/api/ci/enqueue":
+            project = str(body.get("project", "")).strip()
+            number = body.get("pr")
+            try:
+                number = int(number)
+            except (TypeError, ValueError):
+                number = 0
+            if not project or number <= 0:
+                return self._json(400, {"error": "a verification needs a project and the number "
+                                                 "of a change"})
+            # One number the runner always refuses, so a failed job can be seen on purpose.
+            fails = number == 999
+            return self._json(200, {"ok": True, "job": job_new(
+                "verify a change", f"{project} #{number}", fails=fails)})
+        if parsed.path == "/api/ci/cancel":
+            wanted = str(body.get("id", ""))
+            known = [row["id"] for bucket in ("running", "queued", "recent")
+                     for row in QUEUE[bucket]]
+            if wanted not in known:
+                return self._json(404, {"error": "there is no run with that id"})
+            return self._json(200, {"ok": True, "id": wanted})
+        if parsed.path == "/api/accounts/add":
+            engine = (body.get("engine") or "claude").strip()
+            if engine == "codex":
+                return self._json(200, {
+                    "name": "codex", "engine": "codex",
+                    "command": "ssh -L 1455:localhost:1455 -t farm codex login",
+                    "steps": ["codex is one shared account: this logs it in again",
+                              "Run the command from wherever you reach this farm",
+                              "A browser opens, authorize with your account",
+                              "Wait for the words Successfully logged in",
+                              "Come back here"]})
+            name = (body.get("name") or "").strip()
+            if not name or not all(part.isalnum() or part in "._-" for part in name):
+                return self._json(400, {"error": "an account name is letters, digits, a dot, "
+                                                 "a dash or an underscore"})
+            ADDED_ACCOUNTS[name] = time.time()
+            return self._json(200, {
+                "name": name, "engine": engine,
+                "command": f"ssh -t farm 'CLAUDE_CONFIG_DIR=$HOME/.fleet/claude-accounts/{name} claude'",
+                "steps": ["Run the command from wherever you reach this farm",
+                          "In the engine's window type /login",
+                          "Choose the account with a subscription",
+                          "Open the address, authorize, paste the code back",
+                          "Type /exit"]})
+        if parsed.path == "/api/accounts/remove":
+            name = (body.get("name") or "").strip()
+            known = [row["name"] for row in ACCOUNTS["accounts"]] + list(ADDED_ACCOUNTS)
+            if name not in known:
+                return self._json(404, {"error": "there is no account with that name"})
+            ADDED_ACCOUNTS.pop(name, None)
+            return self._json(200, {"ok": True, "name": name,
+                                    "backup": f"/home/farm/.fleet/dead-account-backups/{name}.wiped"})
+        if parsed.path == "/api/accounts/refresh":
+            return self._json(200, {"ok": True, "at": iso(),
+                                    "accounts": len(ACCOUNTS["accounts"])})
+        if parsed.path == "/api/projects/remove":
+            name = (body.get("name") or "").strip()
+            row = next((item for item in PROJECTS + SENT["projects"] if item["name"] == name), None)
+            if row is None:
+                return self._json(404, {"error": "there is no project with that name"})
+            if row.get("lanes_open"):
+                return self._json(409, {"error": f"{name} has {row['lanes_open']} open lanes. "
+                                                 "Stop them first, then remove the project."})
+            ports = row.get("ports") or {}
+            block = [value for value in ports.values() if value is not None]
+            return self._json(200, {"ok": True, "name": name,
+                                    "ports_freed": f"{min(block)} to {max(block)}" if block else ""})
         return self._json(404, {"error": "not found"})
 
     # ------------------------------------------------------------- plumbing

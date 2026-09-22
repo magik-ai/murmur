@@ -131,6 +131,15 @@ function applyProp(element, name, value) {
     return;
   }
   if (name === "value") {
+    /* An <option> with no value attribute reports its own label as its value, and props are
+       written before children exist, so at creation the property is already "" and the write
+       below is skipped: the option then answers "Anyone (6)" when it is picked, and a filter
+       set to a label matches no lane. The attribute is the only place an option's value is
+       safe from its own text. */
+    if (element.localName === "option") {
+      element.setAttribute("value", value ?? "");
+      return;
+    }
     if (document.activeElement !== element && element.value !== String(value ?? "")) {
       element.value = value ?? "";
     }
@@ -185,6 +194,21 @@ const AGENT_MEANING = {
   held: "pause",
   queued: "pause",
 };
+
+/* The power setting, in plain words, with what each does to the machine's share. The header
+   and the Board both say it, so the five words are written here once. */
+export const POWER_MODES = [
+  ["full", "Full", "Every core is available to the agents."],
+  ["soft", "Shared", "The agents give way to whatever else you are doing."],
+  ["balanced", "Background", "The agents keep a small share and stay out of the way."],
+  ["hard", "Paused", "No new agent starts, and the running ones are held back hard."],
+  ["auto", "Automatic", "The farm picks one of the four from how busy the machine is."],
+];
+
+export function powerLabel(id) {
+  const found = POWER_MODES.find((row) => row[0] === id);
+  return found ? found[1] : id || "unknown";
+}
 
 export function agentMeaning(status) {
   return AGENT_MEANING[String(status || "").toLowerCase()] || "pause";
@@ -263,6 +287,25 @@ export function skeletonStack(rows = 3, kind = "row") {
 export function widthStyle(percent) {
   const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
   return `width:${clamped}%`;
+}
+
+/* The second and last of them: where the reader dragged the splitter on the Board. The number
+   comes from a pointer and from this browser's own storage, never from a route, and it is
+   clamped to the range the layout can hold before it is written anywhere. */
+export const SPLIT_MIN = 25;
+export const SPLIT_MAX = 75;
+
+export function splitPercent(value, fallback = 62) {
+  // A browser with nothing stored hands back null, and Number(null) is zero, not nothing:
+  // read as a number it put the splitter hard against the left edge on a first visit.
+  if (value == null || value === "") return fallback;
+  const wanted = Number(value);
+  if (!Number.isFinite(wanted)) return fallback;
+  return Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, Math.round(wanted)));
+}
+
+export function splitStyle(percent) {
+  return `--split:${splitPercent(percent)}%`;
 }
 
 /**

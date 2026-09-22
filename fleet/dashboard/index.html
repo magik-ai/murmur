@@ -6,6 +6,8 @@
 <title>murmur</title>
 <link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E">
 <link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/queue.css">
+<link rel="stylesheet" href="/static/machine.css">
 <script>
   // Apply the stored theme before the first paint, so a dark page never flashes light.
   try {
@@ -32,6 +34,7 @@
     <span id="viewTitle" class="crumb"></span>
     <div class="top-right">
       <span id="capacity" class="pill" title=""><span class="dot"></span><span class="pill-text">capacity</span></span>
+      <div id="powerMode" class="segmented power" role="group" aria-label="What share of this machine the agents may use" hidden></div>
       <label class="field">
         <span class="sr-only">Project filter</span>
         <select id="projectFilter"><option value="">All projects</option></select>
@@ -58,8 +61,8 @@
   <div class="palette-box">
     <input id="paletteInput" type="text" autocomplete="off" spellcheck="false" role="combobox"
       aria-controls="paletteList" aria-expanded="true" aria-autocomplete="list"
-      aria-label="Jump to a tab, an agent, a project or a mailbox"
-      placeholder="Jump to a tab, an agent, a project, a mailbox">
+      aria-label="Jump to a tab, an agent, a conversation or a project"
+      placeholder="Jump to a tab, an agent, a conversation, a project">
     <ul id="paletteList" role="listbox"></ul>
   </div>
 </div>

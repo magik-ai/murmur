@@ -341,6 +341,17 @@ code, .mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular
 
 #view { grid-area: view; padding: 20px 24px 64px; min-width: 0; }
 
+/* A tab that holds itself to the window: the shell stops scrolling and the view is given
+   exactly what is left, so the panes inside it can own their own scrolling. */
+body.fixed-page { overflow: hidden; }
+body.fixed-page #app { height: 100vh; }
+body.fixed-page #view {
+  min-height: 0; overflow: hidden; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.readonly-strip { flex: none; margin-bottom: 12px; font-size: 12px; }
+body.fixed-page .readonly-strip { margin-bottom: 0; }
+
 @media (max-width: 900px) {
   :root { --sidebar: 56px; }
   .mark-name, .navlink span.label, .side-foot, .navlink .count { display: none; }
@@ -428,6 +439,8 @@ textarea { height: auto; padding: 7px 8px; resize: vertical; min-height: 64px; l
 }
 .segmented button + button { border-left: 1px solid var(--line); }
 .segmented button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.segmented.power { flex-wrap: wrap; }
+.segmented.power button { padding: 0 8px; font-size: 11px; }
 
 /* Twenty filters wrap onto a second line, which is fine. What is not fine is a row of chips
    at two different heights, so the height is fixed and the rows are centred on each other. */
@@ -719,36 +732,180 @@ button.agent-card {
 .check.skipped .dot { background: var(--tone-pause); }
 .check.unknown .dot { background: var(--tone-pause); }
 
-.mail-panes { display: grid; grid-template-columns: 220px minmax(0, 1fr) 260px; gap: 12px; align-items: start; }
-@media (max-width: 1100px) { .mail-panes { grid-template-columns: 190px minmax(0, 1fr); } .mail-who { display: none; } }
-@media (max-width: 760px) { .mail-panes { grid-template-columns: minmax(0, 1fr); } }
-.boxlist { list-style: none; margin: 0; padding: 6px; display: grid; gap: 2px; }
-.boxlist-more { padding: 0 6px 8px; }
-.boxlist-more .ghost-button { width: 100%; justify-content: center; }
-.boxlist li {
-  display: flex; align-items: center; gap: 8px; height: var(--control);
-  padding: 0 9px; border-radius: var(--radius-sm); cursor: pointer;
+/* -------------------------------------------------------- 10a. the board */
+
+/* Two panes and a bar the reader can drag between them. The position is this browser's, so
+   a farm with a wide queue and a farm with none are both one drag away from being right. */
+.board-canvas {
+  display: grid;
+  grid-template-columns: var(--split, 62%) 12px minmax(0, 1fr);
+  align-items: start;
 }
-.boxlist li:hover { background: var(--surface-2); }
-.boxlist li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
-.boxlist .new {
-  margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px;
+.splitter {
+  align-self: stretch; min-height: 120px;
+  background: none; border: 0; cursor: col-resize;
+  display: grid; place-items: center;
+}
+.splitter::before {
+  content: ""; width: 2px; height: 100%; border-radius: 1px;
+  background: var(--line);
+  transition: background var(--motion) var(--ease);
+}
+.splitter:hover::before, .splitter:focus-visible::before { background: var(--accent); }
+
+.pane { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pane-head { display: flex; align-items: center; gap: 8px; min-height: 26px; min-width: 0; }
+.pane-head h2 { font-size: 13px; letter-spacing: -0.01em; }
+.pane-body { min-width: 0; }
+.pane-foot { font-size: 12px; }
+.pane-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.field-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 12px; }
+.search { min-width: 150px; flex: 1 1 150px; }
+.count-line { font-size: 12px; white-space: nowrap; }
+
+.strip { margin-bottom: 12px; }
+/* A strip is one row of small readings, not a wall of cards: the agents are the reason the
+   reader opened this page, and every tall tile above them is a tile in their way. */
+.grid.strip-tiles { grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 8px; }
+.strip-tiles .tile { padding: 9px 11px; gap: 4px; }
+.strip-tiles .tile .value { font-size: 16px; }
+.strip-tiles .tile .label, .strip-tiles .tile .muted { font-size: 11px; }
+.grid.accounts-row { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+button.account-chip {
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  display: grid; gap: 8px; align-content: start;
+}
+button.account-chip:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); }
+.account-chip.out { border-color: var(--tone-fail); }
+.account-chip .label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.queue-rows { display: grid; gap: 8px; }
+.queue-row {
+  display: grid; gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--line); border-left: 3px solid var(--tone-pause);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 12px;
+}
+.queue-row.run { border-left-color: var(--tone-run); }
+.queue-row.wait { border-left-color: var(--tone-wait); }
+.queue-row.fail { border-left-color: var(--tone-fail); }
+.queue-row.done { border-left-color: var(--tone-done); }
+
+/* One lane's ending, asked about before it happens. The sentence is inside the confirm, so
+   nobody presses a word whose consequence is written somewhere else. */
+.lane-actions { display: grid; gap: 8px; }
+.confirm {
+  display: grid; gap: 8px; padding: 10px 12px;
+  border: 1px solid var(--tone-wait); border-radius: var(--radius-sm);
+  background: var(--tone-wait-bg);
+}
+
+@media (max-width: 1100px) {
+  .board-canvas { grid-template-columns: minmax(0, 1fr); gap: var(--gap); }
+  .splitter { display: none; }
+}
+
+/* --------------------------------------------------------- 10b. the mail */
+
+/* Three panes that hold themselves to the window, each with its own scroll. The page under
+   them never moves, so the composer and the two headers stay where the reader left them. */
+.mail-root { flex: 1; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.mail-app {
+  position: relative;
+  flex: 1; min-height: 0;
+  display: grid; gap: 12px;
+  grid-template-columns: 280px minmax(0, 1fr) 260px;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "list thread people";
+}
+.conversations-pane { grid-area: list; }
+.thread-pane { grid-area: thread; }
+.people-pane { grid-area: people; }
+.convo-select { grid-area: pick; display: none; }
+.convo-select select { max-width: 100%; width: 100%; }
+
+.mail-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.mail-pane .pane-head { flex: none; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.mail-pane .pane-tools { flex: none; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.mail-pane .pane-tools .search { width: 100%; max-width: 100%; }
+.mail-pane .pane-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; }
+.mail-pane .pane-more { padding-top: 8px; }
+.mail-pane .pane-more .ghost-button { width: 100%; justify-content: center; }
+.thread-head { flex-wrap: wrap; row-gap: 6px; }
+.thread-head .glyph { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 12px; background: var(--surface-2); flex: none; }
+.thread-head h2 { flex: 0 1 auto; min-width: 4ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-head .muted { font-size: 11px; white-space: nowrap; }
+.people-count, .people-close { display: none; }
+
+.conversations { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.conversations li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; min-width: 0;
+}
+.conversations li:hover { background: var(--surface-2); }
+.conversations li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.conversations li .glyph { width: 20px; height: 20px; flex: none; border-radius: 5px; display: grid; place-items: center; font-size: 12px; background: var(--surface-2); }
+.conversations li .who { display: flex; flex-direction: column; min-width: 0; }
+.conversations li .who .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversations li .who .muted { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversations .new {
+  margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; flex: none;
   display: inline-grid; place-items: center; border-radius: 9px;
   background: var(--accent); color: var(--accent-text);
   font-family: var(--font-mono); font-size: 11px;
 }
-.thread { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; max-height: 56vh; overflow-y: auto; }
+
+.thread { display: flex; flex-direction: column; gap: 10px; }
+.thread .day {
+  align-self: center; font-size: 11px; color: var(--text-faint);
+  padding: 2px 8px; border-radius: 999px; background: var(--surface-2);
+}
 .msg { display: grid; gap: 3px; }
-.msg .who { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.msg .who { display: flex; align-items: center; gap: 6px; font-size: 12px; flex-wrap: wrap; }
 .msg .who .glyph { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 11px; background: var(--surface-2); }
 .msg .body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg .at { color: var(--text-faint); font-size: 11px; }
-.composer { display: grid; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
-.composer .row { display: flex; gap: 8px; align-items: center; }
+.msg.echo .body { color: var(--text-dim); }
+.person { display: grid; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.person:last-child { border-bottom: 0; }
+.person .who { display: flex; align-items: center; gap: 6px; font-size: 12px; flex-wrap: wrap; }
+.person .who .glyph { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 11px; background: var(--surface-2); }
+.person .at { color: var(--text-faint); font-size: 11px; }
+
+.composer { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); flex: none; }
+.composer .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.composer-label { color: var(--text-dim); font-size: 12px; }
+.composer textarea { min-height: 56px; width: 100%; }
+
 .feed { display: grid; gap: 0; }
-.feed .item { display: flex; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.feed .item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .feed .item:last-child { border-bottom: 0; }
 .feed .at { color: var(--text-faint); font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 88px; }
+
+/* Under this width the people pane is a count in the thread header, and the list it stands
+   for slides over the conversation rather than squeezing it into nothing. */
+@media (max-width: 1100px) {
+  .mail-app { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "list thread"; }
+  .people-count, .people-close { display: inline-flex; }
+  .people-pane { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: min(280px, 90%); z-index: 5; box-shadow: var(--shadow-2); }
+  .mail-app.people-open .people-pane { display: flex; }
+}
+
+/* And under this one the conversations are a select above the thread, because a list and a
+   thread side by side on a phone is two columns of three words each. */
+@media (max-width: 800px) {
+  .grid.strip-tiles { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+  .strip-tiles .tile .value { font-size: 14px; }
+  .mail-app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "pick" "thread";
+  }
+  .conversations-pane { display: none; }
+  .convo-select { display: flex; }
+}
 
 .queue-lists { display: grid; gap: var(--gap); }
 .ci-card { display: grid; gap: 8px; padding: 12px 14px; border-left: 3px solid var(--tone-pause); }

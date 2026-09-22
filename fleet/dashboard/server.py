@@ -29,8 +29,10 @@ import re
 import secrets
 import socket
 import socketserver
+import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from urllib.parse import parse_qs, unquote, urlparse
@@ -109,7 +111,11 @@ TOKEN = os.environ.get("FLEET_DASH_TOKEN", "").strip() or stored_token()
 CI_LOG_TAIL_BYTES = 256 * 1024
 MAX_BODY_BYTES = 256 * 1024
 CI_DAEMON_UNIT = "fleet-ci.service"
+DAEMON_UNIT = "fleet-daemon.service"
 SWEEP_TIMER_UNIT = "fleet-sweep.timer"
+# The tmux session `dashboard/run.sh` starts this server in. The variable exists so a suite can
+# drive a dashboard of its own without reading the farm's.
+DASH_SESSION = os.environ.get("FLEET_DASH_SESSION", "").strip() or "fleet-dashboard"
 DEFAULT_TITLE = "murmur"
 DEFAULT_HQ_AGENT = "dashboard"
 # A tool that does not answer must not hold a page open. Three seconds is longer than any of
@@ -129,6 +135,13 @@ def run_tool(args, timeout=TOOL_TIMEOUT, env=None):
         return 124, "", f"{args[0]} did not answer within {timeout}s"
     except OSError as exc:
         return 1, "", str(exc)
+
+
+def tool_message(rc, out, err, what):
+    """The one line a page can show when a tool refused: its last word, never a traceback and
+    never the whole stream. Every write route answers with this."""
+    lines = [line for line in ((err or "") + "\n" + (out or "")).splitlines() if line.strip()]
+    return (lines[-1].strip() if lines else f"{what} exited {rc}")[:400]
 
 
 def unit_loaded(unit):
@@ -245,6 +258,9 @@ _UNREADABLE_REPORTED = set()
 _CI_REFRESH_TTL = 2.0
 _ci_refresh_cache = {"at": 0.0, "value": None, "stamp": None}
 _ci_refresh_lock = threading.Lock()
+# Set by a request that met a queue the refresher has not observed yet, so the next pass happens
+# in a moment instead of at the end of the current sleep.
+_ci_refresh_wake = threading.Event()
 
 
 
@@ -260,6 +276,21 @@ def _ci_state_stamp(payload):
     return tuple(rows)
 
 
+def ci_refresh_once():
+    """One observation pass over the queue. Runs git and gh, so only the refresher calls it."""
+    try:
+        refreshed = CI.read_state(refresh=True)
+    except Exception:
+        return
+    if not isinstance(refreshed, dict):
+        return
+    stamp = _ci_state_stamp(refreshed)
+    with _ci_refresh_lock:
+        _ci_refresh_cache["value"] = refreshed
+        _ci_refresh_cache["at"] = time.time()
+        _ci_refresh_cache["stamp"] = stamp
+
+
 def _ci_refresher(interval=15.0):
     """Keep the observation snapshot warm off the request path.
 
@@ -268,17 +299,13 @@ def _ci_refresher(interval=15.0):
     of them is true.
     """
     while True:
-        try:
-            refreshed = CI.read_state(refresh=True)
-            if isinstance(refreshed, dict):
-                stamp = _ci_state_stamp(refreshed)
-                with _ci_refresh_lock:
-                    _ci_refresh_cache["value"] = refreshed
-                    _ci_refresh_cache["at"] = time.time()
-                    _ci_refresh_cache["stamp"] = stamp
-        except Exception:
-            pass
-        time.sleep(interval)
+        # Cleared before the pass, never after it: a request that arrives while this one runs is
+        # asking about a queue this pass may not have seen.
+        _ci_refresh_wake.clear()
+        ci_refresh_once()
+        # A wait rather than a sleep: a page that opened on a queue nobody has observed yet is
+        # answered on the next pass instead of at the end of this one.
+        _ci_refresh_wake.wait(interval)
 
 
 def start_ci_refresher():
@@ -287,12 +314,45 @@ def start_ci_refresher():
     return thread
 
 ACCOUNTS_REFRESH_SECONDS = 600  # owner's cadence: each refresh is one API call per account
+# "Refresh now" on the page. One press is one request per account to the vendor, so a second
+# press inside a minute is refused rather than queued: an account that is being throttled is
+# made worse by asking again.
+ACCOUNTS_WAKE_COOLDOWN = 60
+_accounts_wake = threading.Event()
+_accounts_wake_at = {"at": 0.0}
 _accounts_lock = threading.Lock()
 _accounts_snapshot = {"at": None, "accounts": [], "errors": {}}
 
 
 # What a card says when the reader cannot be told anything more useful than "it did not work".
 ACCOUNT_TROUBLE_UNKNOWN = "The farm could not read this account's numbers."
+
+
+def account_trouble_kind(raw):
+    """Which trouble a reader's message is, as a word this file can steer off: "", no_login,
+    expired, rate_limited, unreachable or unknown.
+
+    Read while the text is still the READER'S own words. Once account_trouble has turned it into
+    copy for a person, classifying it again ties this farm's states to its wording: the login
+    table's rate_limited state survived only because `account_trouble`'s sentence happens to
+    carry the words "slow down", and a rewrite of that sentence would have moved every throttled
+    account to "unknown" with no test failing.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    low = text.lower()
+    if "filenotfounderror" in low or "no such file" in low or "never read" in low:
+        return "no_login"
+    if ("401" in low or "403" in low or "expired" in low
+            or "unauthorized" in low or "forbidden" in low):
+        return "expired"
+    if "429" in low or "rate-limited" in low or "rate limited" in low:
+        return "rate_limited"
+    if any(word in low for word in ("urlerror", "timeout", "timed out", "connection", "refused",
+                                    "unreachable", "gaierror", "socket", "ssl", "http 5")):
+        return "unreachable"
+    return "unknown"
 
 
 def account_trouble(raw):
@@ -302,28 +362,29 @@ def account_trouble(raw):
     [Errno 2] No such file or directory: '/private/tmp/...'" tells the reader nothing about what
     to do, and here there are only ever three things to do: log in once, log in again, or wait.
     """
-    text = str(raw or "").strip()
-    if not text:
+    kind = account_trouble_kind(raw)
+    if not kind:
         return ""
-    low = text.lower()
-    if "filenotfounderror" in low or "no such file" in low or "never read" in low:
+    if kind == "no_login":
         return ("This account has no login on the farm yet. Log in once: "
                 f"ssh -t {CA.FARM_ALIAS} claude")
-    if ("401" in low or "403" in low or "expired" in low
-            or "unauthorized" in low or "forbidden" in low):
-        return "The login on this account has expired. Log in again."
-    if "429" in low or "rate-limited" in low or "rate limited" in low:
-        return "The vendor asked the farm to slow down. These numbers refresh by themselves."
-    if any(word in low for word in ("urlerror", "timeout", "timed out", "connection", "refused",
-                                    "unreachable", "gaierror", "socket", "ssl", "http 5")):
-        return "The vendor did not answer the last time the farm asked."
-    return ACCOUNT_TROUBLE_UNKNOWN
+    return {"expired": "The login on this account has expired. Log in again.",
+            "rate_limited": "The vendor asked the farm to slow down. These numbers refresh by "
+                            "themselves.",
+            "unreachable": "The vendor did not answer the last time the farm asked.",
+            "unknown": ACCOUNT_TROUBLE_UNKNOWN}[kind]
 
 
 def plain_account_trouble(rows, errors):
-    """The same rows and errors, with every reason written for a person instead of for a log."""
+    """The same rows and errors, with every reason written for a person instead of for a log.
+
+    The kind is kept next to the sentence, under `trouble`: it is a word, never the reader's
+    text, so nothing that could carry a path or a class name is published, and the states this
+    page draws are decided by what happened rather than by how it was worded.
+    """
     for row in rows:
         if row.get("stale_error"):
+            row["trouble"] = account_trouble_kind(row["stale_error"])
             row["stale_error"] = account_trouble(row["stale_error"])
     return rows, {name: account_trouble(text) for name, text in (errors or {}).items()}
 
@@ -336,6 +397,9 @@ def _accounts_refresher():
     of them is true.
     """
     while True:
+        # Cleared before the pass, never after it: a request that arrives while this one runs is
+        # asking for numbers this pass may already have missed.
+        _accounts_wake.clear()
         try:
             summaries, errors = CA.collect()
             with _accounts_lock:
@@ -386,12 +450,158 @@ def _accounts_refresher():
             CA.write_cache(rows)  # let balance() and the CLI steer off this, not their own burst
         except Exception:
             pass
-        time.sleep(ACCOUNTS_REFRESH_SECONDS)
+        # A wait rather than a sleep: "Refresh now" on the page is this event, not a second
+        # reader of the vendor's endpoint.
+        _accounts_wake.wait(ACCOUNTS_REFRESH_SECONDS)
 
 
 def accounts_snapshot() -> dict:
     with _accounts_lock:
         return json.loads(json.dumps(_accounts_snapshot))
+
+
+# ---------------------------------------------------------------- who is logged in
+#
+# One row per subscription account: logged in, waiting for its first login, expired, or
+# rate-limited so this farm cannot tell. Read from the credentials file on disk and from the last
+# usage snapshot, NEVER by asking the vendor: this row is drawn on every tick of the machine tab,
+# and an account the vendor is already throttling is made worse by asking it again.
+
+LOGIN_STATES = ("logged_in", "waiting_for_login", "expired", "rate_limited", "unknown")
+
+
+def _first_login_sentence(name, config_dir):
+    """How to log this account in, as the CLI itself words it."""
+    if name == "default":
+        return ("This account has no login on the farm yet. Log in once: "
+                f"ssh -t {CA.FARM_ALIAS} claude, then /login")
+    return ("This account has no login on the farm yet. Log in once: "
+            f"ssh -t {CA.FARM_ALIAS} env CLAUDE_CONFIG_DIR={config_dir} claude, then /login")
+
+
+# What the CLI writes an account's login into, and the only file this row is read from.
+CREDENTIALS_FILE = ".credentials.json"
+
+
+def credentials_state(config_dir):
+    """Which of four things this account's credentials file is.
+
+    `CA.token_expiry` answers None for all four of them, and only one of them means the account
+    was never logged in. Drawing a working account as one that was never set up sends the
+    operator to ssh in and run /login, which does not help and may replace a good credential.
+    """
+    path = os.path.join(config_dir or "", CREDENTIALS_FILE)
+    if not os.path.exists(path):
+        return "absent"
+    try:
+        with open(path) as handle:
+            stored = json.load(handle)
+    except (OSError, ValueError, UnicodeError):
+        return "unreadable"                      # torn mid-write, or not ours to read
+    if not isinstance(stored, dict):
+        return "unreadable"
+    oauth = stored.get("claudeAiOauth")
+    if not isinstance(oauth, dict) or not isinstance(oauth.get("expiresAt"), (int, float)):
+        return "incomplete"                      # a schema this farm does not know
+    return "readable"
+
+
+def _claude_login_row(name, config_dir, row, now):
+    expiry = CA.token_expiry(config_dir)
+    trouble = str((row or {}).get("stale_error") or "")
+    # The kind the refresher recorded, never the sentence it published. A row that never went
+    # through the refresher (a test, a snapshot written by an older build) is classified from
+    # whatever text it does carry, which is then still the reader's own.
+    throttled = ((row or {}).get("trouble") or account_trouble_kind(trouble)) == "rate_limited"
+    if expiry is None:
+        stored = credentials_state(config_dir)
+        if stored == "absent":
+            state, sentence = "waiting_for_login", _first_login_sentence(name, config_dir)
+        elif stored == "incomplete":
+            state = "unknown"
+            sentence = (f"This account's {CREDENTIALS_FILE} carries no login token this farm "
+                        "recognises, so it cannot tell whether the account is logged in.")
+        else:
+            state = "unknown"
+            sentence = (f"This farm could not read this account's {CREDENTIALS_FILE}, so it "
+                        "cannot tell whether the account is logged in. It is there; nothing "
+                        "here says it is wrong.")
+    elif expiry <= now:
+        # A 429 masks an expired token, which is why the expiry is read first: the CLI's own list
+        # makes the same correction.
+        state = "expired"
+        sentence = ("The login on this account has expired. The keepalive timer usually "
+                    "refreshes it; log in again if it does not.")
+    elif throttled:
+        state = "rate_limited"
+        sentence = ("The vendor asked the farm to slow down, so it cannot tell how much room is "
+                    "left. These numbers refresh by themselves.")
+    elif trouble:
+        state = "unknown"
+        sentence = "The farm could not read this account's numbers the last time it asked."
+    else:
+        state = "logged_in"
+        sentence = "Logged in. Lanes can be spawned on this account."
+    return {"name": name, "label": CA.display(name), "engine": "claude", "state": state,
+            "sentence": sentence, "expires_at": _iso(expiry) if expiry else None}
+
+
+def _codex_login_row(row, now):
+    expiry = CX.token_expiry()
+    if expiry is None:
+        state = "waiting_for_login"
+        sentence = ("This farm is not logged in to codex yet. Log in once: "
+                    f"ssh -L 1455:localhost:1455 -t {CA.FARM_ALIAS} codex login")
+    elif expiry <= now:
+        state = "expired"
+        sentence = ("The codex login has expired. The keepalive timer usually refreshes it; log "
+                    "in again if it does not.")
+    elif str((row or {}).get("stale_error") or ""):
+        state = "unknown"
+        sentence = "The farm could not read codex's numbers the last time it asked."
+    else:
+        state = "logged_in"
+        sentence = "Logged in. Lanes can be spawned on codex."
+    return {"name": "codex", "label": "codex", "engine": "codex", "state": state,
+            "sentence": sentence, "expires_at": _iso(expiry) if expiry else None}
+
+
+def accounts_login_state(now=None):
+    """Every account's login, as files on this machine say it is. No vendor call, ever."""
+    now = time.time() if now is None else now
+    snapshot = accounts_snapshot()
+    rows = {str(row.get("name")): row for row in snapshot.get("accounts") or []}
+    out = []
+    for name, config_dir in CA.account_dirs().items():
+        row = rows.get(name) or {}
+        answer = _claude_login_row(name, config_dir, row, now)
+        answer["read_at"] = _iso(row["read_at"]) if row.get("read_at") else None
+        out.append(answer)
+    codex = _codex_login_row(rows.get("codex"), now)
+    codex["read_at"] = _iso(rows["codex"]["read_at"]) if (rows.get("codex") or {}).get("read_at") \
+        else None
+    out.append(codex)
+    return {"accounts": out, "at": _iso(snapshot["at"]) if snapshot.get("at") else None,
+            "pending": snapshot.get("at") is None,
+            "cooldown_seconds": ACCOUNTS_WAKE_COOLDOWN}
+
+
+def accounts_refresh_request(now=None):
+    """(status, payload) for POST /api/accounts/refresh: wake the reader, or say when it may be
+    woken again."""
+    now = time.time() if now is None else now
+    since = now - (_accounts_wake_at["at"] or 0)
+    if since < ACCOUNTS_WAKE_COOLDOWN:
+        wait = max(1, int(round(ACCOUNTS_WAKE_COOLDOWN - since)))
+        return 429, {"error": f"These numbers were asked for {int(since)} seconds ago. Each "
+                              "refresh is one request per account to the vendor, so this can be "
+                              f"asked again in {wait} seconds.",
+                     "retry_after": wait}
+    _accounts_wake_at["at"] = now
+    _accounts_wake.set()
+    return 200, {"ok": True, "retry_after": ACCOUNTS_WAKE_COOLDOWN,
+                 "detail": "The farm is reading the accounts now; the numbers arrive in a few "
+                           "seconds."}
 
 
 def ci_queue(refresh=True):
@@ -404,14 +614,11 @@ def ci_queue(refresh=True):
     same last-known queue it rendered before freshness observations existed.
     """
     # A stale `updated` is only meaningful next to "is anything still writing this?". Without it
-    # the pane ages silently and reads as live data that simply has not changed.
+    # the pane ages silently and reads as live data that simply has not changed. The answer comes
+    # from the services snapshot, never from a call on this request: this route is drawn every
+    # few seconds by every open page.
     def _daemon_alive():
-        try:
-            r = subprocess.run(["systemctl", "--user", "is-active", CI_DAEMON_UNIT],
-                               capture_output=True, text=True, timeout=3)
-            return r.stdout.strip() == "active"
-        except Exception:
-            return None
+        return service_alive("ci_runner")
 
     empty = {"updated": None, "running": [], "queued": [], "recent": [],
              "daemon_alive": _daemon_alive()}
@@ -463,24 +670,12 @@ def ci_queue(refresh=True):
         view = shaped(snapshot)
         view["refresh_age"] = max(0, int(time.time() - produced))
         return view
-    # Nothing published yet - the very first draw after a restart. Pay for one refresh inline so the
-    # pane never opens on observations it does not have, then the thread owns it from here.
-    try:
-        refreshed = CI.read_state(refresh=True)
-    except Exception:
-        return shaped(stored)
-    if not isinstance(refreshed, dict):
-        return shaped(stored)
-    with _ci_refresh_lock:
-        _ci_refresh_cache["value"] = refreshed
-        _ci_refresh_cache["at"] = time.time()
-        _ci_refresh_cache["stamp"] = _ci_state_stamp(refreshed)
-    return shaped(refreshed)
-    # Several panes poll, and each stage-log open asks again; one refresh per couple of seconds is
-    # as fresh as a human can perceive and keeps a busy run from serialising the whole dashboard.
-    if not isinstance(refreshed, dict):
-        return shaped(stored)
-    return shaped(refreshed)
+    # Nothing published for THIS queue yet: the first draw after a restart, or a queue that moved
+    # under the refresher. Serve what is on disk and wake the refresher, which owns it from here.
+    # Paying for the refresh inline was a read that ran git and gh and wrote the state file back,
+    # and several panes poll this route every few seconds.
+    _ci_refresh_wake.set()
+    return shaped(stored)
 
 
 def ci_log_tail(candidate_id, tier_name):
@@ -862,6 +1057,557 @@ def health():
     return _envelope(snapshot, {"checks": snapshot.get("checks") or []})
 
 
+# ---------------------------------------------------------------- services
+#
+# Four rows in the machine's control room: the agent runner, the verification runner, the sweep
+# timer, and this dashboard. Every fact here costs a process, so all four are read by the 45
+# second refresher and NEVER on a request: a page redrawing every few seconds would otherwise ask
+# systemd a few thousand questions an hour.
+#
+# The dashboard's own row is read from its tmux session and its listening socket, the two things
+# `dashboard/run.sh status` looks at, and it is read-only: a page that can stop itself answers the
+# next request with nothing at all.
+
+# `fix` is written out next to `start`, never derived from `verb`: `fleet autosweep` takes
+# on|off|status, so a fix built as "<verb> start" told the reader to run `fleet autosweep start`,
+# which falls through to status, prints "autosweep OFF" and changes nothing. A row that says the
+# sweep is off and hands over a command that does nothing reads as a broken farm.
+SERVICE_UNITS = (
+    {"id": "agent_runner", "label": "Agent runner", "unit": DAEMON_UNIT,
+     "what": "respawns a lane that carries a restart policy until it delivers",
+     "stopped": "stopped, so no lane is respawned when it ends before delivering",
+     "verb": "fleet daemon", "start": ["daemon", "start"], "stop": ["daemon", "stop"],
+     "fix": "fleet daemon start"},
+    {"id": "ci_runner", "label": "Verification runner", "unit": CI_DAEMON_UNIT,
+     "what": "verifies one queued change at a time against main",
+     "stopped": "stopped, so the queue is not being worked",
+     "verb": "fleet ci daemon", "start": ["ci", "daemon", "start"],
+     "stop": ["ci", "daemon", "stop"], "fix": "fleet ci daemon start"},
+    {"id": "sweep_timer", "label": "Sweep timer", "unit": SWEEP_TIMER_UNIT,
+     "what": "buries merged worktrees and resolved cards every few minutes",
+     "stopped": "off, so nothing buries merged worktrees or resolved cards",
+     "verb": "fleet autosweep", "start": ["autosweep", "on"], "stop": ["autosweep", "off"],
+     "fix": "fleet autosweep on"},
+)
+SERVICE_BY_ID = {spec["id"]: spec for spec in SERVICE_UNITS}
+DASHBOARD_SERVICE_ID = "dashboard"
+# What a page is told when it asks this server to stop or restart itself.
+DASHBOARD_SERVICE_REFUSAL = ("This dashboard cannot start, stop or restart itself: the answer to "
+                             "that request would never arrive. Run `fleet dashboard restart` in a "
+                             "terminal on the farm.")
+
+
+def _systemd_duration(text):
+    """Seconds out of a systemd duration, e.g. "19h 41min 40.045077s".
+
+    systemd formats a property as a timespan when, and only when, its NAME carries `USec`:
+    NextElapseUSecMonotonic prints as "1d 1min 17.351398s", so it is read here rather than
+    divided by a million.
+    """
+    total = 0.0
+    for number, unit in re.findall(r"([\d.]+)(us|ms|min|h|d|s)", text or ""):
+        total += {"us": 1e-6, "ms": 1e-3, "s": 1, "min": 60, "h": 3600,
+                  "d": 86400}[unit] * float(number)
+    return total
+
+
+def _systemd_monotonic(text):
+    """Seconds since boot out of a monotonic timestamp property, whichever way systemd printed it.
+
+    ActiveEnterTimestampMonotonic has no `USec` in its name, so systemd prints it as a bare count
+    of microseconds ("586929396"). Reading that as a timespan found no units in it and answered
+    zero, which is why every service row said it had never become active.
+    """
+    text = (text or "").strip()
+    if re.fullmatch(r"\d+", text):
+        return int(text) / 1e6
+    return _systemd_duration(text)
+
+
+def _unit_properties(unit, *names):
+    """{property: value} for one unit, or {} when the user manager cannot answer."""
+    args = ["systemctl", "--user", "show", unit]
+    for name in names:
+        args += ["-p", name]
+    rc, out, _err = run_tool(args)
+    if rc != 0:
+        return {}
+    facts = {}
+    for line in (out or "").splitlines():
+        key, _, value = line.partition("=")
+        facts[key.strip()] = value.strip()
+    return facts
+
+
+def _unit_since(facts, now=None):
+    """When this unit last became active, as an ISO stamp, or None.
+
+    Read from the MONOTONIC property and turned into wall clock here, so the answer is on the one
+    clock every other time on this page is on, without parsing systemd's own date format.
+    """
+    seconds = _systemd_monotonic(facts.get("ActiveEnterTimestampMonotonic"))
+    if seconds <= 0:
+        return None
+    try:
+        ago = time.clock_gettime(time.CLOCK_MONOTONIC) - seconds
+    except (AttributeError, OSError):
+        return None
+    if ago < 0:
+        return None
+    return _iso((time.time() if now is None else now) - ago)
+
+
+def _unit_row(spec):
+    """One service's row, as the refresher reads it."""
+    row = {"id": spec["id"], "label": spec["label"], "unit": spec["unit"],
+           "what": spec["what"], "verb": spec["verb"], "state": "unknown", "detail": "",
+           "since": None, "actions": ["start", "stop", "restart"], "read_only": False, "fix": ""}
+    rc, out, err = run_tool(["systemctl", "--user", "is-active", spec["unit"]])
+    word = ((out or "") + (err or "")).strip().splitlines()
+    word = word[0].strip() if word else ""
+    if rc == 127:
+        row.update(state="absent", actions=[], read_only=True,
+                   detail="there is no systemd user manager on this machine, so this service "
+                          "cannot run here",
+                   fix="run this farm on a machine with a systemd user manager")
+        return row
+    if rc == 124:
+        row.update(state="unknown", detail="the user manager did not answer within "
+                                           f"{TOOL_TIMEOUT}s")
+        return row
+    facts = _unit_properties(spec["unit"], "LoadState", "ActiveEnterTimestampMonotonic")
+    if facts.get("LoadState") not in ("loaded", None, ""):
+        # Never installed, or installed and then removed. Starting it is what installs it, so the
+        # row keeps its actions and says what is true today.
+        row.update(state="absent", detail=f"{spec['unit']} is not installed on this machine",
+                   fix=spec["fix"])
+        return row
+    row["since"] = _unit_since(facts)
+    if word == "active":
+        row.update(state="active", detail=spec["what"])
+    elif word == "failed":
+        row.update(state="failed", detail=f"{spec['unit']} failed; it is not doing its work",
+                   fix=spec["fix"])
+    elif word in ("activating", "deactivating", "reloading"):
+        row.update(state="changing", detail=f"{spec['unit']} is {word}")
+    else:
+        row.update(state="inactive", detail=spec["stopped"], fix=spec["fix"])
+    return row
+
+
+# Where the kernel publishes its sockets, and how many bytes an address is in each. Named so a
+# test can point it at a file of its own: the format is the kernel's and does not change, but
+# this machine's own sockets do, and a suite must not depend on them.
+PROC_TCP_FILES = (("/proc/net/tcp", 4), ("/proc/net/tcp6", 16))
+
+
+def listening_socket(port):
+    """"<address>:<port>" something is LISTENing on, or "" when nothing is, read from /proc.
+
+    A file read, not a tool call: this is asked once per refresh and the answer decides whether
+    the dashboard's own row says it is up. Off Linux there is no such file, every open fails,
+    and the answer is "", which the dashboard's row already words as "this machine does not say
+    which socket it is listening on".
+    """
+    for path, size in PROC_TCP_FILES:
+        try:
+            with open(path) as handle:
+                lines = handle.read().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            fields = line.split()
+            if len(fields) < 4 or fields[3] != "0A":          # 0A = LISTEN
+                continue
+            raw, _, hexport = fields[1].partition(":")
+            try:
+                if int(hexport, 16) != int(port):
+                    continue
+                packed = b"".join(struct.pack("<I", int(raw[index:index + 8], 16))
+                                  for index in range(0, len(raw), 8))
+                address = ipaddress.ip_address(packed[:size])
+            except (ValueError, struct.error):
+                continue
+            return f"[{address}]:{port}" if address.version == 6 else f"{address}:{port}"
+    return ""
+
+
+def _dashboard_row():
+    """This server's own row, read the way `dashboard/run.sh status` reads it."""
+    row = {"id": DASHBOARD_SERVICE_ID, "label": "This dashboard", "unit": None,
+           "what": "serves this page", "verb": "fleet dashboard", "state": "active",
+           "detail": "", "since": None, "actions": [], "read_only": True,
+           "fix": "fleet dashboard restart", "refusal": DASHBOARD_SERVICE_REFUSAL}
+    socket_address = listening_socket(PORT)
+    rc, _out, _err = run_tool(["tmux", "has-session", "-t", DASH_SESSION])
+    in_tmux = rc == 0
+    if in_tmux and socket_address:
+        row["detail"] = f"listening on {socket_address}, in the tmux session {DASH_SESSION}"
+    elif in_tmux:
+        row.update(state="failed",
+                   detail=f"the tmux session {DASH_SESSION} is up but nothing is listening on "
+                          f"port {PORT}")
+    elif socket_address:
+        row["detail"] = (f"listening on {socket_address}, started outside the tmux session "
+                         f"{DASH_SESSION}, so `fleet dashboard restart` will not find it")
+    else:
+        row["detail"] = ("serving this page; this machine does not say which socket it is "
+                         "listening on")
+    return row
+
+
+_services_snapshot = _blank_snapshot(services=[])
+
+
+def services_refresh():
+    rows = []
+    for spec in SERVICE_UNITS:
+        try:
+            rows.append(_unit_row(spec))
+        except Exception as exc:
+            # One row that will not read is a fact about that unit, not a reason to lose the
+            # other three, and never a traceback on a page.
+            rows.append({"id": spec["id"], "label": spec["label"], "unit": spec["unit"],
+                         "what": spec["what"], "verb": spec["verb"], "state": "unknown",
+                         "detail": f"this farm could not read {spec['unit']}"
+                                   f" ({type(exc).__name__})",
+                         "since": None, "actions": [], "read_only": False, "fix": ""})
+    try:
+        rows.append(_dashboard_row())
+    except Exception:
+        rows.append({"id": DASHBOARD_SERVICE_ID, "label": "This dashboard", "unit": None,
+                     "what": "serves this page", "verb": "fleet dashboard", "state": "active",
+                     "detail": "serving this page", "since": None, "actions": [],
+                     "read_only": True, "fix": "fleet dashboard restart",
+                     "refusal": DASHBOARD_SERVICE_REFUSAL})
+    with _snapshot_lock:
+        _snapshot_succeeded(_services_snapshot, {"services": rows})
+
+
+def services():
+    snapshot = _copy_snapshot(_services_snapshot)
+    return _envelope(snapshot, {"services": snapshot.get("services") or []})
+
+
+def service_row(identifier):
+    """One row out of the last snapshot, or None when the first pass has not run."""
+    for row in _copy_snapshot(_services_snapshot).get("services") or []:
+        if row.get("id") == identifier:
+            return row
+    return None
+
+
+def service_alive(identifier):
+    """True, False, or None when nothing has been read yet. The third answer matters: "nothing
+    is working the queue" and "nobody has looked" are different sentences."""
+    row = service_row(identifier)
+    return None if row is None else row.get("state") == "active"
+
+
+# `fleet autosweep on` writes two unit files and reloads the user manager; the others enable a
+# unit and wait for it. A minute is longer than any of them takes and short enough that a wedged
+# user manager reads as a failed action rather than as a page that never answers.
+SERVICE_ACTION_TIMEOUT = 60
+SERVICE_ACTIONS = ("start", "stop", "restart")
+
+
+def service_action(body):
+    """(status, payload) for POST /api/services.
+
+    `fleet` has no restart verb for any of these, so a restart is the stop and then the start, in
+    that order, stopping at the first step that refuses.
+    """
+    identifier = str(body.get("service") or "").strip()
+    action = str(body.get("action") or "").strip().lower()
+    if identifier == DASHBOARD_SERVICE_ID:
+        return 400, {"error": DASHBOARD_SERVICE_REFUSAL, "fix": "fleet dashboard restart"}
+    spec = SERVICE_BY_ID.get(identifier)
+    if spec is None:
+        return 400, {"error": f"'{identifier}' is not a service on this farm",
+                     "services": [item["id"] for item in SERVICE_UNITS] + [DASHBOARD_SERVICE_ID]}
+    if action not in SERVICE_ACTIONS:
+        return 400, {"error": "an action is start, stop or restart"}
+    steps = {"start": [spec["start"]], "stop": [spec["stop"]],
+             "restart": [spec["stop"], spec["start"]]}[action]
+    said = []
+    for step in steps:
+        # No `--` here, deliberately: fleet parses with a hand written case loop, which never
+        # reads a leading dash as an option and refuses a bare `--` as an unknown flag. Every
+        # word below is this server's own, never the request's.
+        rc, out, err = run_tool([fleet_bin()] + step, timeout=SERVICE_ACTION_TIMEOUT)
+        if rc != 0:
+            return 400, {"error": tool_message(rc, out, err, "fleet " + " ".join(step)),
+                         "service": identifier, "action": action}
+        said.append((out or "").strip().splitlines()[-1] if (out or "").strip() else "")
+    # The row a page draws next must be the new one, not the one from before the press.
+    _refresh_wake.set()
+    return 200, {"ok": True, "service": identifier, "action": action,
+                 "detail": " ".join(word for word in said if word)[:400],
+                 "verb": spec["verb"]}
+
+
+# ------------------------------------------------------------ the machine's live numbers
+#
+# Load, memory, GPU, the power mode and the sweep countdown. Each of these asks the machine
+# something (a sensor, docker, the user manager), so they are read on their own short cadence and
+# served from memory. Five seconds is faster than a person perceives and is a fixed cost, where a
+# read path was a cost per open page per tick.
+
+MACHINE_REFRESH_SECONDS = 5
+_machine_snapshot = _blank_snapshot(metrics={}, mode={}, sweep={})
+
+
+# What each reader is called on the page, so a failure is a sentence and never a class name.
+MACHINE_PARTS = {"metrics": "live numbers", "mode": "power mode", "sweep": "sweep countdown"}
+
+
+def machine_refresh():
+    """One pass over the machine's readers.
+
+    A reader that threw keeps its last good value, and the pass is a FAILURE: republishing an
+    hour-old load with `at` set to now and no error is the very thing the envelope was added to
+    prevent, and the strip would say "now" over numbers nobody can vouch for.
+    """
+    parts, failed = {}, []
+    for key, reader in (("metrics", M.collect), ("mode", MODE.status),
+                        ("sweep", sweep_status)):
+        try:
+            value = reader()
+        except Exception:
+            # One sensor that will not answer must not cost the strip the other two.
+            with _snapshot_lock:
+                value = _machine_snapshot.get(key) or {}
+            failed.append(MACHINE_PARTS[key])
+        parts[key] = value
+    with _snapshot_lock:
+        if failed:
+            _machine_snapshot.update(parts)
+            _snapshot_failed(_machine_snapshot,
+                             "this farm could not read its " + " and ".join(failed))
+        else:
+            _snapshot_succeeded(_machine_snapshot, parts)
+
+
+def _machine_part(key):
+    snapshot = _copy_snapshot(_machine_snapshot)
+    payload = snapshot.get(key) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return _envelope(snapshot, payload)
+
+
+def _machine_refresher(interval=MACHINE_REFRESH_SECONDS):
+    while True:
+        try:
+            machine_refresh()
+        except Exception:
+            pass
+        time.sleep(interval)
+
+
+def start_machine_refresher():
+    thread = threading.Thread(target=_machine_refresher, name="machine-refresher", daemon=True)
+    thread.start()
+    return thread
+
+
+# ---------------------------------------------------------------- long actions, as jobs
+#
+# A write that can outlast a request (draining the farm, resuming it, queueing a verification)
+# answers at once with a job id and runs on a thread of its own. The record is a file under
+# $FLEET_STATE/jobs, so a page that was reloaded, or a second page, can still read what happened;
+# and a second press of a running action is refused rather than quietly run twice.
+
+JOB_OUTPUT_TAIL = 4000        # what a person reads of a job that went wrong, not the whole log
+JOB_KEEP_SECONDS = 24 * 3600  # a finished job is kept for a day, then it is nobody's business
+JOB_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_jobs_lock = threading.Lock()
+
+
+def jobs_dir():
+    return os.path.join(STATE, "jobs")
+
+
+def _job_path(job_id):
+    return os.path.join(jobs_dir(), job_id + ".json")
+
+
+def _write_job(record):
+    """One record, written whole. A half written job is a job a page reads as broken."""
+    os.makedirs(jobs_dir(), exist_ok=True)
+    path = _job_path(record["id"])
+    temporary = path + ".writing"
+    with open(temporary, "w") as handle:
+        json.dump(record, handle)
+    os.replace(temporary, path)
+
+
+def _process_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+    except (TypeError, ValueError, ProcessLookupError):
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _job_as_read(record):
+    """A job whose dashboard is gone is not running, whatever its file says. Without this a
+    restart mid-drain would leave the control disabled for ever, waiting on nothing."""
+    if record.get("state") != "running" or record.get("pid") == os.getpid():
+        return record
+    if _process_alive(record.get("pid")):
+        return record
+    return dict(record, state="failed", ended_at=record.get("ended_at") or _now_iso(),
+                error="the dashboard stopped while this was running, so how it ended is unknown")
+
+
+def read_job(job_id):
+    """(status, payload) for GET /api/jobs/<id>."""
+    job_id = (job_id or "").strip()
+    if not job_id or not JOB_ID.fullmatch(job_id):
+        return 400, {"error": "invalid job id"}
+    try:
+        with open(_job_path(job_id)) as handle:
+            record = json.load(handle)
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return 404, {"error": f"there is no job '{job_id}' on this farm"}
+    if not isinstance(record, dict):
+        return 404, {"error": f"there is no job '{job_id}' on this farm"}
+    return 200, _job_as_read(record)
+
+
+def _all_jobs():
+    records = []
+    for path in glob.glob(os.path.join(jobs_dir(), "*.json")):
+        try:
+            with open(path) as handle:
+                record = json.load(handle)
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            continue
+        if isinstance(record, dict) and record.get("id"):
+            records.append(_job_as_read(record))
+    records.sort(key=lambda record: str(record.get("started_at") or ""), reverse=True)
+    return records
+
+
+def running_jobs():
+    """What is in flight right now, newest first: the list every control consults before it
+    lets itself be pressed."""
+    return [record for record in _all_jobs() if record.get("state") == "running"]
+
+
+def _forget_old_jobs(now=None):
+    """Finished records older than a day. A page only ever asks about what it started."""
+    now = time.time() if now is None else now
+    for path in glob.glob(os.path.join(jobs_dir(), "*.json")):
+        try:
+            if os.path.getmtime(path) > now - JOB_KEEP_SECONDS:
+                continue
+            with open(path) as handle:
+                record = json.load(handle)
+            if isinstance(record, dict) and _job_as_read(record).get("state") == "running":
+                continue
+            os.remove(path)
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            continue
+
+
+def _job_output(out, err):
+    text = ((out or "") + ("\n" if out and err else "") + (err or "")).strip()
+    return text[-JOB_OUTPUT_TAIL:]
+
+
+def _new_job_id(action):
+    return f"{action}-{int(time.time())}-{secrets.token_hex(3)}"
+
+
+def _finish_job(record, rc, out, err):
+    """The record as it ends, written whole. Returned as well, so a synchronous write can hand
+    its own outcome straight back to the page."""
+    finished = dict(record, state="done" if rc == 0 else "failed", ended_at=_now_iso(),
+                    exit_code=rc, output=_job_output(out, err))
+    if rc != 0:
+        finished["error"] = tool_message(rc, out, err, record["command"])
+    try:
+        _write_job(finished)
+    except OSError as exc:
+        print(f"fleet dashboard: job {record['id']} could not be recorded: {exc}",
+              file=sys.stderr)
+    return finished
+
+
+def _run_job(record, args, timeout):
+    rc, out, err = run_tool(args, timeout=timeout)
+    _finish_job(record, rc, out, err)
+
+
+def claim_job(action, args=None, label=None, key=None, command=None):
+    """(202, record) when this farm is free to run it, (409, payload) when it is not.
+
+    The interlock is the RESOURCE, not the verb. Drain and resume are `fleet game-mode on` and
+    `fleet game-mode off`, two names for the one power state this farm has, so a check that only
+    compared verbs let both run at once and left the operator drained or resumed by whichever
+    call happened to land last. Actions that share a resource share a key; the label stays per
+    press, so the refusal still names what is actually running.
+
+    `command` is for a write this server performs itself instead of by running a tool: the
+    registry rewrite is one, and it shares its resource with `fleet add-project`.
+    """
+    label = label or action
+    key = key or action
+    with _jobs_lock:
+        already = next((record for record in running_jobs()
+                        if (record.get("key") or record.get("action")) == key), None)
+        if already is not None:
+            # Its own label, not this press's: the page is being told about the job in flight.
+            return 409, {"error": f"{already.get('label') or label} is already running on this "
+                                  "farm",
+                         "job": already}
+        _forget_old_jobs()
+        record = {"id": _new_job_id(action), "action": action, "key": key, "label": label,
+                  "command": (command or
+                              " ".join([os.path.basename(args[0])] + list(args[1:])))[:400],
+                  "state": "running", "started_at": _now_iso(), "ended_at": None,
+                  "output": "", "pid": os.getpid()}
+        try:
+            _write_job(record)
+        except OSError as exc:
+            return 500, {"error": f"this farm's job directory could not be written ({exc})"}
+    return 202, record
+
+
+def start_job(action, args, timeout, label=None, key=None):
+    """(status, payload) for a write that runs on a thread.
+
+    202 and the record when it started, 409 and the record of the one already holding this
+    resource: pressing Drain twice must not drain twice, and pressing Resume during a drain must
+    not undo it halfway.
+    """
+    code, payload = claim_job(action, args, label=label, key=key)
+    if code != 202:
+        return code, payload
+    threading.Thread(target=_run_job, args=(payload, list(args), timeout),
+                     name="job-" + payload["id"], daemon=True).start()
+    return 202, {"job": payload}
+
+
+def run_job_now(action, args, timeout, label=None, key=None):
+    """(status, payload, rc, out, err) for a short write that answers with its own result.
+
+    It still takes the resource while it runs, so it cannot overlap a job that holds the same
+    one, and it leaves the same finished record behind for a page that was reloaded.
+    """
+    code, payload = claim_job(action, args, label=label, key=key)
+    if code != 202:
+        return code, payload, None, "", ""
+    rc, out, err = run_tool(args, timeout=timeout)
+    return 200, {"job": _finish_job(payload, rc, out, err)}, rc, out, err
+
+
 # ---------------------------------------------------------------- projects
 #
 # Which repositories this farm serves. The registry is `projects.toml`, written by
@@ -885,6 +1631,11 @@ CLOSED_LANE_STATUSES = {"aborted", "cancelled", "done", "done_no_pr", "ended", "
                         "killed", "merged", "stopped"}
 # add-project may clone a repository, which is the one thing here that is allowed to take a while.
 PROJECT_ADD_TIMEOUT = 300
+# The registry is one file, so the writes to it take one key and wait for each other.
+PROJECT_WRITE_KEY = "projects"
+# How far apart two projects' port bases are put. A lane is handed base+slot for its dev server,
+# so a block is as many ports as a project could ever have lanes, with room to spare.
+PORT_BLOCK_SIZE = 100
 
 
 def fleet_bin():
@@ -973,10 +1724,46 @@ def projects():
     return rows
 
 
+def _registered_port_base(table):
+    """One project's port base, in either spelling, or None."""
+    ports = table.get("ports") if isinstance(table.get("ports"), dict) else {}
+    for candidate in (ports.get("vite_base"), table.get("port_base")):
+        try:
+            if candidate is not None:
+                return int(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def next_port_base():
+    """The next free block above the highest one registered, or None when there is no room left.
+
+    None rather than the ceiling: clamping handed the same numbers to the project at the top and
+    to the one after it, which is the one thing this function exists to prevent. A farm that has
+    run out of blocks is a sentence for a person, not a silent collision.
+    """
+    highest = None
+    for table in _projects_registry().values():
+        base = _registered_port_base(table)
+        if base is not None and (highest is None or base > highest):
+            highest = base
+    if highest is None:
+        return DEFAULT_PORTS["web"]
+    following = highest + PORT_BLOCK_SIZE
+    return following if following <= PORT_BASE_MAX else None
+
+
 def add_project(body):
     """(status, payload) for POST /api/projects. Registering is `fleet add-project`'s job,
     never a second writer of the same file: a page that edited projects.toml itself would be a
-    second implementation of the one thing that knows how to refuse a duplicate."""
+    second implementation of the one thing that knows how to refuse a duplicate.
+
+    It answers 202 and a job id, like drain and enqueue: `fleet add-project` clones the
+    repository, so holding the connection open for it meant a browser waiting up to five
+    minutes, an outcome lost on a reload, and a second press starting a second clone because
+    nothing was there to refuse it.
+    """
     name = str(body.get("name") or "").strip()
     repo = str(body.get("repo") or "").strip()
     if not PROJECT_NAME.fullmatch(name):
@@ -988,7 +1775,17 @@ def add_project(body):
     # literally whatever it starts with, so no separator is needed or wanted.
     args = [fleet_bin(), "add-project", "--name", name, "--repo", repo]
     port_base = body.get("port_base")
-    if port_base not in (None, ""):
+    if port_base in (None, ""):
+        # Not the CLI's own default, which is the same 5200 for every project: the next free
+        # block above the highest registered one, so the second project does not land on the
+        # first one's ports.
+        port_base = next_port_base()
+        if port_base is None:
+            return 400, {"error": f"the highest port block on this farm is already at "
+                                  f"{PORT_BASE_MAX}, so there is no free block above it. Remove "
+                                  "a project, or give this one a port base of its own between "
+                                  f"{PORT_BASE_MIN} and {PORT_BASE_MAX}."}
+    else:
         try:
             port_base = int(port_base)
         except (TypeError, ValueError):
@@ -996,17 +1793,127 @@ def add_project(body):
         if not PORT_BASE_MIN <= port_base <= PORT_BASE_MAX:
             return 400, {"error": f"port_base must be between {PORT_BASE_MIN} and "
                                   f"{PORT_BASE_MAX}"}
-        args += ["--port-base", str(port_base)]
-    rc, out, err = run_tool(args, timeout=PROJECT_ADD_TIMEOUT)
-    if rc != 0:
-        lines = [line for line in ((err or "") + "\n" + (out or "")).splitlines() if line.strip()]
-        return 400, {"error": (lines[-1].strip() if lines else
-                               f"fleet add-project exited {rc}")[:400]}
+    args += ["--port-base", str(port_base)]
+    code, payload = start_job("add_project", args, PROJECT_ADD_TIMEOUT,
+                              label=f"Adding {name}", key=PROJECT_WRITE_KEY)
+    payload.update({"name": name, "repo": repo, "port_base": port_base,
+                    "sentence": f"{name} is being registered and its repository cloned. The "
+                                "project appears in this list when that is done."})
+    return code, payload
+
+
+TABLE_HEADER = re.compile(r"^\s*\[\s*([^\]]+?)\s*\]")
+
+
+def _table_owner(line):
+    """Which project a `[table]` line belongs to, or None when the line is not a header.
+
+    `fleet add-project` writes the name quoted, an operator writes it bare, and a sub-table is
+    `[<name>.ports]` in either spelling. All four forms name the same project.
+    """
+    match = TABLE_HEADER.match(line)
+    if not match:
+        return None
+    return match.group(1).replace('"', "").replace("'", "").split(".")[0].strip()
+
+
+def _registry_without(text, name):
+    """The registry text with one project's tables removed and everything else left alone.
+
+    Line based on purpose: this file is the operator's, with their comments and their order in
+    it, and a rewrite through a TOML writer would hand it back without either.
+    """
+    kept, dropping = [], False
+    for line in text.splitlines(keepends=True):
+        owner = _table_owner(line)
+        if owner is not None:
+            dropping = owner == name
+        if not dropping:
+            kept.append(line)
+    return "".join(kept)
+
+
+def remove_project(body):
+    """(status, payload) for POST /api/projects/remove.
+
+    The registry only. Worktrees, checkouts and lane records are not this route's business, and
+    a project with work in flight is not removed at all.
+
+    The rewrite runs under the same key as `fleet add-project`. Both write `projects.toml`, the
+    server is threaded, and add-project runs for up to five minutes next to this: a remove whose
+    read landed before an add's append and whose replace landed after it dropped the new
+    project, and the guard below could not see it, because it only compares against the text
+    this reader read.
+    """
+    name = str(body.get("name") or "").strip()
+    if not PROJECT_NAME.fullmatch(name):
+        return 400, {"error": "a project name is letters, digits, dot, dash or underscore, "
+                              "up to 40 characters"}
     row = next((item for item in projects() if item["name"] == name), None)
     if row is None:
-        return 400, {"error": f"fleet add-project reported success but '{name}' is not in the "
-                              "registry"}
-    return 200, row
+        return 404, {"error": f"'{name}' is not a project registered on this farm"}
+    if row["lanes_open"] > 0:
+        count = row["lanes_open"]
+        return 409, {"error": f"{name} has {count} lane(s) open. Stop or retire them first, "
+                              "then remove the project.",
+                     "lanes_open": count}
+    code, claim = claim_job("remove_project", label=f"Removing {name}", key=PROJECT_WRITE_KEY,
+                            command=f"remove {name} from projects.toml")
+    if code != 202:
+        return code, claim
+    try:
+        status, payload = _registry_without_project(name, row)
+    except Exception:
+        _finish_job(claim, 1, "", f"removing {name} did not complete")
+        raise
+    _finish_job(claim, 0 if status == 200 else 1, payload.get("sentence") or "",
+                payload.get("error") or "")
+    return status, payload
+
+
+def _registry_without_project(name, row):
+    """The rewrite itself, under the registry key its caller took."""
+    path = os.path.join(CONFIG, "projects.toml")
+    try:
+        with open(path) as handle:
+            before = handle.read()
+    except OSError as exc:
+        return 400, {"error": f"this farm's project registry could not be read ({exc})"}
+    after = _registry_without(before, name)
+    # The guard: what comes out must parse, must have lost this project, and must have kept
+    # every other one exactly. A registry is the farm's map of itself; a bad rewrite of it is
+    # worse than a project that will not go away.
+    try:
+        import tomllib
+        parsed = tomllib.loads(after)
+        original = tomllib.loads(before)
+    except Exception as exc:
+        return 400, {"error": f"removing '{name}' would leave a registry this farm cannot read "
+                              f"({exc}); edit {path} by hand"}
+    if name in parsed or any(parsed.get(other) != table for other, table in original.items()
+                             if other != name):
+        return 400, {"error": f"removing '{name}' would change another project's settings; "
+                              f"edit {path} by hand"}
+    backup = path + "." + name + "-removed-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    try:
+        with open(backup, "w") as handle:
+            handle.write(before)
+        fd, temporary = tempfile.mkstemp(prefix="projects.toml.", dir=os.path.dirname(path))
+        with os.fdopen(fd, "w") as handle:
+            handle.write(after)
+        os.replace(temporary, path)
+    except OSError as exc:
+        return 400, {"error": f"this farm's project registry could not be written ({exc})"}
+    ports = row["ports"]
+    block = f"{ports['web']} to {ports['web'] + PORT_BLOCK_SIZE - 1}"
+    # The dev server block, and only that: `fleet add-project` writes port_base alone, so the
+    # api and end-to-end bases are the same numbers for every project on this farm and are not
+    # this project's to free.
+    return 200, {"ok": True, "name": name, "ports": ports, "port_base": ports["web"],
+                 "freed": block, "backup": backup,
+                 "sentence": f"{name} is no longer registered. Its dev server port block, "
+                             f"{block}, is free for the next project. Its checkout and its "
+                             "worktrees are untouched."}
 
 
 def _is_phantom(record):
@@ -1256,6 +2163,237 @@ def agent_msg(body):
     return 200, {"ok": True, "slug": slug, "detail": (out or "").strip()[:200]}
 
 
+# ---------------------------------------------------------------- stopping a lane
+#
+# `fleet kill` stops the lane's unit and marks its record killed. `--retire` also writes the
+# lane-scoped marker the supervisor honours, so the runner never respawns it and any sibling the
+# storm already spawned is stopped too. Which of the two a page should offer is decided by the
+# lane's restart policy, and that policy travels back with the answer so the page can say what
+# the press actually did.
+AGENT_KILL_TIMEOUT = 60
+
+
+def agent_kill(body):
+    """(status, payload) for POST /api/agents/kill."""
+    slug = str(body.get("slug") or "").strip()
+    retire = bool(body.get("retire"))
+    if not slug or not SLUG.fullmatch(slug):
+        return 400, {"error": "invalid lane name"}
+    # A name that is merely well shaped is not a lane: the slug is matched against the records
+    # this farm actually holds before it becomes a word on a command line.
+    record = _read_agent_record(os.path.join(STATE, "state", slug + ".json"))
+    if record is None:
+        return 404, {"error": f"there is no lane named '{slug}' on this farm"}
+    restart = str(record.get("restart") or "").strip() or None
+    # No `--` here, deliberately: cmd_kill parses with a case loop whose only flag is --retire,
+    # and it refuses a bare `--` as an unknown one. A slug cannot start with a dash anyway, SLUG
+    # requires a letter or a digit first.
+    args = [fleet_bin(), "kill"] + (["--retire"] if retire else []) + [slug]
+    rc, out, err = run_tool(args, timeout=AGENT_KILL_TIMEOUT)
+    if rc != 0:
+        return 400, {"error": tool_message(rc, out, err, "fleet kill"), "slug": slug}
+    if retire:
+        sentence = "This lane is stopped and retired. Nothing will respawn it."
+    elif restart:
+        sentence = ("This pass is stopped. The runner will respawn this lane under a new name, "
+                    f"because its policy is {restart}.")
+    else:
+        sentence = "This lane is stopped. It carries no restart policy, so nothing respawns it."
+    return 200, {"ok": True, "slug": slug, "retired": retire, "restart": restart,
+                 "lane": record.get("lane"), "project": record.get("project"),
+                 "sentence": sentence, "detail": (out or "").strip()[:200]}
+
+
+# ---------------------------------------------------------------- power
+#
+# Three actions, labelled as what they do. There is no spawn-only pause verb on this farm, so the
+# control that stops new agents is `fleet mode balanced`, which also caps the CPU and memory of
+# every agent already running and releases the verification database. Draining is
+# `fleet game-mode on`: it salvages and kills every live lane, stops the agent runner and stops
+# the verification database. Resuming is `fleet game-mode off`, and the runner it starts respawns
+# every until-pr and until-merged lane, which spends subscription.
+
+POWER_THROTTLE_TIMEOUT = 30    # writes a cgroup and answers
+POWER_DRAIN_TIMEOUT = 900      # salvage pushes one lane at a time, over the network
+POWER_RESUME_TIMEOUT = 300
+THROTTLE_MODE = "balanced"
+# All three power actions take this one key, because this farm has one power state and not
+# three. Throttle, drain and resume are opposites of each other in pairs: two of them running at
+# once leaves the farm in whichever state the last call happened to reach, at random.
+POWER_JOB_KEY = "power"
+# The two statuses `fleet game-mode` counts as RAM holders, and so the lanes a drain stops.
+LIVE_LANE_STATUSES = ("running", "starting")
+
+
+def live_lanes():
+    """The lanes a drain would salvage and stop, by name."""
+    rows = []
+    for record in agents():
+        if str(record.get("status") or "").lower() not in LIVE_LANE_STATUSES:
+            continue
+        rows.append({"slug": record.get("slug"), "project": record.get("project"),
+                     "lane": record.get("lane"), "by": record.get("by"),
+                     "restart": str(record.get("restart") or "").strip() or None,
+                     "pr_url": record.get("pr_url")})
+    rows.sort(key=lambda row: str(row.get("slug") or ""))
+    return rows
+
+
+def _throttle_caps():
+    """What `fleet mode balanced` will actually do to a machine, in one phrase.
+
+    Read from the mode policy rather than written down here: a farm that edited its profiles must
+    not be promised this farm's numbers.
+    """
+    try:
+        profiles, _auto = MODE._policy()
+        profile = profiles[THROTTLE_MODE]
+    except Exception:
+        return "caps the CPU and memory of every agent"
+    cores = os.cpu_count() or 1
+    quota = profile.get("cpu_quota_pct")
+    memory = profile.get("mem_high_pct")
+    parts = []
+    if quota is not None:
+        parts.append(f"{quota}% of the CPU (about {round(quota / 100 * cores, 1)} of {cores} "
+                     "cores)")
+    if memory is not None:
+        parts.append(f"{memory}% of this machine's memory")
+    return ("caps every agent already running at " + " and ".join(parts)) if parts else \
+        "caps the CPU and memory of every agent"
+
+
+def power_preview(action):
+    """(status, payload) for GET /api/power/preview: what the press will do, before it is
+    pressed. Reads state files only, so it costs a page nothing to ask first."""
+    action = (action or "").strip().lower()
+    if action not in ("throttle", "drain", "resume"):
+        return 400, {"error": "an action is throttle, drain or resume"}
+    lanes = live_lanes() if action == "drain" else []
+    # Any power job, not just this verb's: a page asking about resume while a drain runs is
+    # asking about the one thing that is in flight.
+    running = next((record for record in running_jobs()
+                    if (record.get("key") or record.get("action")) == POWER_JOB_KEY), None)
+    if action == "throttle":
+        payload = {
+            "label": "Throttle the farm and stop new agents",
+            "sentence": f"Every agent already running keeps running. This {_throttle_caps()}, "
+                        "stops any new agent from being spawned, and releases the verification "
+                        "database.",
+            "warnings": ["Nothing is lost, and nothing is stopped."],
+        }
+    elif action == "drain":
+        payload = {
+            "label": "Drain the farm",
+            "sentence": f"This salvages and then stops the {len(lanes)} lane(s) below, stops the "
+                        "agent runner so nothing is respawned, and stops the verification "
+                        "database.",
+            "warnings": ["A verification in flight loses its verdict.",
+                         "A lane with no restart policy loses whatever salvage could not push.",
+                         "This dashboard keeps running through all of it."],
+        }
+    else:
+        payload = {
+            "label": "Resume the farm",
+            "sentence": "This starts the agent runner again, and it will respawn every until-pr "
+                        "and until-merged lane from its brief, which spends subscription.",
+            "warnings": ["The verification database starts again at the next run."],
+        }
+    payload.update({"action": action, "lanes": lanes, "lane_count": len(lanes),
+                    "running_job": running})
+    return 200, payload
+
+
+def power_action(body):
+    """(status, payload) for POST /api/power."""
+    action = str(body.get("action") or "").strip().lower()
+    code, preview = power_preview(action)
+    if code != 200:
+        return code, preview
+    if action == "throttle":
+        # Synchronous: it writes a cgroup and answers, and a page that had to poll a job for that
+        # would be slower than the thing it is watching. It takes the power key all the same, so
+        # it can neither start during a drain nor let one start under it.
+        code, payload, rc, out, err = run_job_now(
+            action, [fleet_bin(), "mode", THROTTLE_MODE], POWER_THROTTLE_TIMEOUT,
+            label=preview["label"], key=POWER_JOB_KEY)
+        if code != 200:
+            payload.update({"action": action})
+            return code, payload
+        if rc != 0:
+            return 400, {"error": tool_message(rc, out, err, "fleet mode"), "action": action}
+        try:
+            setting = MODE.get_setting()          # a one word file, never a tool
+        except Exception:
+            setting = THROTTLE_MODE
+        return 200, {"ok": True, "action": action, "mode": setting,
+                     "sentence": preview["sentence"], "detail": (out or "").strip()[:400]}
+    verb = ["game-mode", "on" if action == "drain" else "off"]
+    timeout = POWER_DRAIN_TIMEOUT if action == "drain" else POWER_RESUME_TIMEOUT
+    code, payload = start_job(action, [fleet_bin()] + verb, timeout, label=preview["label"],
+                              key=POWER_JOB_KEY)
+    payload.update({"action": action, "lanes": preview["lanes"],
+                    "lane_count": preview["lane_count"], "sentence": preview["sentence"]})
+    return code, payload
+
+
+# ---------------------------------------------------------------- the verification queue
+#
+# Two writes: queue a change for verification, and cancel one. Both are validated here against
+# what this farm actually has, so a typo is a sentence on the page rather than a record in the
+# queue that nothing will ever pick up.
+
+CI_ENQUEUE_TIMEOUT = 120      # it writes a record, but it also resolves the change on the forge
+CI_CANCEL_TIMEOUT = 60
+CI_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# A pull request number, as GitHub numbers them. Anything else was a typo or a path.
+PR_MAX = 10 ** 7
+
+
+def ci_enqueue(body):
+    """(status, payload) for POST /api/ci/enqueue."""
+    project = str(body.get("project") or "").strip()
+    raw = body.get("pr")
+    if not PROJECT_NAME.fullmatch(project) or project not in _projects_registry():
+        return 400, {"error": f"'{project}' is not a project registered on this farm",
+                     "projects": sorted(_projects_registry())}
+    try:
+        number = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 400, {"error": "a change is named by its number, for example 128"}
+    if not 0 < number < PR_MAX:
+        return 400, {"error": "a change number is a whole number above zero"}
+    # Options only, so no separator: lib/ci.py parses with argparse and every value below
+    # travels behind its own option.
+    args = [fleet_bin(), "ci", "enqueue", "--project", project, "--pr", str(number)]
+    code, payload = start_job("ci_enqueue", args, CI_ENQUEUE_TIMEOUT,
+                              label=f"Verifying {project} change {number}")
+    payload.update({"project": project, "pr": number})
+    return code, payload
+
+
+def ci_cancel(body):
+    """(status, payload) for POST /api/ci/cancel."""
+    run_id = str(body.get("id") or "").strip()
+    if not run_id or not CI_RUN_ID.fullmatch(run_id):
+        return 400, {"error": "invalid run id"}
+    queue = ci_queue(refresh=False)
+    known = [str(item.get("id")) for bucket in ("running", "queued")
+             for item in queue.get(bucket) or [] if isinstance(item, dict) and item.get("id")]
+    if run_id not in known:
+        # Cancelling a run that has already finished does nothing, and cancelling a name that was
+        # never in the queue would answer "cancellation requested" for nothing at all.
+        return 400, {"error": f"'{run_id}' is not running or waiting in this farm's queue",
+                     "runs": known}
+    # `--` first: lib/ci.py takes the run id as a POSITIONAL through argparse, which reads a
+    # leading dash as an option.
+    rc, out, err = run_tool([fleet_bin(), "ci", "cancel", "--", run_id],
+                            timeout=CI_CANCEL_TIMEOUT)
+    if rc != 0:
+        return 400, {"error": tool_message(rc, out, err, "fleet ci cancel"), "id": run_id}
+    return 200, {"ok": True, "id": run_id, "detail": (out or "").strip()[:200]}
+
+
 # ---------------------------------------------------------------- the head office's mail
 #
 # The agents talk to each other through a head office: one issue per mailbox, one comment per
@@ -1496,16 +2634,24 @@ def mail_refresh():
 
 def _refresh_once():
     """One pass over everything a read route serves. Each part is on its own: a head office
-    that is down must not cost the page its health table."""
-    for refresh in (config_refresh, health_refresh, mail_refresh, who_refresh, feed_refresh):
+    that is down must not cost the page its health table.
+
+    Forgetting old job records rides along here rather than only inside start_job: on a farm
+    whose last action was a drain, nothing else would ever start, and the record would sit in
+    $FLEET_STATE/jobs for ever against a document that says it is kept for a day.
+    """
+    for refresh in (config_refresh, services_refresh, health_refresh, mail_refresh, who_refresh,
+                    feed_refresh, _forget_old_jobs):
         try:
             refresh()
         except Exception:
             pass
 
 
-def _refresher(interval=REFRESH_SECONDS):
-    while True:
+def _refresher(interval=REFRESH_SECONDS, stop=None):
+    """The 45 second pass. `stop` exists for the suite: a refresher left running past the test
+    that started it goes on spawning tools into every test that follows."""
+    while stop is None or not stop.is_set():
         _refresh_wake.clear()
         _refresh_once()
         # A wait rather than a sleep, so a request for something nobody has asked for yet is
@@ -1719,8 +2865,17 @@ def who_refresh():
     with _snapshot_lock:
         if rc != 0:
             _snapshot_failed(_who_snapshot, _first_line(err or out, f"hq who exited {rc}"))
-        else:
-            _snapshot_succeeded(_who_snapshot, {"sessions": _parse_who(out)})
+            return
+        previous = {session["name"]: session for session in _who_snapshot["sessions"]}
+        sessions = _parse_who(out)
+        for session in sessions:
+            older = previous.get(session["name"])
+            # The same reading implies the same moment. hq reports an AGE, so deriving a stamp
+            # from it again a second later moves it a second, and every row that carries it
+            # redraws, and nothing that holds two of these snapshots can compare them.
+            if older and older.get("age_hours") == session["age_hours"]:
+                session["since"] = older["since"]
+        _snapshot_succeeded(_who_snapshot, {"sessions": sessions})
 
 
 def feed_refresh():
@@ -1828,46 +2983,30 @@ def mail_send(body):
     if rc != 0:
         lines = [line for line in ((err or "") + "\n" + (out or "")).splitlines() if line.strip()]
         return 400, {"error": (lines[-1].strip() if lines else f"hq msg exited {rc}")[:400]}
-    return 200, {"ok": True, "to": target, "from": agent, "detail": (out or "").strip()[:200]}
+    # The message is in the office now, but this dashboard reads the office on a cadence, so
+    # without this wake a sender watches their own message take up to forty five seconds to
+    # appear in the thread they just sent it to.
+    _refresh_wake.set()
+    return 200, {"ok": True, "to": target, "from": agent, "detail": (out or "").strip()[:200],
+                 "refreshing": True}
 
 
 
 def sweep_status():
     """State of the autosweep systemd --user timer, for the header countdown. Uses the
     MONOTONIC next-elapse (OnUnitActiveSec is monotonic) and the same clock in Python, so
-    'seconds until the next sweep' needs no wall-clock/date parsing."""
-    def props(unit, *names):
-        try:
-            args = ["systemctl", "--user", "show", unit]
-            for n in names:
-                args += ["-p", n]
-            r = subprocess.run(args, capture_output=True, text=True, timeout=5)
-            d = {}
-            for line in r.stdout.splitlines():
-                k, _, v = line.partition("=")
-                d[k] = v
-            return d
-        except Exception:
-            return {}
+    'seconds until the next sweep' needs no wall-clock/date parsing.
 
-    def dur(s):
-        # systemd prints a monotonic USec property as a duration since boot, e.g.
-        # "19h 41min 40.045077s": not raw microseconds. Parse it to seconds.
-        total = 0.0
-        for num, u in re.findall(r"([\d.]+)(us|ms|min|h|d|s)", s or ""):
-            total += {"us": 1e-6, "ms": 1e-3, "s": 1, "min": 60, "h": 3600, "d": 86400}[u] * float(num)
-        return total
-
-    t = props(SWEEP_TIMER_UNIT, "UnitFileState", "NextElapseUSecMonotonic")
-    enabled = t.get("UnitFileState") in ("enabled", "enabled-runtime")
+    Runs two processes, so only the machine refresher calls it; /api/sweep serves what it left."""
+    timer = _unit_properties(SWEEP_TIMER_UNIT, "UnitFileState", "NextElapseUSecMonotonic")
+    enabled = timer.get("UnitFileState") in ("enabled", "enabled-runtime")
     secs = None
     if enabled:
-        nxt = dur(t.get("NextElapseUSecMonotonic"))     # next fire, as monotonic seconds
+        nxt = _systemd_duration(timer.get("NextElapseUSecMonotonic"))   # monotonic seconds
         if nxt > 0:
             secs = max(0.0, nxt - time.clock_gettime(time.CLOCK_MONOTONIC))
-    return {"enabled": enabled, "secs_left": secs,
-            "result": (props(SWEEP_TIMER_UNIT.replace(".timer", ".service"),
-                             "Result").get("Result") or None)}
+    service = _unit_properties(SWEEP_TIMER_UNIT.replace(".timer", ".service"), "Result")
+    return {"enabled": enabled, "secs_left": secs, "result": service.get("Result") or None}
 
 
 # What a forge calls a check that did not pass, mapped onto the five words this page draws.
@@ -2132,12 +3271,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(code, json.dumps(payload))
             elif path == "/api/ci":
                 self._send(200, json.dumps(ci_queue()))
+            elif path == "/api/accounts/login-state":
+                self._send(200, json.dumps(accounts_login_state()))
             elif path.startswith("/api/accounts"):
                 self._send(200, json.dumps(accounts_snapshot()))
             elif path.startswith("/api/models"):
                 self._send(200, json.dumps(MODELS.listing()))
             elif path.startswith("/api/mode"):
-                self._send(200, json.dumps(MODE.status()))
+                self._send(200, json.dumps(_machine_part("mode")))
             elif path == "/api/projects":
                 self._send(200, json.dumps(projects()))
             elif path == "/api/mail/boxes":
@@ -2155,9 +3296,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif path == "/api/health":
                 self._send(200, json.dumps(health()))
             elif path.startswith("/api/sweep"):
-                self._send(200, json.dumps(sweep_status()))
+                self._send(200, json.dumps(_machine_part("sweep")))
             elif path.startswith("/api/metrics"):
-                self._send(200, json.dumps(M.collect()))
+                self._send(200, json.dumps(_machine_part("metrics")))
+            elif path == "/api/services":
+                self._send(200, json.dumps(services()))
+            elif path == "/api/power/preview":
+                query = parse_qs(urlparse(self.path).query)
+                code, payload = power_preview(query.get("action", [""])[0])
+                self._send(code, json.dumps(payload))
+            elif path == "/api/jobs":
+                self._send(200, json.dumps({"jobs": running_jobs()}))
+            elif path.startswith("/api/jobs/"):
+                code, payload = read_job(path[len("/api/jobs/"):])
+                self._send(code, json.dumps(payload))
             elif path == "/api/agent/log":
                 query = parse_qs(urlparse(self.path).query)
                 code, payload = agent_log(query.get("slug", [""])[0],
@@ -2193,11 +3345,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if path == "/api/projects":
                 code, payload = add_project(body)
                 self._send(code, json.dumps(payload))
+            elif path == "/api/projects/remove":
+                code, payload = remove_project(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/services":
+                code, payload = service_action(body)
+                self._send(code, json.dumps(payload))
             elif path == "/api/mail/send":
                 code, payload = mail_send(body)
                 self._send(code, json.dumps(payload))
             elif path == "/api/agent/msg":
                 code, payload = agent_msg(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/ci/enqueue":
+                code, payload = ci_enqueue(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/ci/cancel":
+                code, payload = ci_cancel(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/power":
+                code, payload = power_action(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/agents/kill":
+                code, payload = agent_kill(body)
                 self._send(code, json.dumps(payload))
             elif self.path.startswith("/api/models"):
                 act, mid = body.get("action", ""), body.get("id", "")
@@ -2217,6 +3387,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(400, json.dumps({"error": str(e)}))
                     return
                 self._send(200, json.dumps(MODE.tick(force=True)))  # apply now
+            elif path == "/api/accounts/refresh":
+                code, payload = accounts_refresh_request()
+                self._send(code, json.dumps(payload))
             elif self.path.startswith("/api/accounts/add"):
                 engine = (body.get("engine") or "claude").strip()
                 if engine == "codex":
@@ -2326,8 +3499,14 @@ if __name__ == "__main__":
             print("  bound wide, so reading needs it too", flush=True)
     else:
         print("  READ-ONLY: no write token could be stored; set FLEET_DASH_TOKEN", flush=True)
+    machine_refresh()          # prime it: the first page must not open on an empty strip
+    start_machine_refresher()
     threading.Thread(target=_mode_loop, daemon=True).start()
     threading.Thread(target=_ci_loop, daemon=True).start()
+    # The queue's own observations. This thread was written and then never started, so the
+    # observations were paid for on the first request that met a new queue; that read ran git and
+    # gh and wrote the state file back, which is not a read at all.
+    start_ci_refresher()
     threading.Thread(target=_accounts_refresher, name="accounts-refresher", daemon=True).start()
     start_refresher()
     Server((BIND, PORT), Handler).serve_forever()

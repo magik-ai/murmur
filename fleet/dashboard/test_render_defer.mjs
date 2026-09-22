@@ -20,7 +20,7 @@ const browser = await chromium.launch();
 // position to exist at all, and a check that cannot move cannot prove it stayed.
 const page = await (await browser.newContext({ viewport: { width: 1100, height: 520 } })).newPage();
 
-await page.goto(`${URL}/#/agents`, { waitUntil: "domcontentloaded" });
+await page.goto(`${URL}/#/board`, { waitUntil: "domcontentloaded" });
 await page.waitForTimeout(1600);
 
 /* Mark the first card, so a rebuild can be seen even when the new node looks identical. */
@@ -28,6 +28,8 @@ await page.evaluate(() => {
   document.querySelector(".agent-card").dataset.probe = "held";
 });
 await page.click(".agent-card");
+// The Board scrolls as a page, and the drawer scrolls inside itself. Both positions are what
+// this check is about, so the list has to be long enough to have one.
 await page.waitForTimeout(1200);
 
 const opened = await page.evaluate(() => !document.getElementById("drawer").hidden);

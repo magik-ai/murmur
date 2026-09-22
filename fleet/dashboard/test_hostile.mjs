@@ -1,8 +1,9 @@
 /* What the page does when a route lies to it. Every case here overrides one route with a shape
    the server should never send, and asks two questions: did anything throw, and did the reader
    get told. A dashboard that draws half a screen and keeps saying "Live" is worse than one that
-   says it cannot read the answer. The keyboard and the header cases live here too, because they
-   are the same kind of question: can a person still use the page. */
+   says it cannot read the answer. The keyboard, the header, the read-only page and the
+   addresses the old tabs answered on live here too, because they are the same kind of
+   question: can a person still use this. */
 
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -33,8 +34,16 @@ for (let attempt = 0; attempt < 60; attempt += 1) {
 const { chromium } = await loadPlaywright();
 const browser = await chromium.launch();
 
+/** A page with no write token, which is a legitimate way to run this dashboard. */
+const READ_ONLY = JSON.stringify({
+  writable: false,
+  reason: "This page was opened without the dashboard token.",
+  token_required: true,
+  loopback: false,
+});
+
 /** One page, with the routes named in `overrides` answered by this test instead of the stub. */
-async function open({ hash = "#/overview", size = { width: 1440, height: 900 }, overrides = {}, seed = null }) {
+async function open({ hash = "#/board", size = { width: 1440, height: 900 }, overrides = {}, seed = null }) {
   const context = await browser.newContext({ viewport: size });
   const page = await context.newPage();
   const thrown = [];
@@ -63,9 +72,10 @@ const text = (page) => page.evaluate(() => document.getElementById("view").inner
 
 for (const [route, hash, name] of [
   ["/api/ci", "#/queue", "queue"],
-  ["/api/metrics", "#/system", "system"],
-  ["/api/accounts", "#/accounts", "accounts"],
-  ["/api/fleet", "#/agents", "agents"],
+  ["/api/ci", "#/board", "the board's queue pane"],
+  ["/api/metrics", "#/board", "the machine strip"],
+  ["/api/accounts", "#/board", "the accounts strip"],
+  ["/api/fleet", "#/board", "the agents pane"],
 ]) {
   const { page, context, thrown } = await open({
     hash,
@@ -79,24 +89,20 @@ for (const [route, hash, name] of [
   await context.close();
 }
 
-for (const [route, hash, name] of [
-  ["/api/fleet", "#/agents", "agents"],
-  ["/api/fleet", "#/overview", "overview"],
-  ["/api/projects", "#/projects", "projects"],
-]) {
+{
   const { page, context, thrown } = await open({
-    hash,
-    overrides: { [route]: JSON.stringify({ unavailable: "The farm state directory is not readable.", fix: "fleet doctor" }) },
+    hash: "#/board",
+    overrides: { "/api/fleet": JSON.stringify({ unavailable: "The farm state directory is not readable.", fix: "fleet doctor" }) },
   });
   const body = await text(page);
-  check(`${name}: a route that answers "unavailable" does not break the tab`, thrown.length === 0, thrown[0]);
-  check(`${name}: the sentence and its command are shown`, body.includes("not readable") && body.includes("fleet doctor"), body.slice(0, 80));
+  check("a route that answers \"unavailable\" does not break the tab", thrown.length === 0, thrown[0]);
+  check("the sentence and its command are shown", body.includes("not readable") && body.includes("fleet doctor"), body.slice(0, 80));
   await context.close();
 }
 
 {
   const { page, context, thrown } = await open({
-    hash: "#/projects",
+    hash: "#/board",
     overrides: { "/api/projects": JSON.stringify({ rows: [] }), "/api/fleet": "null" },
   });
   check("a list route that answers an object breaks nothing", thrown.length === 0, thrown[0]);
@@ -110,7 +116,7 @@ for (const [route, hash, name] of [
 {
   const beacon = "https://evil.example.invalid/beacon.png";
   const { page, context, thrown, asked } = await open({
-    hash: "#/agents",
+    hash: "#/board",
     overrides: {
       "/api/identities": JSON.stringify({
         winston: { icon: "E", color: `red;background-image:url('${beacon}');position:fixed;inset:0;z-index:99999` },
@@ -127,7 +133,7 @@ for (const [route, hash, name] of [
 
 {
   const { page, context } = await open({
-    hash: "#/agents",
+    hash: "#/board",
     overrides: {
       "/api/identities": JSON.stringify({ winston: { icon: "X".repeat(400), color: "#5b8def" } }),
     },
@@ -141,7 +147,7 @@ for (const [route, hash, name] of [
 
 {
   const { page, context } = await open({
-    hash: "#/agents?agent=demo-web-91bd",
+    hash: "#/board?agent=demo-web-91bd",
     overrides: {
       "/api/agent": JSON.stringify({
         slug: "demo-web-91bd", project: "demo", lane: "web", status: "pr_open",
@@ -151,31 +157,57 @@ for (const [route, hash, name] of [
     },
   });
   const hrefs = await page.evaluate(() => [...document.querySelectorAll("#drawerBody a")].map((node) => node.getAttribute("href")));
-  check("a link that is not http is never rendered as a link", !hrefs.some((href) => /^javascript:/i.test(href)), JSON.stringify(hrefs));
   const shown = await page.evaluate(() => document.getElementById("drawerBody").innerText);
+  check("a link that is not http is never rendered as a link", !hrefs.some((href) => /^javascript:/i.test(href)), JSON.stringify(hrefs));
   check("the address is still shown as text", shown.includes("javascript:window.__pwn"), shown.slice(0, 60));
   await context.close();
 }
 
-/* -------------------------------------------------------------- the four states, everywhere */
+/* ------------------------------------------- the addresses the old seven tabs answered on */
+
+for (const [from, wanted, name] of [
+  ["#/overview", "#/board", "overview"],
+  ["#/system", "#/machine", "system"],
+  ["#/projects", "#/machine?section=projects", "projects"],
+  ["#/accounts", "#/machine?section=accounts", "accounts"],
+  ["#/agents?agent=demo-api-3f2a", "#/board?agent=demo-api-3f2a", "an agent bookmark"],
+]) {
+  const { page, context, thrown } = await open({ hash: from });
+  const where = await page.evaluate(() => location.hash);
+  const drew = await page.evaluate(() => document.getElementById("view").childElementCount > 0);
+  check(`${name}: the old address lands on its new home`, where === wanted, `${where} wanted ${wanted}`);
+  check(`${name}: and the page it lands on drew something`, drew && thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+{
+  const { page, context } = await open({ hash: "#/agents?agent=demo-api-3f2a" });
+  const open2 = await page.evaluate(() => ({
+    drawer: !document.getElementById("drawer").hidden,
+    title: document.getElementById("drawerTitle").textContent,
+  }));
+  check("a bookmarked lane still opens its drawer after the redirect",
+    open2.drawer && open2.title === "demo-api-3f2a", JSON.stringify(open2));
+  await context.close();
+}
+
+/* -------------------------------------------------------- the four states, everywhere */
 
 {
   const { page, context } = await open({
-    hash: "#/overview",
+    hash: "#/board",
     overrides: { "/api/fleet": (handler) => new Promise(() => { /* never answers */ }) },
   });
-  const card = await page.evaluate(() => {
-    const heads = [...document.querySelectorAll(".card")];
-    const agents = heads.find((node) => /^Agents/.test(node.innerText));
-    return agents ? { text: agents.innerText, skeletons: agents.querySelectorAll(".skeleton").length } : null;
+  const pane = await page.evaluate(() => {
+    const found = document.querySelector(".agents-pane");
+    return found ? { text: found.innerText, skeletons: found.querySelectorAll(".skeleton").length } : null;
   });
-  check("the agents card shows a skeleton, not four zeros", card && card.skeletons > 0, JSON.stringify(card));
+  check("the agents pane shows a skeleton, not an empty list", pane && pane.skeletons > 0, JSON.stringify(pane));
   await context.close();
 }
 
 /* A panel that is drawn before its answer arrives has TWO shapes under one key: a grey
-   placeholder and the value that replaces it. The live farm showed both at once, four grey
-   rows sitting above the four numbers they were standing in for. */
+   placeholder and the value that replaces it. The live farm showed both at once. */
 
 {
   const late = JSON.stringify([
@@ -183,24 +215,26 @@ for (const [route, hash, name] of [
     { slug: "b", project: "demo", lane: "api", status: "failed", started_at: 1, updated_at: 1 },
   ]);
   const { page, context } = await open({
-    hash: "#/overview",
+    hash: "#/board",
     overrides: {
       "/api/fleet": (handler) => setTimeout(() => handler.fulfill({
         status: 200, contentType: "application/json", body: late,
       }), 1000),
     },
   });
-  const card = await page.evaluate(() => {
-    const agents = [...document.querySelectorAll(".card")].find((node) => /^Agents/.test(node.innerText));
-    return agents ? { text: agents.innerText, skeletons: agents.querySelectorAll(".skeleton").length } : null;
+  const pane = await page.evaluate(() => {
+    const found = document.querySelector(".agents-pane");
+    return found ? {
+      skeletons: found.querySelectorAll(".skeleton").length,
+      cards: found.querySelectorAll("[data-agent-card]").length,
+    } : null;
   });
-  check("the skeleton is replaced by the numbers, not left above them",
-    card && card.skeletons === 0 && /Running\n1/.test(card.text), JSON.stringify(card));
+  check("the skeleton is replaced by the cards, not left above them",
+    pane && pane.skeletons === 0 && pane.cards === 2, JSON.stringify(pane));
   await context.close();
 }
 
-/* A queue with nothing running and nothing waiting is a state, not a gap. It used to be the
-   one shape that left the overview card on its placeholder with nothing to read. */
+/* A queue with nothing running and nothing waiting is a state, not a gap. */
 
 {
   const finished = [0, 1, 2].map((index) => ({
@@ -208,21 +242,89 @@ for (const [route, hash, name] of [
     state: "passed", started: 1, ended: 2, tiers: [],
   }));
   const { page, context, thrown } = await open({
-    hash: "#/overview",
+    hash: "#/board",
     overrides: {
       "/api/ci": JSON.stringify({ updated: 1, daemon_alive: true, running: [], queued: [], recent: finished }),
     },
   });
-  const card = await page.evaluate(() => {
-    const queue = [...document.querySelectorAll(".card")].find((node) => /^Queue/.test(node.innerText));
-    return queue ? { text: queue.innerText, skeletons: queue.querySelectorAll(".skeleton").length,
-      open: Boolean(queue.querySelector('a[href="#/queue"]')) } : null;
+  const pane = await page.evaluate(() => {
+    const found = document.querySelector(".queue-pane");
+    return found ? {
+      text: found.innerText,
+      skeletons: found.querySelectorAll(".skeleton").length,
+      link: Boolean(found.querySelector('a[href="#/queue"]')),
+    } : null;
   });
-  check("an empty queue says so, counts what finished, and keeps its way in",
-    card && card.skeletons === 0 && card.open
-      && /Nothing is being verified right now/.test(card.text)
-      && /3 finished runs/.test(card.text), JSON.stringify(card));
-  check("an empty queue threw nothing", thrown.length === 0, thrown.join(" | "));
+  check("a quiet queue says so, counts what finished, and keeps its way in",
+    pane && pane.skeletons === 0 && pane.link
+      && /Nothing is being verified right now/.test(pane.text)
+      && /3 recent runs/.test(pane.text), JSON.stringify(pane));
+  check("a quiet queue threw nothing", thrown.length === 0, thrown.join(" | "));
+  await context.close();
+}
+
+/* The queue pane is running and waiting only. A finished run belongs to the Queue tab, and
+   putting fifty of them on the Board is how the Board stopped being readable. */
+
+{
+  const row = (index, state) => ({
+    id: `ci-${index}`, project: "demo", pr: 400 + index, branch: `demo/change-${index}`,
+    state, started: 1, ended: state === "running" ? null : 2, tiers: [],
+  });
+  const { page, context } = await open({
+    hash: "#/board",
+    overrides: {
+      "/api/ci": JSON.stringify({
+        updated: 1, daemon_alive: true,
+        running: [row(1, "running")], queued: [row(2, "queued")],
+        recent: [3, 4, 5, 6].map((index) => row(index, "passed")),
+      }),
+    },
+  });
+  const seen = await page.evaluate(() => {
+    const found = document.querySelector(".queue-pane");
+    return { rows: found.querySelectorAll(".queue-row").length, text: found.innerText.replace(/\s+/g, " ") };
+  });
+  check("the board's queue shows what is running and waiting, and counts the rest",
+    seen.rows === 2 && /4 recent runs/.test(seen.text), JSON.stringify(seen));
+  await context.close();
+}
+
+/* ------------------------------------------ a farm that has not been finished, or started */
+
+{
+  const { page, context, thrown } = await open({
+    hash: "#/board",
+    overrides: {
+      "/api/health": JSON.stringify({
+        at: new Date().toISOString(), stale_since: null, error: null, pending: null,
+        checks: [
+          { id: "gh", label: "gh", state: "missing", detail: "gh is not installed.", fix: "sudo apt install gh" },
+          { id: "tmux", label: "tmux", state: "ok", detail: "version 3.4", fix: "" },
+        ],
+      }),
+    },
+  });
+  const seen = await page.evaluate(() => {
+    const found = [...document.querySelectorAll(".card")].find((node) => /^Finish setting up/.test(node.innerText));
+    return found ? { text: found.innerText.replace(/\s+/g, " "), buttons: found.querySelectorAll("button").length } : null;
+  });
+  check("a missing prerequisite puts the checklist on top of the board",
+    seen && /sudo apt install gh/.test(seen.text), seen ? seen.text.slice(0, 120) : "no checklist");
+  check("and the checklist cannot be dismissed without fixing it", seen && seen.buttons === 0, JSON.stringify(seen));
+  check("the checklist breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+{
+  const { page, context } = await open({
+    hash: "#/board",
+    overrides: { "/api/fleet": JSON.stringify([]) },
+  });
+  const body = await text(page);
+  check("a farm that has never run a lane is told how to run one",
+    /No agent has ever run here/.test(body) && /fleet spawn --project demo/.test(body), body.replace(/\s+/g, " ").slice(0, 200));
+  check("and the strips are not drawn over an empty farm", !/Memory free/.test(body), body.slice(0, 80));
   await context.close();
 }
 
@@ -231,7 +333,7 @@ for (const [route, hash, name] of [
 {
   const long = "lane-".concat("x".repeat(660));
   const { page, context, thrown } = await open({
-    hash: `#/agents?agent=${long}`,
+    hash: `#/board?agent=${long}`,
     size: { width: 390, height: 844 },
     overrides: {
       "/api/fleet": JSON.stringify([{ slug: long, project: long, lane: "web", status: "running", started_at: 1 }]),
@@ -246,12 +348,12 @@ for (const [route, hash, name] of [
 
 {
   const { page, context, thrown } = await open({
-    hash: "#/agents",
+    hash: "#/board",
     overrides: { "/api/fleet": JSON.stringify([{ slug: null, project: "demo", status: "running", started_at: 1 }]) },
   });
   await page.keyboard.press("Meta+k");
   await page.waitForTimeout(300);
-  await page.keyboard.type("age");
+  await page.keyboard.type("boa");
   await page.waitForTimeout(400);
   const options = await page.evaluate(() => document.getElementById("paletteList").children.length);
   check("a nameless lane does not kill the jump palette", thrown.length === 0, thrown[0]);
@@ -262,7 +364,7 @@ for (const [route, hash, name] of [
 /* --------------------------------------------------------------------------- the keyboard */
 
 {
-  const { page, context } = await open({ hash: "#/agents" });
+  const { page, context } = await open({ hash: "#/board" });
   const reached = await page.evaluate(async () => {
     const card = document.querySelector("[data-agent-card]");
     if (!card) return { found: false };
@@ -292,10 +394,9 @@ for (const [route, hash, name] of [
   }));
   check("Escape closes the drawer and hands focus back to the card", back.closed && Boolean(back.focused), JSON.stringify(back));
 
-  const sortable = await page.evaluate(() => {
+  await page.evaluate(() => {
     const table = [...document.querySelectorAll(".segmented button")].find((node) => node.textContent === "Table");
     if (table) table.click();
-    return true;
   });
   await page.waitForTimeout(500);
   const rows = await page.evaluate(() => ({
@@ -309,17 +410,57 @@ for (const [route, hash, name] of [
 
 {
   const { page, context } = await open({ hash: "#/mail" });
-  const boxes = await page.evaluate(() => ({
-    listbox: document.querySelector(".boxlist") && document.querySelector(".boxlist").getAttribute("role"),
-    option: document.querySelector(".boxlist li") && document.querySelector(".boxlist li").getAttribute("tabindex"),
+  const listed = await page.evaluate(() => ({
+    listbox: document.querySelector(".conversations") && document.querySelector(".conversations").getAttribute("role"),
+    option: document.querySelector(".conversations li") && document.querySelector(".conversations li").getAttribute("tabindex"),
+    splitter: document.querySelector(".splitter"),
   }));
-  check("the mailbox list is a listbox", boxes.listbox === "listbox", JSON.stringify(boxes));
-  check("a mailbox can take focus", boxes.option === "0", JSON.stringify(boxes));
+  check("the conversation list is a listbox", listed.listbox === "listbox", JSON.stringify(listed));
+  check("a conversation can take focus", listed.option === "0", JSON.stringify(listed));
   await context.close();
 }
 
 {
-  const { page, context } = await open({ hash: "#/agents" });
+  const { page, context } = await open({ hash: "#/board" });
+  const splitter = await page.evaluate(() => {
+    const node = document.querySelector(".splitter");
+    return node ? {
+      role: node.getAttribute("role"),
+      now: node.getAttribute("aria-valuenow"),
+      tab: node.getAttribute("tabindex"),
+      label: node.getAttribute("aria-label"),
+    } : null;
+  });
+  check("the splitter is a separator a keyboard can reach",
+    splitter && splitter.role === "separator" && splitter.tab === "0" && Boolean(splitter.label),
+    JSON.stringify(splitter));
+  await page.focus(".splitter");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await page.waitForTimeout(500);
+  const moved = await page.evaluate(() => ({
+    now: document.querySelector(".splitter").getAttribute("aria-valuenow"),
+    kept: localStorage.getItem("murmur.board.split"),
+  }));
+  check("the arrow keys move it and the position is kept",
+    Number(moved.now) < Number(splitter.now) && moved.kept === moved.now, JSON.stringify(moved));
+  await context.close();
+}
+
+{
+  // A reader who dragged the splitter last week opens the page where they left it.
+  const { page, context } = await open({ hash: "#/board", seed: { "murmur.board.split": "34" } });
+  const width = await page.evaluate(() => {
+    const canvas = document.querySelector(".board-canvas");
+    const agents = document.querySelector(".agents-pane");
+    return Math.round((agents.getBoundingClientRect().width / canvas.getBoundingClientRect().width) * 100);
+  });
+  check("the stored splitter position is what the page opens with", Math.abs(width - 34) <= 2, String(width));
+  await context.close();
+}
+
+{
+  const { page, context } = await open({ hash: "#/board" });
   await page.keyboard.press("Meta+k");
   await page.waitForTimeout(400);
   const before = await page.evaluate(() => {
@@ -327,7 +468,6 @@ for (const [route, hash, name] of [
     return {
       role: input.getAttribute("role"),
       controls: input.getAttribute("aria-controls"),
-      label: input.getAttribute("aria-label"),
       active: input.getAttribute("aria-activedescendant"),
       focused: document.activeElement === input,
     };
@@ -343,7 +483,7 @@ for (const [route, hash, name] of [
 /* ------------------------------------------------------------------- the reader's own eyes */
 
 {
-  const { page, context } = await open({ hash: "#/agents", size: { width: 390, height: 844 } });
+  const { page, context } = await open({ hash: "#/board", size: { width: 390, height: 844 } });
   const header = await page.evaluate(() => {
     const bar = document.getElementById("topbar");
     const right = document.querySelector(".top-right");
@@ -355,6 +495,12 @@ for (const [route, hash, name] of [
     };
   });
   check("the header fits on a phone", header.bar && header.right, JSON.stringify(header));
+  const stacked = await page.evaluate(() => {
+    const agents = document.querySelector(".agents-pane").getBoundingClientRect();
+    const queue = document.querySelector(".queue-pane").getBoundingClientRect();
+    return queue.top >= agents.bottom - 1;
+  });
+  check("the two panes stack on a phone instead of squeezing", stacked);
   const clipped = await page.evaluate(() => {
     const bad = [];
     for (const pill of document.querySelectorAll(".agent-card .pill")) {
@@ -371,77 +517,307 @@ for (const [route, hash, name] of [
 }
 
 {
-  const { page, context } = await open({ hash: "#/agents" });
+  const { page, context } = await open({ hash: "#/board" });
   const words = await page.evaluate(() => [...document.querySelectorAll(".agent-card .pill-text")].map((node) => node.textContent));
   check("there are five status words and no sixth", !words.includes("Unreadable"), words.join(" | "));
-  const detail = await page.evaluate(() => document.getElementById("view").innerText);
+  const detail = await text(page);
   check("an unreadable record says so as a detail", /record unreadable/i.test(detail));
+  const emoji = await page.evaluate(() => {
+    // Every mark on the page comes from the server's registry. The page itself draws none.
+    const marks = [...document.querySelectorAll("#view .glyph")].map((node) => node.textContent);
+    const rest = document.getElementById("view").innerText;
+    for (const mark of marks) if (mark) { /* a registry glyph is data, not page copy */ }
+    return [...rest].filter((sign) => sign.codePointAt(0) > 0x2100 && !marks.some((mark) => mark.includes(sign))).join("");
+  });
+  check("the page's own copy carries no emoji markers", emoji === "", emoji);
+  await context.close();
+}
+
+/* One word, one meaning, on one screen. A farm with no room for another agent has a header
+   pill that says "No room" and a power setting a few inches away whose top setting is called
+   "Full": the Capacity tile must not be the third thing, saying "Full" for the opposite. */
+{
+  const { page, context } = await open({
+    hash: "#/board",
+    overrides: {
+      "/api/metrics": JSON.stringify({
+        ts: Date.now() / 1000, agents: 6, can_spawn: false, level: "block",
+        reasons: ["free memory is under the floor"],
+        block_reasons: ["free memory is under the floor"], warnings: [],
+        load: { load1: 12.8, load5: 11.2, load15: 9.7, cores: 14 },
+        mem: { ram_total_gb: 64, ram_avail_gb: 1.2, ram_used_gb: 62.8, swap_total_gb: 8, swap_used_gb: 6.4, swap_churn_kbps: 900 },
+        disk: { path: "/", total_gb: 1000, used_gb: 980, free_gb: 20 },
+        cpu_temp_c: 71, cpu_temp_source: "package sensor", sensors_unavailable: false,
+      }),
+    },
+  });
+  const said = await page.evaluate(() => {
+    const found = [...document.querySelectorAll(".tile")]
+      .find((node) => node.querySelector(".label").textContent.startsWith("Capacity"));
+    return {
+      tile: found ? found.querySelector(".value").textContent : "",
+      pill: document.querySelector("#capacity .pill-text").textContent,
+      power: document.getElementById("powerMode").textContent.replace(/\s+/g, " "),
+    };
+  });
+  check("the capacity tile does not say Full on a farm with no room",
+    said.tile === "No room", said.tile);
+  check("the tile and the header pill say the same word", said.tile === said.pill,
+    `${said.tile} / ${said.pill}`);
+  check("Full on this screen means only the power setting", said.power.includes("Full"), said.power);
+  await context.close();
+}
+
+/* ------------------------------------------------- what the two selects and the search do */
+
+{
+  const { page, context } = await open({ hash: "#/board" });
+  const started = await page.evaluate(() => [...document.querySelectorAll("#agentSpawner option")].map((node) => node.textContent));
+  const states = await page.evaluate(() => [...document.querySelectorAll("#agentStatus option")].map((node) => node.textContent));
+  check("the started-by select counts the lanes behind every name",
+    started[0] === "Anyone (6)" && started.some((row) => /^winston \(\d\)$/.test(row)), started.join(" | "));
+  check("the status select offers the five meanings and counts them",
+    states.length === 6 && states[0] === "Any status (6)" && states.some((row) => /^Running \(\d\)$/.test(row)),
+    states.join(" | "));
+  await page.fill("#agentSearch", "checkout");
+  await page.waitForTimeout(500);
+  const found = await page.evaluate(() => [...document.querySelectorAll("[data-agent-card]")].map((node) => node.dataset.agentCard));
+  check("the search finds a lane by its name", found.length === 1 && found[0].includes("checkout"), found.join(", "));
+  await page.fill("#agentSearch", "412");
+  await page.waitForTimeout(500);
+  const byNumber = await page.evaluate(() => [...document.querySelectorAll("[data-agent-card]")].map((node) => node.dataset.agentCard));
+  check("and by the number of the change it has open", byNumber.length === 1 && byNumber[0] === "demo-web-91bd", byNumber.join(", "));
+  await page.fill("#agentSearch", "nothing-like-this");
+  await page.waitForTimeout(500);
+  const none = await page.evaluate(() => document.querySelector(".agents-pane").innerText);
+  check("a search that finds nothing says how to get back", /No agent matches this filter/.test(none), none.slice(0, 80));
+  await context.close();
+}
+
+/* The way a reader uses these two selects twice: pick a name, then go back to everyone. The
+   first option of each is the one that clears it, and picking it must never leave the pane
+   empty with the advice "clear the two selects" under it. */
+{
+  const { page, context, thrown } = await open({ hash: "#/board" });
+  const countLine = () => page.evaluate(() => document.querySelector(".count-line").textContent);
+  const cards = () => page.evaluate(() => document.querySelectorAll("[data-agent-card]").length);
+  const values = await page.evaluate(() => [...document.querySelectorAll("#agentSpawner option")]
+    .map((node) => node.getAttribute("value")));
+  check("every option carries its own value and not its label",
+    values[0] === "" && values.slice(1).every((value) => value && !value.includes("(")),
+    values.map((value) => JSON.stringify(value)).join(" | "));
+
+  await page.selectOption("#agentSpawner", { index: 1 });
+  await page.waitForTimeout(400);
+  const narrowed = await countLine();
+  check("picking a name in Started by narrows the pane", /^[1-5] of 6$/.test(narrowed), narrowed);
+  await page.selectOption("#agentSpawner", { index: 0 });
+  await page.waitForTimeout(400);
+  const back = await countLine();
+  check("picking Anyone again shows every lane", back === "6 of 6" && (await cards()) === 6,
+    `${back}, ${await cards()} cards`);
+
+  await page.selectOption("#agentStatus", { index: 1 });
+  await page.waitForTimeout(400);
+  await page.selectOption("#agentStatus", { index: 0 });
+  await page.waitForTimeout(400);
+  const cleared = await countLine();
+  check("picking Any status again shows every lane", cleared === "6 of 6" && (await cards()) === 6,
+    `${cleared}, ${await cards()} cards`);
+  check("clearing a filter throws nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* ------------------------------------------------------- stopping a lane, and retiring it */
+
+{
+  const writes = [];
+  const { page, context, thrown } = await open({
+    hash: "#/board?agent=demo-api-3f2a",
+    overrides: {
+      "/api/agent": JSON.stringify({
+        slug: "demo-api-3f2a", project: "demo", lane: "api", status: "running",
+        started_at: Math.floor(Date.now() / 1000) - 600, restart: "until-pr",
+      }),
+      "/api/agents/kill": (handler) => {
+        writes.push(JSON.parse(handler.request().postData() || "{}"));
+        return handler.fulfill({
+          status: 200, contentType: "application/json",
+          body: JSON.stringify({ ok: true, slug: "demo-api-3f2a", restart: "until-pr", detail: "demo-api-3f2a was asked to stop." }),
+        });
+      },
+    },
+  });
+  const offered = await page.evaluate(() => [...document.querySelectorAll("[data-lane-end]")].map((node) => node.textContent));
+  check("a lane with a restart policy is offered both endings",
+    offered.join(" | ") === "Stop this pass | Retire this lane", offered.join(" | "));
+  await page.click('[data-lane-end="stop"]');
+  await page.waitForTimeout(400);
+  const said = await page.evaluate(() => document.querySelector(".confirm").innerText.replace(/\s+/g, " "));
+  check("the confirm says what the runner will do next",
+    /under a new name/.test(said) && /until-pr/.test(said), said.slice(0, 160));
+  await page.click('[data-confirm-yes="stop"]');
+  await page.waitForTimeout(900);
+  const toast = await page.evaluate(() => document.getElementById("toasts").innerText.replace(/\s+/g, " "));
+  check("stopping posts the slug and whether it is a retirement",
+    writes.length === 1 && writes[0].slug === "demo-api-3f2a" && writes[0].retire === false, JSON.stringify(writes));
+  check("and the reader is told what happened", /was asked to stop/.test(toast), toast);
+  check("ending a lane breaks nothing", thrown.length === 0, thrown[0]);
   await context.close();
 }
 
 {
-  const { page, context } = await open({ hash: "#/overview" });
-  const said = await page.evaluate(() => {
-    const cards = [...document.querySelectorAll(".card")];
-    const mail = cards.find((node) => /^Last said/.test(node.innerText));
-    return mail ? mail.innerText : "";
+  const writes = [];
+  const { page, context } = await open({
+    hash: "#/board?agent=demo-api-3f2a",
+    overrides: {
+      "/api/agent": JSON.stringify({
+        slug: "demo-api-3f2a", project: "demo", lane: "api", status: "running",
+        started_at: Math.floor(Date.now() / 1000) - 600, restart: "until-merged",
+      }),
+      "/api/agents/kill": (handler) => {
+        writes.push(JSON.parse(handler.request().postData() || "{}"));
+        return handler.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, restart: null }) });
+      },
+    },
   });
-  check("the last said list shows messages, not housekeeping", said.length > 0 && !said.includes("snapshot was refreshed"), said.slice(0, 120));
-  await context.close();
-}
-
-/* The office feed is the card that made the live farm lie: the route answered an error, the
-   card had no events to show, and it said the agents had been silent for a day. A failed read
-   and a quiet office are not the same answer and must never share a sentence. */
-
-const QUIET = JSON.stringify({ at: new Date().toISOString(), stale_since: null, error: null, pending: false, hours: 24, events: [] });
-const BROKEN = JSON.stringify({ at: null, stale_since: null, error: "hq did not answer within 60s", pending: false, hours: 24, events: [] });
-const OLD = JSON.stringify({
-  at: new Date(Date.now() - 600000).toISOString(),
-  stale_since: new Date(Date.now() - 600000).toISOString(),
-  error: "could not resolve host github.com",
-  pending: false,
-  hours: 24,
-  events: [{ at: new Date(Date.now() - 900000).toISOString(), at_label: null, kind: "mail", text: "dali to all: the search lane is merged" }],
-});
-const WAITING = JSON.stringify({ at: null, stale_since: null, error: null, pending: true, hours: 24, events: [] });
-
-for (const [name, body, wants, forbids] of [
-  ["a quiet office says the agents were silent", QUIET, /have not said anything/, /could not be read/],
-  ["a failed read says what failed", BROKEN, /could not be read|did not answer/, /have not said anything/],
-  ["an old answer is shown with the reason it is old", OLD, /search lane is merged/, /have not said anything/],
-]) {
-  const { page, context, thrown } = await open({
-    hash: "#/overview",
-    overrides: { "/api/mail/feed": body },
-  });
-  const card = await page.evaluate(() => {
-    const found = [...document.querySelectorAll(".card")].find((node) => /^Last said/.test(node.innerText));
-    return found ? found.innerText : "";
-  });
-  check(`last said: ${name}`, wants.test(card) && !forbids.test(card) && thrown.length === 0, card.replace(/\s+/g, " ").slice(0, 140));
+  await page.click('[data-lane-end="retire"]');
+  await page.waitForTimeout(400);
+  const said = await page.evaluate(() => document.querySelector(".confirm").innerText.replace(/\s+/g, " "));
+  check("retiring says the runner will not start it again", /will not\s+start it again/.test(said), said.slice(0, 160));
+  await page.click('[data-confirm-yes="retire"]');
+  await page.waitForTimeout(900);
+  check("retiring posts the retirement", writes.length === 1 && writes[0].retire === true, JSON.stringify(writes));
   await context.close();
 }
 
 {
   const { page, context } = await open({
-    hash: "#/overview",
-    overrides: { "/api/mail/feed": WAITING },
+    hash: "#/board?agent=demo-api-3f2a",
+    overrides: {
+      "/api/agent": JSON.stringify({
+        slug: "demo-api-3f2a", project: "demo", lane: "api", status: "running",
+        started_at: Math.floor(Date.now() / 1000) - 600,
+      }),
+    },
   });
-  const seen = await page.evaluate(() => {
-    const found = [...document.querySelectorAll(".card")].find((node) => /^Last said/.test(node.innerText));
-    return { text: found ? found.innerText : "", bones: found ? found.querySelectorAll(".skeleton").length : 0 };
-  });
-  check("last said: a first pass that has not run yet waits, it does not report silence",
-    seen.bones > 0 && !/have not said anything/.test(seen.text), `${seen.bones} placeholders, "${seen.text.replace(/\s+/g, " ").slice(0, 80)}"`);
+  const offered = await page.evaluate(() => [...document.querySelectorAll("[data-lane-end]")].map((node) => node.textContent));
+  check("a lane with no restart policy has one ending, not two",
+    offered.join(" | ") === "Stop this lane", offered.join(" | "));
   await context.close();
 }
 
-/* -------------------------------------------------------------------- how much it asks for */
+{
+  const said = "that lane is not running any more";
+  const { page, context } = await open({
+    hash: "#/board?agent=demo-api-3f2a",
+    overrides: {
+      "/api/agents/kill": (handler) => handler.fulfill({
+        status: 409, contentType: "application/json", body: JSON.stringify({ error: said }),
+      }),
+    },
+  });
+  await page.click('[data-lane-end="stop"]');
+  await page.waitForTimeout(300);
+  await page.click('[data-confirm-yes="stop"]');
+  await page.waitForTimeout(900);
+  const toast = await page.evaluate(() => document.getElementById("toasts").innerText);
+  check("a refused stop shows the reason the server gave", toast.includes(said), toast);
+  await context.close();
+}
+
+/* ---------------------------------------------------------------- the read-only page */
+
+{
+  const { page, context, thrown } = await open({
+    hash: "#/board?agent=demo-api-3f2a",
+    overrides: { "/api/access": READ_ONLY },
+  });
+  const off = await page.evaluate(() => {
+    const controls = [...document.querySelectorAll("#powerMode button, [data-lane-end], #drawerBody .composer button, #drawerBody .composer textarea")];
+    return {
+      count: controls.length,
+      allOff: controls.every((node) => node.disabled),
+      said: document.body.innerText.includes("This page was opened without the dashboard token."),
+      marked: document.body.classList.contains("readonly"),
+    };
+  });
+  check("a page with no token has every write control on the board switched off",
+    off.count >= 8 && off.allOff, JSON.stringify(off));
+  check("and it says why, in the server's own words", off.said && off.marked, JSON.stringify(off));
+  check("a read-only board breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+{
+  const { page, context } = await open({
+    hash: "#/mail",
+    overrides: { "/api/access": READ_ONLY },
+  });
+  const off = await page.evaluate(() => {
+    const controls = [...document.querySelectorAll(".composer button, .composer textarea")];
+    return {
+      count: controls.length,
+      allOff: controls.every((node) => node.disabled),
+      said: document.getElementById("view").innerText.includes("This page was opened without the dashboard token."),
+    };
+  });
+  check("a page with no token cannot send a message either",
+    off.count >= 2 && off.allOff && off.said, JSON.stringify(off));
+  await context.close();
+}
+
+/* ------------------------------------------------------------- the power setting */
+
+{
+  const writes = [];
+  const { page, context, thrown } = await open({
+    hash: "#/board",
+    overrides: {
+      "/api/mode": (handler) => {
+        const request = handler.request();
+        if (request.method() !== "POST") return handler.continue();
+        writes.push(JSON.parse(request.postData() || "{}"));
+        return handler.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      },
+    },
+  });
+  const buttons = await page.evaluate(() => [...document.querySelectorAll("#powerMode button")].map((node) => node.textContent));
+  check("the header offers the four settings and Automatic",
+    buttons.join(" | ") === "Full | Shared | Background | Paused | Automatic", buttons.join(" | "));
+  await page.click('[data-power="balanced"]');
+  await page.waitForTimeout(900);
+  check("pressing one posts it", writes.some((row) => row.mode === "balanced"), JSON.stringify(writes));
+  check("the power setting breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* The office's own list: it has to draw, and pressing the button has to cost one read. The
+   pane used to ask for the conversation and the list in turn, each dropping the other from the
+   tick, which is six grey bars forever and two hundred reads of the office a second. */
+{
+  const { page, context, thrown, asked } = await open({ hash: "#/mail?to=winston" });
+  const before = asked.length;
+  await page.click("[data-timeline]");
+  await page.waitForTimeout(2500);
+  const rows = await page.evaluate(() => document.querySelectorAll(".feed .item").length);
+  const since = asked.slice(before);
+  const feed = since.filter((url) => url.includes("/api/mail/feed")).length;
+  const thread = since.filter((url) => url.includes("/api/mail/thread")).length;
+  check("everything the office did draws its rows", rows > 0, `${rows} rows`);
+  check("pressing it reads the office once and never loops",
+    feed === 1 && thread === 0, `${feed} reads of the list, ${thread} of the conversation`);
+  check("the office's list throws nothing", thrown.length === 0, thrown[0]);
+  const skeletons = await page.evaluate(() => document.querySelectorAll(".thread .skeleton").length);
+  check("and it is not still loading", skeletons === 0, `${skeletons} grey bars`);
+  await context.close();
+}
+
+/* ------------------------------------------------------- how much the mail asks for */
 
 {
   const seen = {};
-  for (let index = 0; index < 20; index += 1) seen[`box${index}`] = new Date(Date.now() - 86400000).toISOString();
+  for (let index = 0; index < 20; index += 1) seen[`name${index}`] = new Date(Date.now() - 86400000).toISOString();
   const boxes = Object.keys(seen).map((name, index) => ({
     name, number: index, updated_at: Date.now() / 1000, count_24h: 3, last_at: Date.now() / 1000,
   }));
@@ -455,7 +831,7 @@ for (const [name, body, wants, forbids] of [
   await page.waitForTimeout(2500);
   const threads = asked.filter((url) => url.includes("/api/mail/thread"));
   const distinct = new Set(threads.map((url) => new URL(url).searchParams.get("box")));
-  check("mail reads one thread, the one on screen", distinct.size <= 1, `${distinct.size} boxes, ${threads.length} requests`);
+  check("mail reads one conversation, the one on screen", distinct.size <= 1, `${distinct.size} names, ${threads.length} requests`);
   await context.close();
 }
 
@@ -467,7 +843,7 @@ for (const [name, body, wants, forbids] of [
     started_at: Math.floor(Date.now() / 1000) - index,
   }));
   const { page, context } = await open({
-    hash: "#/agents",
+    hash: "#/board",
     overrides: { "/api/fleet": JSON.stringify(many) },
   });
   const first = await page.evaluate(() => document.querySelectorAll("[data-agent-card]").length);
@@ -486,7 +862,7 @@ for (const [name, body, wants, forbids] of [
 /* ------------------------------------------------------------ a lane that dropped work */
 
 {
-  const { page, context } = await open({ hash: "#/agents" });
+  const { page, context } = await open({ hash: "#/board" });
   const chip = await page.evaluate(() => {
     const card = document.querySelector('[data-agent-card="storefront-checkout-77c1"]');
     const tag = card && card.querySelector("[data-scope-dropped]");
@@ -507,7 +883,7 @@ for (const [name, body, wants, forbids] of [
 
 /* ------------------------------------------------------- the palette, from every tab */
 
-for (const [hash, name] of [["#/system", "system"], ["#/projects", "projects"], ["#/accounts", "accounts"]]) {
+for (const [hash, name] of [["#/mail", "mail"], ["#/queue", "queue"], ["#/machine", "machine"]]) {
   const { page, context, thrown } = await open({ hash });
   await page.keyboard.press("Meta+k");
   await page.waitForTimeout(400);
@@ -519,14 +895,15 @@ for (const [hash, name] of [["#/system", "system"], ["#/projects", "projects"], 
   await page.keyboard.press("Enter");
   await page.waitForTimeout(700);
   const where = await page.evaluate(() => location.hash);
-  check(`${name}: Enter lands on the lane that was typed`, where.includes("agent=demo-api-3f2a"), where);
+  check(`${name}: Enter lands on the lane that was typed`,
+    where.includes("board") && where.includes("agent=demo-api-3f2a"), where);
   await page.keyboard.press("Escape");
   await page.keyboard.press("Meta+k");
   await page.waitForTimeout(400);
   await page.fill("#paletteInput", "rubicon");
   await page.waitForTimeout(900);
-  const boxes = await page.evaluate(() => [...document.querySelectorAll("#paletteList li")].map((node) => node.textContent));
-  check(`${name}: the palette offers a mailbox too`, boxes.some((row) => row.includes("Mailbox")), boxes.join(" | "));
+  const names = await page.evaluate(() => [...document.querySelectorAll("#paletteList li")].map((node) => node.textContent));
+  check(`${name}: the palette offers a conversation too`, names.some((row) => row.includes("Conversation")), names.join(" | "));
   check(`${name}: opening the palette breaks nothing`, thrown.length === 0, thrown[0]);
   await context.close();
 }
@@ -535,115 +912,47 @@ for (const [hash, name] of [["#/system", "system"], ["#/projects", "projects"], 
 
 {
   const { page, context, thrown } = await open({
-    hash: "#/accounts",
+    hash: "#/board",
     overrides: {
       "/api/accounts": JSON.stringify({
         at: Date.now() / 1000,
         accounts: [
           { name: "farm-one", label: "farm one", engine: "claude", read_at: null,
             session: null, weekly: null, scoped: [],
-            stale_error: "This account has no login on the farm yet. Log in once: ssh -t farm claude" },
+            stale_error: "This account has no login on the farm yet." },
           { name: "farm-two", label: "farm two", engine: "claude", read_at: Date.now() / 1000 - 900,
-            session: 42, weekly: 71, scoped: [],
-            stale_error: "The vendor did not answer the last time the farm asked." },
-          { name: "codex", label: "codex", engine: "codex", read_at: null,
-            session: 30, weekly: null, scoped: [],
-            stale_error: "The login on this account has expired. Log in again." },
+            session: 100, weekly: 71, scoped: [], limit_reached: true },
         ],
         errors: {},
       }),
     },
   });
   const body = await text(page);
-  check("a card with no numbers says so in words", /No numbers yet\. This account has no login on the farm yet\./.test(body), body.slice(0, 200));
-  check("a kept reading says when it was last true",
-    /These numbers are as of 15m ago and have not refreshed\. The vendor did not answer/.test(body));
-  check("a card with no time never writes one",
-    /These numbers have not refreshed\. The login on this account has expired\./.test(body));
-  check("no card ever says \"from not known\"", !/from not known/.test(body));
+  const red = await page.evaluate(() => {
+    const card = document.querySelector('[data-account="farm-two"]');
+    return card ? { out: card.classList.contains("out"), text: card.innerText.replace(/\s+/g, " ") } : null;
+  });
+  check("a subscription with no numbers says so in words",
+    /No window has reported a number yet/.test(body), body.replace(/\s+/g, " ").slice(0, 160));
+  check("a subscription with nothing left is red and says so",
+    red && red.out && /Out of room/.test(red.text), JSON.stringify(red));
   check("no card prints an exception or a path",
     !/Error:|Errno|\/private\/|\/home\//.test(body), body.slice(0, 200));
-  check("a card with nothing to report breaks nothing", thrown.length === 0, thrown[0]);
+  check("a subscription card with nothing to report breaks nothing", thrown.length === 0, thrown[0]);
+  await page.click('[data-account="farm-two"]');
+  await page.waitForTimeout(600);
+  const where = await page.evaluate(() => location.hash);
+  check("and pressing it opens the machine tab at the accounts section",
+    where.includes("machine") && where.includes("section=accounts"), where);
   await context.close();
 }
 
-/* --------------------------------------------------------------- switching an engine */
-
-{
-  const writes = [];
-  const { page, context, thrown } = await open({
-    hash: "#/accounts",
-    overrides: {
-      "/api/models": (handler) => {
-        const request = handler.request();
-        if (request.method() !== "POST") return handler.continue();
-        writes.push(JSON.parse(request.postData() || "{}"));
-        return handler.fulfill({
-          status: 200, contentType: "application/json",
-          body: JSON.stringify({ model: { id: "codex" }, error: null }),
-        });
-      },
-    },
-  });
-  const controls = await page.evaluate(() => ({
-    switches: document.querySelectorAll("[data-engine-switch]").length,
-    tests: document.querySelectorAll("[data-engine-test]").length,
-    word: (document.querySelector('[data-engine-switch="codex"]') || {}).textContent || "",
-  }));
-  check("every engine card carries a switch and a test",
-    controls.switches === 3 && controls.tests === 3, JSON.stringify(controls));
-  check("the switch says what pressing it does", controls.word === "Switch off", controls.word);
-  await page.click('[data-engine-switch="codex"]');
-  await page.waitForTimeout(1000);
-  check("switching an engine off posts the action the server understands",
-    writes.some((row) => row.action === "disable" && row.id === "codex"), JSON.stringify(writes));
-  await page.click('[data-engine-test="codex"]');
-  await page.waitForTimeout(1000);
-  check("the test button asks the server to try that engine",
-    writes.some((row) => row.action === "test" && row.id === "codex"), JSON.stringify(writes));
-  check("the engine controls break nothing", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
-{
-  const { page, context } = await open({
-    hash: "#/accounts",
-    overrides: {
-      "/api/access": JSON.stringify({ writable: false, reason: "This page was opened without the dashboard token.", token_required: true, loopback: false }),
-    },
-  });
-  const off = await page.evaluate(() => [...document.querySelectorAll("[data-engine-switch], [data-engine-test]")]
-    .every((node) => node.disabled));
-  check("a reader who cannot write cannot switch an engine", off);
-  await context.close();
-}
-
-/* ------------------------------------------------------- what the server said about a refusal */
-
-{
-  const said = "a repository is owner/name";
-  const { page, context, thrown } = await open({
-    hash: "#/projects",
-    overrides: {
-      "/api/projects": (handler) => (handler.request().method() === "POST"
-        ? handler.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: said }) })
-        : handler.continue()),
-    },
-  });
-  await page.fill("#projectName", "broken");
-  await page.fill("#projectRepo", "not a repository");
-  await page.evaluate(() => [...document.querySelectorAll("button")].find((node) => node.textContent === "Add").click());
-  await page.waitForTimeout(1200);
-  const shown = await page.evaluate(() => [...document.querySelectorAll(".readonly-note")].map((node) => node.textContent).join(" | "));
-  check("a refused project shows the reason the server gave", shown.includes(said), shown);
-  check("a refused project breaks nothing", thrown.length === 0, thrown[0]);
-  await context.close();
-}
+/* ------------------------------------------------- what the server said about a refusal */
 
 {
   const said = "that lane is not running any more";
   const { page, context } = await open({
-    hash: "#/agents?agent=demo-api-3f2a",
+    hash: "#/board?agent=demo-api-3f2a",
     overrides: {
       "/api/agent/msg": (handler) => handler.fulfill({
         status: 400, contentType: "application/json", body: JSON.stringify({ error: said }),
@@ -658,8 +967,104 @@ for (const [hash, name] of [["#/system", "system"], ["#/projects", "projects"], 
   await context.close();
 }
 
-/* Twenty five code names is what a real office holds, and two of the issues carry one name.
-   The list has to be one row per name, newest first, and short enough to read. */
+/* ------------------------------------------------------------------- the mail, in use */
+
+{
+  const sent = [];
+  const { page, context, thrown } = await open({
+    hash: "#/mail",
+    overrides: {
+      "/api/mail/send": (handler) => {
+        sent.push(JSON.parse(handler.request().postData() || "{}"));
+        return handler.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, to: "all", from: "dashboard" }) });
+      },
+    },
+  });
+  const label = await page.evaluate(() => document.querySelector(".composer-label").textContent);
+  check("the composer says who the message goes to", label === "Message to Everyone", label);
+  const under = await page.evaluate(() => document.querySelector(".composer .readonly-note").textContent);
+  check("and that it is not sent as the reader", under === "Sent as dashboard, not as you", under);
+  await page.fill("#mailText", "the search lane is done");
+  await page.click("#mailSend");
+  await page.waitForTimeout(1200);
+  const echo = await page.evaluate(() => {
+    const row = document.querySelector("[data-echo]");
+    return row ? { state: row.dataset.echo, text: row.innerText.replace(/\s+/g, " ") } : null;
+  });
+  check("a sent message appears at once and says where it is",
+    echo && echo.state === "sent" && /sent, it will show here at the next refresh/.test(echo.text),
+    JSON.stringify(echo));
+  check("and it went to the conversation on screen", sent.length === 1 && sent[0].to === "all", JSON.stringify(sent));
+  check("sending breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+{
+  const { page, context } = await open({
+    hash: "#/mail",
+    overrides: {
+      "/api/mail/send": (handler) => handler.fulfill({
+        status: 503, contentType: "application/json", body: JSON.stringify({ error: "the office is still being read" }),
+      }),
+    },
+  });
+  await page.fill("#mailText", "a sentence the reader does not want to type twice");
+  await page.click("#mailSend");
+  await page.waitForTimeout(1200);
+  const after = await page.evaluate(() => ({
+    kept: document.getElementById("mailText").value,
+    toast: document.getElementById("toasts").innerText,
+    echoes: document.querySelectorAll("[data-echo]").length,
+  }));
+  check("a message the office refused is left in the box for another try",
+    after.kept === "a sentence the reader does not want to type twice" && after.echoes === 0, JSON.stringify(after));
+  check("and the refusal is said in the server's words", /still being read/.test(after.toast), after.toast);
+  await context.close();
+}
+
+/* The panes are fixed and the page under them does not move, however long the conversation. */
+
+{
+  const now = Date.now() / 1000;
+  const many = Array.from({ length: 120 }, (unused, index) => ({
+    sender: index % 2 ? "winston" : "rubicon",
+    at: `${index}m ago`, created_at: now - index * 60,
+    text: `line ${index}: something that was said about the orders screen and the checkout lane`,
+  })).reverse();
+  const { page, context } = await open({
+    hash: "#/mail",
+    overrides: {
+      "/api/mail/thread": JSON.stringify({
+        at: new Date().toISOString(), stale_since: null, error: null, pending: null,
+        box: "all", window_hours: 72, messages: many,
+      }),
+    },
+  });
+  const seen = await page.evaluate(() => ({
+    pageScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+    threadScrolls: (() => {
+      const pane = document.querySelector(".thread-pane .pane-scroll");
+      return pane.scrollHeight > pane.clientHeight + 1;
+    })(),
+    composerInView: (() => {
+      const box = document.querySelector(".composer").getBoundingClientRect();
+      return box.bottom <= window.innerHeight + 1;
+    })(),
+    days: document.querySelectorAll(".thread .day").length,
+  }));
+  check("a long conversation scrolls inside its own pane, not the page",
+    !seen.pageScrolls && seen.threadScrolls, JSON.stringify(seen));
+  const bottom = await page.evaluate(() => {
+    const pane = document.querySelector(".thread-pane .pane-scroll");
+    return { left: pane.scrollHeight - pane.scrollTop - pane.clientHeight, height: pane.scrollHeight };
+  });
+  check("and it opens at the newest message, not the oldest", bottom.left < 48, JSON.stringify(bottom));
+  check("the composer stays on the screen under it", seen.composerInView, JSON.stringify(seen));
+  check("the messages are separated by day", seen.days > 0, String(seen.days));
+  await context.close();
+}
+
+/* Twenty five code names is what a real office holds, and two of the records carry one name. */
 
 {
   const now = Date.now() / 1000;
@@ -673,16 +1078,18 @@ for (const [hash, name] of [["#/system", "system"], ["#/projects", "projects"], 
     overrides: { "/api/mail/boxes": JSON.stringify({ at: new Date().toISOString(), stale_since: null, error: null, pending: null, boxes }) },
   });
   const read = () => page.evaluate(() => ({
-    names: [...document.querySelectorAll(".boxlist li span:first-child")].map((node) => node.textContent),
-    button: document.querySelector(".boxlist-more button") ? document.querySelector(".boxlist-more button").textContent : "",
+    names: [...document.querySelectorAll(".conversations li")].map((node) => node.dataset.conversation),
+    first: document.querySelector(".conversations li .name").textContent,
+    button: document.querySelector(".pane-more button") ? document.querySelector(".pane-more button").textContent : "",
   }));
   const first = await read();
-  check("one name is one mailbox however many issues carry it",
+  check("one name is one conversation however many records carry it",
     first.names.filter((name) => name === "winston").length === 1, first.names.join(", "));
   check("a long office list stops at twelve and offers the rest",
     first.names.length === 12 && first.button === "Show all 24", `${first.names.length} rows, button ${first.button}`);
-  check("the box everybody reads is first", first.names[0] === "all", first.names.slice(0, 3).join(", "));
-  await page.click(".boxlist-more button");
+  check("the conversation everybody reads is first and is called Everyone",
+    first.names[0] === "all" && first.first === "Everyone", `${first.names[0]} / ${first.first}`);
+  await page.click(".pane-more button");
   await page.waitForTimeout(400);
   const all = await read();
   check("asking for the rest shows them", all.names.length === 24 && all.button === "Show fewer",
@@ -691,11 +1098,43 @@ for (const [hash, name] of [["#/system", "system"], ["#/projects", "projects"], 
   await context.close();
 }
 
+/* The people pane and the conversation list give way on a small screen, per amendment 17. */
+
+{
+  const { page, context } = await open({ hash: "#/mail", size: { width: 1000, height: 800 } });
+  const narrow = await page.evaluate(() => ({
+    people: getComputedStyle(document.querySelector(".people-pane")).display,
+    count: document.querySelector(".people-count") ? document.querySelector(".people-count").textContent : "",
+    countShown: document.querySelector(".people-count") && getComputedStyle(document.querySelector(".people-count")).display !== "none",
+  }));
+  check("under 1100 px the people pane is a count in the thread header",
+    narrow.people === "none" && narrow.countShown && /^People \(\d\)$/.test(narrow.count), JSON.stringify(narrow));
+  await page.click(".people-count");
+  await page.waitForTimeout(400);
+  const opened = await page.evaluate(() => getComputedStyle(document.querySelector(".people-pane")).display);
+  check("and pressing the count shows the people", opened !== "none", opened);
+  await context.close();
+}
+
+{
+  const { page, context } = await open({ hash: "#/mail", size: { width: 700, height: 800 } });
+  const phone = await page.evaluate(() => ({
+    list: getComputedStyle(document.querySelector(".conversations-pane")).display,
+    pick: getComputedStyle(document.querySelector(".convo-select")).display,
+    options: document.querySelectorAll(".convo-select option").length,
+    pageScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+  }));
+  check("under 800 px the conversations become a select above the thread",
+    phone.list === "none" && phone.pick !== "none" && phone.options > 0, JSON.stringify(phone));
+  check("and the page still does not scroll", !phone.pageScrolls, JSON.stringify(phone));
+  await context.close();
+}
+
 /* ------------------------------------------------------------------ the freshness label */
 
 {
   const { page, context } = await open({
-    hash: "#/agents",
+    hash: "#/board",
     overrides: { "/api/fleet": (handler) => handler.fulfill({ status: 500, contentType: "application/json", body: '{"error":"the state directory is gone"}' }) },
   });
   const label = await page.evaluate(() => document.getElementById("freshness").textContent);
@@ -718,19 +1157,39 @@ for (const [hash, name] of [["#/system", "system"], ["#/projects", "projects"], 
     label: document.getElementById("freshness").textContent,
     why: document.getElementById("freshness").title,
     stale: document.getElementById("freshness").classList.contains("stale"),
-    boxes: document.querySelectorAll(".boxlist li").length,
+    rows: document.querySelectorAll(".conversations li").length,
   }));
   check("a kept answer from the office stops the header saying live", /^Stale since /.test(seen.label), seen.label);
   check("the header says on hover which route is old and why",
     seen.why.includes("/api/mail/boxes") && seen.why.includes("github.com"), seen.why);
   // Nothing here failed: the request worked, the answer itself said it was a kept copy.
   check("the header is marked old even though every request worked",
-    seen.stale && seen.boxes > 0, JSON.stringify(seen));
+    seen.stale && seen.rows > 0, JSON.stringify(seen));
   await context.close();
 }
 
 {
-  const { page, context } = await open({ hash: "#/agents" });
+  const { page, context } = await open({
+    hash: "#/mail",
+    overrides: {
+      "/api/mail/who": JSON.stringify({
+        at: new Date().toISOString(), stale_since: new Date(Date.now() - 360000).toISOString(),
+        error: null, pending: null,
+        sessions: [{ name: "winston", state: "live", age_hours: 0.2, since: null, task: "the orders screen" }],
+      }),
+    },
+  });
+  const said = await page.evaluate(() => document.querySelector(".people-pane").innerText.replace(/\s+/g, " "));
+  check("an old reading of the office says so in the reader's words",
+    /The office last answered \d/.test(said), said.slice(0, 120));
+  // Nothing in the People pane is a message, so the sentence over it says what it is about.
+  check("and the sentence over a list of people is about people",
+    /people it knew about then/.test(said) && !/message/i.test(said), said.slice(0, 160));
+  await context.close();
+}
+
+{
+  const { page, context } = await open({ hash: "#/board" });
   const label = await page.evaluate(() => document.getElementById("freshness").textContent);
   check("nothing old and nothing failing still reads live", /^Live, as of /.test(label), label);
   await context.close();

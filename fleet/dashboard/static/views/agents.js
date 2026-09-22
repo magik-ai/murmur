@@ -1,6 +1,7 @@
-/* Agents: who is running, on what, and how far. A card grid for looking, a table for
-   counting, and a drawer for one lane. The drawer is a drawer and not a modal on purpose:
-   the list stays on screen, so the reader never loses the place they came from. */
+/* The agents pane of the Board: who is running, on what, and how far. A card grid for
+   looking, a table for counting, and a drawer for one lane. The drawer is a drawer and not a
+   modal on purpose: the list stays on screen, so the reader never loses the place they came
+   from. This file is a pane, not a tab: the Board draws it next to the queue. */
 
 import {
   h, card, panel, pill, emptyState, skeletonStack, agentMeaning, MEANINGS,
@@ -19,8 +20,11 @@ const local = {
   showAll: false,
   spawner: "",
   status: "",
+  search: "",
   sortKey: "started_at",
   sortDir: -1,
+  confirm: "",
+  busy: false,
 };
 
 function readMode() {
@@ -38,13 +42,54 @@ function setMode(mode) {
   } catch (error) { /* the choice lasts for this page only */ }
 }
 
-function visible(rows, context) {
-  return rows.filter((row) => {
-    if (context.project && row.project !== context.project) return false;
-    if (local.spawner && (row.spawned_by || "") !== local.spawner) return false;
-    if (local.status && agentMeaning(row.status) !== local.status) return false;
-    return true;
+/** The number in a change's address, so "412" finds the lane whose change is #412. */
+function changeNumber(row) {
+  if (row.pr != null && row.pr !== "") return String(row.pr);
+  const found = String(row.pr_url || "").match(/(\d+)(?:\/?$)/);
+  return found ? found[1] : "";
+}
+
+/* What the search box looks at: the lane, the branch and the number of the change. Nothing
+   else, because a search that also reads the brief finds every lane on the farm at once. */
+function matches(row, needle) {
+  if (!needle) return true;
+  const hay = [row.slug, row.lane, row.branch, changeNumber(row)]
+    .filter(Boolean).join(" ").toLowerCase();
+  return hay.includes(needle);
+}
+
+/* Which lanes a filter leaves on screen. Pure, and the only place the rule lives, so the
+   rule can be read and checked without a browser.
+
+   A status outside the five meanings is not a filter, it is a value that arrived from
+   somewhere it should not have, and the answer to that is to show every lane rather than an
+   empty pane telling the reader to clear a filter they already cleared. */
+export function filterAgents(rows, filter = {}) {
+  const needle = String(filter.search || "").trim().toLowerCase();
+  const spawner = filter.spawner || "";
+  const status = filter.status && MEANINGS[filter.status] ? filter.status : "";
+  return list(rows).filter((row) => {
+    if (filter.project && row.project !== filter.project) return false;
+    if (spawner && (row.spawned_by || "") !== spawner) return false;
+    if (status && agentMeaning(row.status) !== status) return false;
+    return matches(row, needle);
   });
+}
+
+function visible(rows, context) {
+  return filterAgents(rows, {
+    project: context.project,
+    spawner: local.spawner,
+    status: local.status,
+    search: local.search,
+  });
+}
+
+/* What a select means when the reader picks something in it. The first option of each of
+   these two is the one that clears it, so it is read by position: a label can change, and a
+   reader who picks "Anyone" is asking for every lane, never for none. */
+function chosen(select) {
+  return select.selectedIndex === 0 ? "" : select.value;
 }
 
 function glyph(name) {
@@ -54,7 +99,8 @@ function glyph(name) {
 
 /* ------------------------------------------------------------- filters */
 
-function chips(rows, context) {
+/** Who started a lane and what state it is in, each with how many lanes are behind it. */
+function counts(rows, context) {
   const spawners = new Map();
   const statuses = new Map();
   for (const row of rows) {
@@ -64,36 +110,73 @@ function chips(rows, context) {
     const meaning = agentMeaning(row.status);
     statuses.set(meaning, (statuses.get(meaning) || 0) + 1);
   }
-  return h("div", { class: "chips" },
-    chip("All", !local.status && !local.spawner, () => {
-      local.status = "";
-      local.spawner = "";
-      context.paint();
-    }, rows.length),
-    [...statuses.entries()].sort().map(([meaning, count]) => chip(
-      MEANINGS[meaning].label,
-      local.status === meaning,
-      () => {
-        local.status = local.status === meaning ? "" : meaning;
-        context.paint();
-      },
-      count,
-      `status:${meaning}`)),
-    [...spawners.entries()].sort().map(([name, count]) => chip(
-      `by ${name}`,
-      local.spawner === name,
-      () => {
-        local.spawner = local.spawner === name ? "" : name;
-        context.paint();
-      },
-      count,
-      `by:${name}`)));
+  return { spawners, statuses };
 }
 
-function chip(label, pressed, onclick, count, key) {
-  return h("button", { class: "chip", key: key || label, "aria-pressed": String(Boolean(pressed)), onclick },
-    h("span", null, label),
-    count == null ? null : h("span", { class: "count" }, String(count)));
+/* Two selects and a search box, which is what the owner asked for in place of a row of
+   twenty chips: a farm with twenty code names cannot be filtered by pressing one of twenty. */
+function controls(rows, context, shown) {
+  const { spawners, statuses } = counts(rows, context);
+  const started = [["", `Anyone (${rows.length})`],
+    ...[...spawners.entries()].sort().map(([name, count]) => [name, `${name} (${count})`])];
+  const states = [["", `Any status (${rows.length})`],
+    ...Object.keys(MEANINGS).map((meaning) => [meaning,
+      `${MEANINGS[meaning].label} (${statuses.get(meaning) || 0})`])];
+  return h("div", { class: "pane-controls", key: "controls" },
+    labelled("Started by", h("select", {
+      id: "agentSpawner",
+      onchange: (event) => {
+        local.spawner = chosen(event.target);
+        context.paint();
+      },
+    }, started.map(([value, label]) => h("option", {
+      key: value || "any", value, selected: value === local.spawner,
+    }, label)))),
+    labelled("Status", h("select", {
+      id: "agentStatus",
+      onchange: (event) => {
+        local.status = chosen(event.target);
+        context.paint();
+      },
+    }, states.map(([value, label]) => h("option", {
+      key: value || "any", value, selected: value === local.status,
+    }, label)))),
+    h("input", {
+      id: "agentSearch",
+      type: "search",
+      class: "search",
+      value: local.search,
+      placeholder: "Lane, branch or change number",
+      "aria-label": "Search the lanes by lane, branch or change number",
+      oninput: (event) => {
+        local.search = event.target.value;
+        local.showAll = false;
+        context.paint();
+      },
+    }),
+    h("span", { class: "muted count-line" }, `${shown.length} of ${rows.length}`),
+    h("div", { class: "spacer" }),
+    h("div", { class: "segmented" },
+      h("button", {
+        type: "button",
+        "aria-pressed": String(local.mode === "cards"),
+        onclick: () => {
+          setMode("cards");
+          context.paint();
+        },
+      }, "Cards"),
+      h("button", {
+        type: "button",
+        "aria-pressed": String(local.mode === "table"),
+        onclick: () => {
+          setMode("table");
+          context.paint();
+        },
+      }, "Table")));
+}
+
+function labelled(text, control) {
+  return h("label", { class: "field-label", key: text }, h("span", null, text), control);
 }
 
 /* --------------------------------------------------------------- cards */
@@ -106,7 +189,7 @@ function agentCard(row, context) {
     type: "button",
     class: "card agent-card",
     "data-agent-card": row.slug || "",
-    onclick: () => context.go("agents", { agent: row.slug }),
+    onclick: () => context.go("board", { agent: row.slug }),
   },
     h("div", { class: "head" },
       glyph(row.spawned_by || row.slug),
@@ -222,8 +305,8 @@ function table(rows, context) {
         tabindex: "0",
         role: "button",
         "data-agent-row": row.slug || "",
-        onclick: () => context.go("agents", { agent: row.slug }),
-        onkeydown: activate(() => context.go("agents", { agent: row.slug })),
+        onclick: () => context.go("board", { agent: row.slug }),
+        onkeydown: activate(() => context.go("board", { agent: row.slug })),
       },
         h("td", null, row.slug),
         h("td", null, row.project || "none"),
@@ -235,6 +318,98 @@ function table(rows, context) {
 }
 
 /* -------------------------------------------------------------- drawer */
+
+/* Stopping a lane and retiring it are two different things, and which of them is on offer is
+   the lane's own business: a lane with a restart policy is started again by the runner under
+   a new name, so stopping it is stopping this pass. A lane with no policy has one ending. */
+function endings(row) {
+  const policy = String((row && row.restart) || "").trim();
+  if (policy && policy !== "none") {
+    return [
+      {
+        id: "stop",
+        label: "Stop this pass",
+        retire: false,
+        says: `This ends the pass that is running now. The runner will start this lane again `
+          + `under a new name, because its restart policy is ${policy}.`,
+      },
+      {
+        id: "retire",
+        label: "Retire this lane",
+        retire: true,
+        says: "This ends the lane and takes its restart policy away, so the runner will not "
+          + "start it again. Its worktree and its branch are left where they are.",
+      },
+    ];
+  }
+  return [
+    {
+      id: "stop",
+      label: "Stop this lane",
+      retire: false,
+      says: "This ends the lane. It has no restart policy, so nothing will start it again. "
+        + "Its worktree and its branch are left where they are.",
+    },
+  ];
+}
+
+async function endLane(slug, choice, context) {
+  local.busy = true;
+  context.paint();
+  try {
+    const answer = await apiPost("/api/agents/kill", { slug, retire: choice.retire });
+    const again = answer && answer.restart ? `The runner will start it again: ${answer.restart}.` : "";
+    toast([(answer && answer.detail) || `${slug} was asked to stop.`, again].filter(Boolean).join(" "));
+    local.confirm = "";
+    await context.refresh("/api/fleet");
+    await context.refresh(`/api/agent?slug=${encodeURIComponent(slug)}`);
+  } catch (error) {
+    toast(serverReason(error) || `${slug} was not stopped.`, "bad");
+  } finally {
+    local.busy = false;
+    context.paint();
+  }
+}
+
+function endControls(slug, row, context) {
+  const allowed = access.writable;
+  const choices = endings(row);
+  const asked = choices.find((choice) => choice.id === local.confirm);
+  return h("div", { class: "lane-actions", key: "actions", "data-write": "" },
+    h("div", { class: "section-head" }, h("h3", null, "Ending this lane")),
+    asked
+      ? h("div", { class: "confirm", role: "group", "aria-label": `${asked.label}?` },
+        h("p", null, `${asked.label}? ${asked.says}`),
+        h("div", { class: "row" },
+          h("button", {
+            class: "button primary",
+            "data-confirm-yes": asked.id,
+            disabled: allowed && !local.busy ? null : true,
+            onclick: () => endLane(slug, asked, context),
+          }, local.busy ? "Working" : `Yes, ${asked.label.toLowerCase()}`),
+          h("button", {
+            class: "ghost-button",
+            disabled: local.busy ? true : null,
+            onclick: () => {
+              local.confirm = "";
+              context.paint();
+            },
+          }, "Cancel")))
+      : h("div", { class: "row" },
+        choices.map((choice) => h("button", {
+          key: choice.id,
+          class: choice.id === "retire" ? "ghost-button" : "button",
+          "data-lane-end": choice.id,
+          disabled: allowed ? null : true,
+          title: allowed ? choice.says : access.reason || "This dashboard is read-only.",
+          onclick: () => {
+            local.confirm = choice.id;
+            context.paint();
+          },
+        }, choice.label))),
+    allowed ? null : h("p", { class: "readonly-note" },
+      access.reason || "This dashboard is read-only."));
+}
 
 function detailBody(slug, context) {
   const detail = context.watch(`/api/agent?slug=${encodeURIComponent(slug)}`);
@@ -259,6 +434,7 @@ function detailBody(slug, context) {
           fact("Started", fmt.ago(row.started_at)),
           fact("Cost", fmt.money(row.cost_usd)),
           fact("Tokens", `${fmt.num(row.tokens_in)} in, ${fmt.num(row.tokens_out)} out`),
+          row.restart ? fact("Restart policy", String(row.restart)) : null,
           droppedScope(row) ? fact("Scope dropped",
             (row.scope.dropped || []).map((item) => String(item)).join(", ")) : null,
           row.branch ? fact("Branch", row.branch) : null,
@@ -294,6 +470,7 @@ function detailBody(slug, context) {
               (data.truncated ? "... earlier lines not shown ...\n" : "") + data.lines.join("\n")),
           })),
         composer(slug, context),
+        endControls(slug, row, context),
       ];
     },
   });
@@ -338,96 +515,77 @@ function composer(slug, context) {
       allowed ? null : h("span", { class: "readonly-note" }, access.reason || "This dashboard is read-only.")));
 }
 
-function syncDrawer(context, rows) {
+/** The drawer follows the address: one lane in the query, one lane open. */
+export function syncAgentDrawer(context, rows) {
   const wanted = context.params.get("agent") || "";
   const current = openDrawerKey();
   if (wanted && current !== wanted) {
     const row = rows.find((candidate) => candidate.slug === wanted);
+    local.confirm = "";
     openDrawer({
       key: wanted,
       title: wanted,
       sub: row ? [row.project, row.lane].filter(Boolean).join(" · ") : "",
       body: () => detailBody(wanted, context),
       onClose: () => {
+        local.confirm = "";
         context.drop(`/api/agent?slug=${encodeURIComponent(wanted)}`);
         context.drop(`/api/agent/log?slug=${encodeURIComponent(wanted)}&tail=200`);
-        context.go("agents");
+        context.go("board");
       },
     });
   }
   if (!wanted && current) closeDrawer();
 }
 
-/* ---------------------------------------------------------------- view */
+/* ----------------------------------------------------------- the pane */
 
-export default {
-  id: "agents",
-  title: "Agents",
-  needs: ["/api/fleet", "/api/projects"],
-  badge(context) {
-    const rows = list(context.res("/api/fleet").data);
-    const running = rows.filter((row) => agentMeaning(row.status) === "run").length;
-    return running || "";
-  },
-  render(context) {
-    const resource = context.res("/api/fleet");
-    const rows = list(resource.data);
-    if (context.params.get("status") && !local.status) local.status = context.params.get("status");
-    syncDrawer(context, rows);
-    const shown = visible(rows, context);
-    return [
-      h("div", { class: "section-head", key: "controls" },
-        chips(rows, context),
-        h("div", { class: "spacer" }),
-        h("div", { class: "segmented" },
-          h("button", {
-            "aria-pressed": String(local.mode === "cards"),
-            onclick: () => {
-              setMode("cards");
-              context.paint();
-            },
-          }, "Cards"),
-          h("button", {
-            "aria-pressed": String(local.mode === "table"),
-            onclick: () => {
-              setMode("table");
-              context.paint();
-            },
-          }, "Table"))),
-      panel(resource, {
-        loading: () => h("div", { class: "grid cards" },
-          [0, 1, 2].map((index) => card({ class: "card-pad", key: `sk${index}` }, skeletonStack(3)))),
-        isEmpty: () => shown.length === 0,
-        empty: () => emptyState({
-          title: rows.length ? "No agent matches this filter" : "No agents yet",
-          body: rows.length
-            ? "Clear the filters above to see every lane this farm knows about."
-            : "An agent is one lane of work on one branch. Start the first one with the command below.",
-          command: rows.length ? "" : `fleet spawn --project ${firstProject(context)} --lane first --task "the first thing you want done"`,
-        }),
-        ready: () => {
-          const drawn = local.showAll ? shown : shown.slice(0, FIRST_SCREENFUL);
-          const rest = shown.length - drawn.length;
-          return [
-            local.mode === "table"
-              ? table(drawn, context)
-              : h("div", { class: "grid cards", key: "cards" }, drawn.map((row) => agentCard(row, context))),
-            rest > 0 ? h("div", { class: "section-head", key: "more" },
-              h("button", {
-                class: "ghost-button",
-                onclick: () => {
-                  local.showAll = true;
-                  context.paint();
-                },
-              }, `Show the other ${rest}`)) : null,
-          ];
-        },
+/** The lanes, as the left half of the Board. The Board asks for /api/fleet on its behalf. */
+export function agentsPane(context) {
+  const resource = context.res("/api/fleet");
+  const rows = list(resource.data);
+  if (context.params.get("status") && !local.status) local.status = context.params.get("status");
+  syncAgentDrawer(context, rows);
+  const shown = visible(rows, context);
+  return h("section", { class: "pane agents-pane", key: "agents" },
+    h("div", { class: "pane-head" },
+      h("h2", null, "Agents"),
+      h("div", { class: "spacer" })),
+    controls(rows, context, shown),
+    h("div", { class: "pane-body" }, panel(resource, {
+      loading: () => h("div", { class: "grid cards" },
+        [0, 1, 2].map((index) => card({ class: "card-pad", key: `sk${index}` }, skeletonStack(3)))),
+      isEmpty: () => shown.length === 0,
+      empty: () => emptyState({
+        title: rows.length ? "No agent matches this filter" : "No agents yet",
+        body: rows.length
+          ? "Clear the two selects and the search box above to see every lane this farm knows about."
+          : "An agent is one lane of work on one branch. Start the first one with the command below.",
+        command: rows.length ? "" : spawnCommand(context),
       }),
-    ];
-  },
-};
+      ready: () => {
+        const drawn = local.showAll ? shown : shown.slice(0, FIRST_SCREENFUL);
+        const rest = shown.length - drawn.length;
+        return [
+          local.mode === "table"
+            ? table(drawn, context)
+            : h("div", { class: "grid cards", key: "cards" }, drawn.map((row) => agentCard(row, context))),
+          rest > 0 ? h("div", { class: "section-head", key: "more" },
+            h("button", {
+              class: "ghost-button",
+              onclick: () => {
+                local.showAll = true;
+                context.paint();
+              },
+            }, `Show the other ${rest}`)) : null,
+        ];
+      },
+    })));
+}
 
-function firstProject(context) {
+/** The command that produces the first agent, with a real project name in it. */
+export function spawnCommand(context) {
   const projects = list(context.res("/api/projects").data);
-  return projects.length ? projects[0].name : "<project>";
+  const name = projects.length ? projects[0].name : "<project>";
+  return `fleet spawn --project ${name} --lane first --task "the first thing you want done"`;
 }

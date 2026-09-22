@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import secrets
 import socket
 import sys
 import tempfile
@@ -70,6 +71,48 @@ def fake_tools(scripts, env=None):
                                         config=root / "config")
 
 
+@contextlib.contextmanager
+def snapshot_services(rows):
+    """The services snapshot holding exactly these rows, for a test that is about what a route
+    reads rather than about what the refresher found."""
+    with mock.patch.dict(dashboard._services_snapshot,
+                         {"at": "2026-09-22T08:00:00Z", "tried": True, "stale_since": None,
+                          "error": None, "services": rows}, clear=True):
+        yield
+
+
+@contextlib.contextmanager
+def blank_machine_snapshot():
+    """The live-numbers snapshot as it is before the first pass."""
+    with mock.patch.dict(dashboard._machine_snapshot,
+                         {"at": None, "tried": False, "stale_since": None, "error": None,
+                          "metrics": {}, "mode": {}, "sweep": {}}, clear=True):
+        yield
+
+
+class RecordingEvent(threading.Event):
+    """An event that counts its wakes. A test cannot simply read `is_set`: another suite leaves a
+    real refresher running, and that thread clears whatever event it finds whenever it pleases."""
+
+    def __init__(self):
+        super().__init__()
+        self.wakes = 0
+
+    def set(self):
+        self.wakes += 1
+        super().set()
+
+
+@contextlib.contextmanager
+def machine_snapshot(**parts):
+    """The live-numbers snapshot holding exactly these readings."""
+    payload = {"at": "2026-09-22T08:00:00Z", "tried": True, "stale_since": None, "error": None,
+               "metrics": {}, "mode": {}, "sweep": {}}
+    payload.update(parts)
+    with mock.patch.dict(dashboard._machine_snapshot, payload, clear=True):
+        yield
+
+
 def write_hq_config(box, repo="acme/office"):
     path = box.config / "hq" / "config.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,11 +158,12 @@ class DashboardServerTest(unittest.TestCase):
     def test_ci_queue_is_well_formed_before_the_coordinator_runs(self):
         with tempfile.TemporaryDirectory() as state:
             with mock.patch.object(dashboard, "STATE", state):
-                self.assertEqual(
-                    dashboard.ci_queue(),
-                    {"updated": None, "running": [], "queued": [], "recent": [],
-                     "daemon_alive": False},
-                )
+                with snapshot_services([{"id": "ci_runner", "state": "inactive"}]):
+                    self.assertEqual(
+                        dashboard.ci_queue(),
+                        {"updated": None, "running": [], "queued": [], "recent": [],
+                         "daemon_alive": False},
+                    )
 
     def test_ci_queue_uses_the_coordinator_refreshed_view(self):
         stored = {
@@ -152,8 +196,18 @@ class DashboardServerTest(unittest.TestCase):
                 mock.patch.object(
                     dashboard.CI, "read_state", return_value=refreshed
                 ) as read_state,
+                snapshot_services([{"id": "ci_runner", "state": "inactive"}]),
             ):
-                self.assertEqual(dashboard.ci_queue(), {**refreshed, "daemon_alive": False})
+                # Before the refresher has published, the route serves what is on disk and asks
+                # the refresher to look, rather than paying for git and gh on a read.
+                dashboard._ci_refresh_wake.clear()
+                self.assertEqual(dashboard.ci_queue(),
+                                 {**stored, "daemon_alive": False})
+                self.assertTrue(dashboard._ci_refresh_wake.is_set())
+                read_state.assert_not_called()
+                dashboard.ci_refresh_once()
+                self.assertEqual(dashboard.ci_queue(),
+                                 {**refreshed, "daemon_alive": False, "refresh_age": 0})
         read_state.assert_called_once_with(refresh=True)
 
     def test_ci_queue_falls_back_to_the_stored_shape_when_refresh_fails(self):
@@ -382,8 +436,9 @@ class DashboardServerTest(unittest.TestCase):
             with (
                 mock.patch.object(dashboard, "STATE", state),
                 mock.patch.object(dashboard.CI, "read_state", return_value=sample),
-                mock.patch.object(dashboard.MODE, "status", return_value={"route": "mode"}),
                 mock.patch.object(dashboard.MODELS, "listing", return_value=[{"route": "models"}]),
+                machine_snapshot(mode={"route": "mode"}),
+                snapshot_services([{"id": "ci_runner", "state": "inactive"}]),
             ):
                 server = dashboard.Server(("127.0.0.1", 0), dashboard.Handler)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -406,7 +461,9 @@ class DashboardServerTest(unittest.TestCase):
                             "truncated": False,
                         },
                     )
-                    self.assertEqual(get("/api/mode"), {"route": "mode"})
+                    self.assertEqual(get("/api/mode"),
+                                     {"route": "mode", "at": "2026-09-22T08:00:00Z",
+                                      "stale_since": None, "error": None, "pending": False})
                     self.assertEqual(get("/api/models"), [{"route": "models"}])
                 finally:
                     server.shutdown()
@@ -415,23 +472,20 @@ class DashboardServerTest(unittest.TestCase):
 
 
     def test_daemon_alive_tracks_the_unit_and_is_not_a_constant(self):
-        """Every assertion above would still pass if daemon_alive were hardcoded False."""
-        import subprocess
+        """Every assertion above would still pass if daemon_alive were hardcoded False.
 
-        real = subprocess.run
-        try:
-            with tempfile.TemporaryDirectory() as state:
-                with mock.patch.object(dashboard, "STATE", state):
-                    subprocess.run = lambda *a, **k: type(
-                        "R", (), {"stdout": "active\n", "returncode": 0}
-                    )()
+        The answer is the services snapshot's, so this drives the snapshot rather than a call:
+        the queue route is drawn every few seconds and must ask the machine nothing."""
+        with tempfile.TemporaryDirectory() as state:
+            with mock.patch.object(dashboard, "STATE", state):
+                with snapshot_services([{"id": "ci_runner", "state": "active"}]):
                     self.assertTrue(dashboard.ci_queue()["daemon_alive"])
-                    subprocess.run = lambda *a, **k: type(
-                        "R", (), {"stdout": "inactive\n", "returncode": 3}
-                    )()
+                with snapshot_services([{"id": "ci_runner", "state": "inactive"}]):
                     self.assertFalse(dashboard.ci_queue()["daemon_alive"])
-        finally:
-            subprocess.run = real
+                with snapshot_services([]):
+                    # Nobody has looked yet. "The queue is not being worked" would be a claim
+                    # this dashboard cannot make.
+                    self.assertIsNone(dashboard.ci_queue()["daemon_alive"])
 
 
 class AccountTroubleTest(unittest.TestCase):
@@ -501,6 +555,941 @@ class AccountTroubleTest(unittest.TestCase):
         self.assertIn("ssh -t farm claude", errors["farm-one"])
 
 
+# What `systemctl --user` really prints, which is not one format but two: a property whose NAME
+# carries `USec` is formatted as a timespan, and every other monotonic timestamp is a bare count
+# of microseconds since boot. A fake that printed the timespan for both hid the defect that every
+# service row said it had never become active.
+SYSTEMCTL_FAKE = """
+unit="$3"
+case "$2" in
+  is-active)
+    case "$unit" in
+      fleet-daemon.service) echo active; exit 0;;
+      fleet-ci.service) echo inactive; exit 3;;
+      fleet-sweep.timer) echo failed; exit 3;;
+    esac
+    echo unknown; exit 3;;
+  show)
+    echo "LoadState=loaded"
+    echo "ActiveEnterTimestampMonotonic=${FAKE_ACTIVE_ENTER_US:-586929396}"
+    echo "NextElapseUSecMonotonic=1d 1min 17.351398s"
+    echo "UnitFileState=enabled"
+    echo "Result=success"
+    exit 0;;
+esac
+exit 1
+"""
+
+
+def monotonic_microseconds(ago):
+    """This machine's CLOCK_MONOTONIC, `ago` seconds back, as systemd would print it.
+
+    Computed here rather than hardcoded: a fixed number is in the future on a machine that
+    booted a minute ago, and a stamp in the future is no stamp at all.
+    """
+    return str(max(0, int((time.clock_gettime(time.CLOCK_MONOTONIC) - ago) * 1e6)))
+# The session this dashboard is asked about is FLEET_DASH_SESSION's to name, so the fake answers
+# for whichever one the test points it at. Hardcoding "fleet-dashboard" here meant the suite
+# failed the moment anyone used the escape hatch it was written for.
+TMUX_FAKE = """
+case "$1 $3" in
+  "has-session ${FAKE_DASH_SESSION:-fleet-dashboard}") exit 0;;
+esac
+exit 1
+"""
+
+
+class ServicesTest(unittest.TestCase):
+    """The control room's four rows: the agent runner, the verification runner, the sweep timer
+    and this dashboard. Every one of them costs a process to read, so the refresher reads them
+    and the route serves what it left."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    @contextlib.contextmanager
+    def farm(self, scripts=None, **env):
+        blank = {"at": None, "tried": False, "stale_since": None, "error": None, "services": []}
+        environment = {"FAKE_ACTIVE_ENTER_US": monotonic_microseconds(90),
+                       "FAKE_DASH_SESSION": dashboard.DASH_SESSION}
+        environment.update(env)
+        with fake_tools({"systemctl": SYSTEMCTL_FAKE, "tmux": TMUX_FAKE}
+                        if scripts is None else scripts, env=environment) as box:
+            with mock.patch.dict(dashboard._services_snapshot, blank, clear=True):
+                yield box
+
+    def test_the_four_rows_carry_a_state_a_sentence_and_when_it_last_changed(self):
+        with self.farm() as box:
+            dashboard.services_refresh()
+            rows = dashboard.services()["services"]
+            self.assertIn("systemctl --user is-active fleet-daemon.service",
+                          box.calls.read_text())
+        self.assertEqual([row["id"] for row in rows],
+                         ["agent_runner", "ci_runner", "sweep_timer", "dashboard"])
+        by_id = {row["id"]: row for row in rows}
+        self.assertEqual(by_id["agent_runner"]["state"], "active")
+        self.assertEqual(by_id["ci_runner"]["state"], "inactive")
+        self.assertEqual(by_id["sweep_timer"]["state"], "failed")
+        for row in rows:
+            self.assertTrue(row["detail"], row["id"])
+            self.assertNotIn("Traceback", row["detail"])
+        # one clock: a moment, in UTC, like every other time this server hands out
+        since = dashboard.parse_iso(by_id["agent_runner"]["since"])
+        self.assertIsNotNone(since)
+        # and it says what the fake said: ninety seconds ago, not the epoch and not the future
+        ago = time.time() - since.timestamp()
+        self.assertTrue(80 < ago < 130, f"{by_id['agent_runner']['since']} is {ago}s ago")
+
+    def test_a_monotonic_stamp_is_read_in_both_the_formats_systemd_prints(self):
+        """systemd formats a property as a timespan only when its name carries `USec`.
+        ActiveEnterTimestampMonotonic does not, so it arrives as raw microseconds; reading that
+        as a timespan found no units in it, answered zero, and every row said `since: null`."""
+        self.assertEqual(dashboard._systemd_monotonic("586929396"), 586.929396)
+        self.assertEqual(dashboard._systemd_monotonic("1d 1min 17.351398s"), 86477.351398)
+        self.assertEqual(dashboard._systemd_monotonic("0"), 0.0)
+        self.assertEqual(dashboard._systemd_monotonic(""), 0.0)
+        self.assertEqual(dashboard._systemd_monotonic(None), 0.0)
+        facts = {"LoadState": "loaded",
+                 "ActiveEnterTimestampMonotonic": monotonic_microseconds(3600)}
+        since = dashboard.parse_iso(dashboard._unit_since(facts))
+        self.assertIsNotNone(since, "a real systemd stamp must not read as never")
+        self.assertAlmostEqual(time.time() - since.timestamp(), 3600, delta=30)
+        # a unit that has never been active prints a zero, and that is not a moment
+        self.assertIsNone(dashboard._unit_since({"ActiveEnterTimestampMonotonic": "0"}))
+
+    def test_every_fix_on_a_row_is_a_command_that_does_what_the_row_asks(self):
+        """`fleet autosweep` takes on|off|status. A fix built as "<verb> start" sent the reader
+        to `fleet autosweep start`, which prints the status and changes nothing."""
+        # in this fixture the verification runner is inactive and the sweep timer has failed,
+        # which are the two states that put a command in front of the reader
+        expected = {"ci_runner": "fleet ci daemon start", "sweep_timer": "fleet autosweep on"}
+        with self.farm():
+            dashboard.services_refresh()
+            rows = {row["id"]: row for row in dashboard.services()["services"]}
+        for identifier, command in expected.items():
+            self.assertNotEqual(rows[identifier]["state"], "active", identifier)
+            self.assertEqual(rows[identifier]["fix"], command, identifier)
+        # a row that is doing its work asks for nothing
+        self.assertEqual(rows["agent_runner"]["state"], "active")
+        self.assertEqual(rows["agent_runner"]["fix"], "")
+        # and the press that the row's own button sends is the same command
+        for spec in dashboard.SERVICE_UNITS:
+            self.assertEqual(spec["fix"], "fleet " + " ".join(spec["start"]), spec["id"])
+
+    def test_a_service_that_is_not_installed_still_names_the_command_that_installs_it(self):
+        absent = """
+unit="$3"
+case "$2" in
+  is-active) echo inactive; exit 3;;
+  show) echo "LoadState=not-found"; exit 0;;
+esac
+exit 1
+"""
+        with self.farm({"systemctl": absent, "tmux": TMUX_FAKE}):
+            dashboard.services_refresh()
+            rows = {row["id"]: row for row in dashboard.services()["services"]}
+        self.assertEqual(rows["sweep_timer"]["state"], "absent")
+        self.assertEqual(rows["sweep_timer"]["fix"], "fleet autosweep on")
+
+    def test_the_dashboard_row_is_read_only_and_names_the_restart_command(self):
+        with self.farm():
+            dashboard.services_refresh()
+            row = dashboard.service_row("dashboard")
+        self.assertTrue(row["read_only"])
+        self.assertEqual(row["actions"], [])
+        self.assertIn("fleet dashboard restart", row["refusal"])
+        self.assertIn(dashboard.DASH_SESSION, row["detail"])
+
+    def test_the_dashboard_row_follows_the_session_this_suite_was_given(self):
+        """FLEET_DASH_SESSION exists so a suite can drive a dashboard of its own without reading
+        the farm's. Asserting the literal "fleet-dashboard" made this the one escape hatch that
+        failed on being used."""
+        session = "fake-dash-" + secrets.token_hex(3)
+        with mock.patch.object(dashboard, "DASH_SESSION", session):
+            with self.farm() as box:
+                dashboard.services_refresh()
+                row = dashboard.service_row("dashboard")
+                self.assertIn(f"tmux has-session -t {session}", box.calls.read_text())
+        self.assertIn(session, row["detail"])
+        self.assertNotIn("fleet-dashboard", row["detail"])
+
+    def test_a_machine_with_no_user_manager_says_so_instead_of_failing(self):
+        with self.farm({"tmux": TMUX_FAKE}):
+            dashboard.services_refresh()
+            rows = dashboard.services()["services"]
+        for row in rows[:3]:
+            self.assertEqual(row["state"], "absent", row["id"])
+            self.assertEqual(row["actions"], [], row["id"])
+            self.assertIn("systemd user manager", row["detail"])
+        self.assertEqual(rows[3]["id"], "dashboard")
+
+    def test_a_row_that_will_not_read_does_not_cost_the_page_the_others(self):
+        real = dashboard._unit_row
+
+        def one_bad(spec):
+            if spec["id"] == "ci_runner":
+                raise RuntimeError("boom")
+            return real(spec)
+
+        with self.farm():
+            with mock.patch.object(dashboard, "_unit_row", one_bad):
+                dashboard.services_refresh()
+            rows = dashboard.services()["services"]
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(dashboard.service_row("ci_runner")["state"], "unknown")
+            self.assertEqual(dashboard.service_row("agent_runner")["state"], "active")
+        self.assertNotIn("Traceback", json.dumps(rows))
+
+    def test_the_route_serves_the_snapshot_and_says_pending_before_the_first_pass(self):
+        with self.farm() as box:
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), running_server() as base:
+                status, payload = fetch_json(base, "/api/services")
+                self.assertEqual(status, 200)
+                self.assertTrue(payload["pending"])
+                self.assertEqual(payload["services"], [])
+                dashboard.services_refresh()
+                box.calls.write_text("")
+                status, payload = fetch_json(base, "/api/services")
+                self.assertEqual(status, 200)
+                self.assertFalse(payload["pending"])
+                self.assertEqual(len(payload["services"]), 4)
+                self.assertEqual(box.calls.read_text(), "",
+                                 "reading the services must not ask the machine anything")
+
+    def test_the_listening_socket_is_decoded_from_the_kernel_word_format(self):
+        """The format is the kernel's, so it can be read from a file of this test's own: an
+        address is little-endian 32 bit words, a port is hex, and 0A is LISTEN. This runs
+        anywhere, which the reading of this machine's own sockets below cannot."""
+        v4 = self.proc_file(
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt",
+            "   0: 0100007F:1EC6 00000000:0000 0A 00000000:00000000 00:00000000 1000 0 1 2",
+            "   1: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 1000 0 1 2",
+            "   2: 0100007F:1EC7 0100007F:BEEF 01 00000000:00000000 00:00000000 1000 0 1 2")
+        v6 = self.proc_file(
+            "  sl  local_address                         remote_address                    st",
+            "   0: 00000000000000000000000001000000:1F91 00000000000000000000000000000000:0000"
+            " 0A 00000000:00000000 00:00000000 1000 0 1 2")
+        with mock.patch.object(dashboard, "PROC_TCP_FILES", ((v4, 4), (v6, 16))):
+            self.assertEqual(dashboard.listening_socket(7878), "127.0.0.1:7878")
+            self.assertEqual(dashboard.listening_socket(8080), "0.0.0.0:8080")
+            self.assertEqual(dashboard.listening_socket(8081), "[::1]:8081")
+            # 0x1EC7 is there, but as an established connection and not as a listener
+            self.assertEqual(dashboard.listening_socket(7879), "")
+            self.assertEqual(dashboard.listening_socket(1), "")
+        # a machine that publishes no such file says nothing rather than failing
+        with mock.patch.object(dashboard, "PROC_TCP_FILES",
+                               ((str(pathlib.Path(self.tmp.name, "nope")), 4),)):
+            self.assertEqual(dashboard.listening_socket(7878), "")
+
+    def proc_file(self, *lines):
+        path = pathlib.Path(self.tmp.name, "proc-" + secrets.token_hex(3))
+        path.write_text("\n".join(lines) + "\n")
+        return str(path)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"),
+                         "/proc/net/tcp is published by Linux only")
+    def test_the_listening_socket_is_read_from_proc_and_never_from_a_tool(self):
+        with self.farm() as box:
+            server = dashboard.Server(("127.0.0.1", 0), dashboard.Handler)
+            try:
+                port = server.server_address[1]
+                box.calls.write_text("")
+                self.assertTrue(dashboard.listening_socket(port).endswith(f":{port}"))
+                self.assertEqual(dashboard.listening_socket(0), "")
+                self.assertEqual(box.calls.read_text(), "")
+            finally:
+                server.server_close()
+
+
+class ServiceActionTest(unittest.TestCase):
+    """Starting and stopping the farm's services from the page. Every one of them is a fleet
+    verb, with the words this server chose, and the dashboard's own row refuses."""
+
+    @contextlib.contextmanager
+    def farm(self, **env):
+        with fake_tools({"fleet": FLEET_FAKE}, env=env or None) as box:
+            with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
+                yield box
+
+    def test_each_service_maps_to_the_verb_that_owns_it(self):
+        for service, action, expected in (
+                ("agent_runner", "start", "fleet daemon start"),
+                ("agent_runner", "stop", "fleet daemon stop"),
+                ("ci_runner", "start", "fleet ci daemon start"),
+                ("ci_runner", "stop", "fleet ci daemon stop"),
+                ("sweep_timer", "start", "fleet autosweep on"),
+                ("sweep_timer", "stop", "fleet autosweep off")):
+            with self.farm() as box:
+                status, payload = dashboard.service_action({"service": service,
+                                                            "action": action})
+                recorded = box.calls.read_text()
+            self.assertEqual(status, 200, payload)
+            self.assertTrue(payload["ok"])
+            self.assertIn(expected, recorded)
+            # a separator would be read as a word of its own by fleet's case loop
+            self.assertNotIn("--", recorded)
+
+    def test_a_restart_is_the_stop_and_then_the_start_in_that_order(self):
+        with self.farm() as box:
+            status, payload = dashboard.service_action({"service": "ci_runner",
+                                                        "action": "restart"})
+            recorded = [line for line in box.calls.read_text().splitlines()
+                        if line.startswith("fleet-parsed")]
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(recorded, ['fleet-parsed ci daemon {"action": "stop"}',
+                                    'fleet-parsed ci daemon {"action": "start"}'])
+
+    def test_the_dashboard_refuses_and_names_the_command_that_does_it(self):
+        with self.farm() as box:
+            for action in ("start", "stop", "restart"):
+                status, payload = dashboard.service_action({"service": "dashboard",
+                                                            "action": action})
+                self.assertEqual(status, 400)
+                self.assertIn("fleet dashboard restart", payload["error"])
+            self.assertEqual(box.calls.read_text(), "", "nothing may run for this row")
+
+    def test_an_unknown_service_or_action_never_reaches_the_cli(self):
+        with self.farm() as box:
+            for body in ({"service": "postgres", "action": "start"},
+                         {"service": "ci_runner", "action": "reboot"},
+                         {"service": "", "action": ""},
+                         {"service": "ci_runner"}):
+                status, payload = dashboard.service_action(body)
+                self.assertEqual(status, 400, body)
+                self.assertNotIn("Traceback", json.dumps(payload))
+            self.assertEqual(box.calls.read_text(), "")
+
+    def test_a_refusing_cli_is_a_400_carrying_its_last_line(self):
+        with self.farm(FLEET_FAKE_FAIL="Failed to start fleet-ci.service: Unit not found."):
+            status, payload = dashboard.service_action({"service": "ci_runner",
+                                                        "action": "start"})
+        self.assertEqual(status, 400)
+        self.assertIn("Unit not found", payload["error"])
+        self.assertNotIn("Traceback", json.dumps(payload))
+
+    def test_the_route_needs_the_write_token_and_wakes_the_refresher(self):
+        # a wake of its own: another suite leaves a real refresher running, and that thread
+        # clears the shared one whenever it pleases
+        wake = RecordingEvent()
+        with self.farm():
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                    mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                    mock.patch.object(dashboard, "_refresh_wake", wake), \
+                    running_server() as base:
+                status, payload = fetch_json(base, "/api/services", method="POST",
+                                             body={"service": "ci_runner", "action": "start"})
+                self.assertEqual(status, 403)
+                self.assertIn("token", payload["error"])
+                status, payload = fetch_json(base, "/api/services", token="s3cret",
+                                             method="POST",
+                                             body={"service": "ci_runner", "action": "start"})
+                self.assertEqual(status, 200, payload)
+                self.assertEqual(payload["verb"], "fleet ci daemon")
+                self.assertEqual(wake.wakes, 1,
+                                 "the row a page draws next must be the new one")
+
+
+class JobsTest(unittest.TestCase):
+    """A write that can outlast a request answers with a job id and runs on a thread. The record
+    is a file, so a reloaded page can still read how it ended."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = pathlib.Path(self.tmp.name)
+        patcher = mock.patch.object(dashboard, "STATE", str(self.state))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tool(self, body):
+        path = self.state / ("tool-" + secrets.token_hex(3))
+        path.write_text("#!/bin/sh\n" + body)
+        path.chmod(0o755)
+        return str(path)
+
+    def wait_for(self, job_id, state, seconds=5):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            status, record = dashboard.read_job(job_id)
+            if status == 200 and record["state"] == state:
+                return record
+            time.sleep(0.02)
+        self.fail(f"job {job_id} never reached {state}: {dashboard.read_job(job_id)}")
+
+    def test_a_job_is_recorded_from_start_to_finish(self):
+        status, payload = dashboard.start_job("drain", [self.tool('echo "two lanes salvaged"')],
+                                              timeout=5, label="Draining the farm")
+        self.assertEqual(status, 202)
+        job = payload["job"]
+        self.assertEqual(job["state"], "running")
+        self.assertIsNotNone(dashboard.parse_iso(job["started_at"]))
+        self.assertIsNone(job["ended_at"])
+        done = self.wait_for(job["id"], "done")
+        self.assertEqual(done["action"], "drain")
+        self.assertEqual(done["exit_code"], 0)
+        self.assertIn("two lanes salvaged", done["output"])
+        self.assertIsNotNone(dashboard.parse_iso(done["ended_at"]))
+
+    def test_a_job_that_fails_says_so_in_a_sentence_and_never_a_traceback(self):
+        status, payload = dashboard.start_job(
+            "drain", [self.tool('echo "docker: no such container" >&2\nexit 1')], timeout=5)
+        self.assertEqual(status, 202)
+        failed = self.wait_for(payload["job"]["id"], "failed")
+        self.assertEqual(failed["exit_code"], 1)
+        self.assertIn("no such container", failed["error"])
+        self.assertNotIn("Traceback", json.dumps(failed))
+
+    def test_a_second_start_of_a_running_action_is_refused_with_the_one_in_flight(self):
+        gate = self.state / "gate"
+        blocking = self.tool('while [ ! -f "%s" ]; do sleep 0.02; done\n' % gate)
+        status, payload = dashboard.start_job("drain", [blocking], timeout=10)
+        self.assertEqual(status, 202)
+        running = payload["job"]["id"]
+        status, refusal = dashboard.start_job("drain", [blocking], timeout=10,
+                                              label="Draining the farm")
+        self.assertEqual(status, 409)
+        self.assertIn("already running", refusal["error"])
+        self.assertEqual(refusal["job"]["id"], running)
+        # a job holding a different resource is not blocked by it
+        status, other = dashboard.start_job("enqueue", [self.tool("true")], timeout=5)
+        self.assertEqual(status, 202)
+        self.assertIn(running, [record["id"] for record in dashboard.running_jobs()])
+        gate.write_text("go")
+        # both, and by name: waiting only for the drain left the quick one racing the last
+        # assertion, which is a test that passes on a fast machine and fails on a slow one
+        self.wait_for(running, "done")
+        self.wait_for(other["job"]["id"], "done")
+        self.assertEqual(dashboard.running_jobs(), [])
+
+    def test_the_routes_serve_the_records_and_refuse_a_name_that_is_not_one(self):
+        status, payload = dashboard.start_job("enqueue", [self.tool("echo queued")], timeout=5)
+        job_id = payload["job"]["id"]
+        self.wait_for(job_id, "done")
+        with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+            status, payload = fetch_json(base, "/api/jobs/" + job_id, token="s3cret")
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["state"], "done")
+            self.assertEqual(fetch_json(base, "/api/jobs", token="s3cret")[1], {"jobs": []})
+            self.assertEqual(fetch_json(base, "/api/jobs/ghost", token="s3cret")[0], 404)
+            self.assertEqual(
+                fetch_json(base, "/api/jobs/..%2f..%2fetc%2fpasswd", token="s3cret")[0], 400)
+
+    def test_a_job_left_by_a_dashboard_that_is_gone_is_not_still_running(self):
+        (self.state / "jobs").mkdir()
+        (self.state / "jobs" / "drain-1.json").write_text(json.dumps(
+            {"id": "drain-1", "action": "drain", "state": "running",
+             "started_at": "2026-09-22T08:00:00Z", "ended_at": None, "output": "",
+             "pid": 2 ** 22 - 1}))
+        status, record = dashboard.read_job("drain-1")
+        self.assertEqual(status, 200)
+        self.assertEqual(record["state"], "failed")
+        self.assertIn("the dashboard stopped", record["error"])
+        self.assertEqual(dashboard.running_jobs(), [])
+
+    def test_a_job_that_will_not_end_is_ended_by_its_own_timeout(self):
+        """Every write names its own timeout, and a job that outlasts it has to end as a
+        failure with a sentence: a record left running for ever disables its control for ever."""
+        status, payload = dashboard.start_job("drain", [self.tool("sleep 120")], timeout=1)
+        self.assertEqual(status, 202)
+        failed = self.wait_for(payload["job"]["id"], "failed", seconds=20)
+        self.assertEqual(failed["exit_code"], 124)
+        self.assertIn("did not answer within 1s", failed["error"])
+        self.assertNotIn("Traceback", json.dumps(failed))
+        self.assertEqual(dashboard.running_jobs(), [])
+
+    def test_a_finished_record_is_forgotten_after_a_day(self):
+        old = self.old_record("drain-old")
+        dashboard.start_job("resume", [self.tool("true")], timeout=5)
+        self.assertFalse(old.exists())
+
+    def old_record(self, job_id, state="done"):
+        path = self.state / "jobs" / (job_id + ".json")
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps({"id": job_id, "action": "drain", "state": state,
+                                    "started_at": "2026-09-01T08:00:00Z", "pid": os.getpid()}))
+        os.utime(path, (time.time() - 2 * 24 * 3600,) * 2)
+        return path
+
+    def test_the_refresher_forgets_old_records_with_no_next_job_to_do_it(self):
+        """On a farm whose last action was a drain, nothing else ever starts, and start_job was
+        the only caller: the record sat there for ever against a document that says a day."""
+        old = self.old_record("drain-old")
+        still_running = self.old_record("drain-running", state="running")
+        with contextlib.ExitStack() as stack:
+            for name in ("config_refresh", "services_refresh", "health_refresh", "mail_refresh",
+                         "who_refresh", "feed_refresh"):
+                stack.enter_context(mock.patch.object(dashboard, name, lambda: None))
+            dashboard._refresh_once()
+        self.assertFalse(old.exists(), "a day old and finished")
+        self.assertTrue(still_running.exists(), "and one that is still running is left alone")
+
+
+class PowerTest(unittest.TestCase):
+    """Throttle, drain, resume. Each one says what it will do before it does it, and the drain
+    says it by name: the lanes it is about to salvage and stop."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = pathlib.Path(self.tmp.name)
+        (self.state / "state").mkdir()
+        self.lane("ui-1", "running", restart="until-pr")
+        self.lane("server-2", "starting")
+        self.lane("docs-3", "merged")           # finished: not a lane a drain would stop
+        patcher = mock.patch.object(dashboard, "STATE", str(self.state))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def lane(self, slug, status, restart=None):
+        record = {"slug": slug, "project": "alpha", "lane": slug, "engine": "claude",
+                  "by": "winston", "status": status}
+        if restart:
+            record["restart"] = restart
+        (self.state / "state" / (slug + ".json")).write_text(json.dumps(record))
+
+    @contextlib.contextmanager
+    def farm(self, **env):
+        with fake_tools({"fleet": FLEET_FAKE}, env=env or None) as box:
+            with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
+                yield box
+
+    def test_the_drain_preview_names_the_lanes_it_will_stop_and_what_is_lost(self):
+        status, payload = dashboard.power_preview("drain")
+        self.assertEqual(status, 200)
+        self.assertEqual([lane["slug"] for lane in payload["lanes"]], ["server-2", "ui-1"])
+        self.assertEqual(payload["lane_count"], 2)
+        self.assertEqual(payload["lanes"][1]["restart"], "until-pr")
+        text = " ".join([payload["sentence"]] + payload["warnings"])
+        self.assertIn("agent runner", text)
+        self.assertIn("verification", text)
+        self.assertIn("loses", text)
+
+    def test_the_throttle_preview_names_the_caps_and_the_database(self):
+        status, payload = dashboard.power_preview("throttle")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["lanes"], [])
+        self.assertIn("% of the CPU", payload["sentence"])
+        self.assertIn("memory", payload["sentence"])
+        self.assertIn("verification database", payload["sentence"])
+
+    def test_the_resume_preview_says_the_runner_will_spend_subscription(self):
+        payload = dashboard.power_preview("resume")[1]
+        self.assertIn("until-pr", payload["sentence"])
+        self.assertIn("subscription", payload["sentence"])
+
+    def test_an_action_that_is_not_one_of_the_three_is_refused(self):
+        with self.farm() as box:
+            for action in ("", "pause", "shutdown", "on"):
+                self.assertEqual(dashboard.power_preview(action)[0], 400, action)
+                self.assertEqual(dashboard.power_action({"action": action})[0], 400, action)
+            self.assertEqual(box.calls.read_text(), "")
+
+    def test_throttling_runs_the_mode_verb_and_answers_at_once(self):
+        with self.farm() as box:
+            status, payload = dashboard.power_action({"action": "throttle"})
+            recorded = box.calls.read_text()
+        self.assertEqual(status, 200, payload)
+        self.assertIn('fleet-parsed mode {"mode": "balanced"}', recorded)
+        self.assertNotIn("game-mode", recorded)
+        self.assertEqual(dashboard.running_jobs(), [])
+
+    def test_draining_and_resuming_are_jobs_with_the_game_mode_verb(self):
+        with self.farm() as box:
+            status, payload = dashboard.power_action({"action": "drain"})
+            self.assertEqual(status, 202, payload)
+            self.assertEqual(payload["job"]["action"], "drain")
+            self.assertEqual([lane["slug"] for lane in payload["lanes"]],
+                             ["server-2", "ui-1"])
+            self.wait_for(payload["job"]["id"])
+            status, payload = dashboard.power_action({"action": "resume"})
+            self.assertEqual(status, 202, payload)
+            self.wait_for(payload["job"]["id"])
+            recorded = box.calls.read_text()
+        self.assertIn('fleet-parsed game-mode {"action": "on"}', recorded)
+        self.assertIn('fleet-parsed game-mode {"action": "off"}', recorded)
+
+    def wait_for(self, job_id, seconds=5):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            record = dashboard.read_job(job_id)[1]
+            if record.get("state") != "running":
+                return record
+            time.sleep(0.02)
+        self.fail(f"job {job_id} never finished")
+
+    def test_a_drain_and_a_resume_cannot_run_at_the_same_time(self):
+        """The farm has one power state, not three. `fleet game-mode on` and
+        `fleet game-mode off` are opposites, so the second press must be refused with the first
+        one, whichever verb it carries."""
+        gate = self.state / "gate"
+        blocker = self.state / "fleet"
+        blocker.write_text('#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\n'
+                           'while [ ! -f "%s" ]; do sleep 0.02; done\n'
+                           % (self.state / "ran", gate))
+        blocker.chmod(0o755)
+        with mock.patch.object(dashboard, "fleet_bin", return_value=str(blocker)):
+            status, drain = dashboard.power_action({"action": "drain"})
+            self.assertEqual(status, 202, drain)
+            for action in ("resume", "drain", "throttle"):
+                status, payload = dashboard.power_action({"action": action})
+                self.assertEqual(status, 409, (action, payload))
+                self.assertEqual(payload["job"]["id"], drain["job"]["id"],
+                                 "the refusal names the press that is actually running")
+                self.assertIn("Drain the farm", payload["error"])
+            self.assertEqual([record["id"] for record in dashboard.running_jobs()],
+                             [drain["job"]["id"]])
+            gate.write_text("go")
+            self.wait_for(drain["job"]["id"])
+        # only the drain ever reached a command line
+        self.assertEqual((self.state / "ran").read_text().strip().splitlines(),
+                         ["game-mode on"])
+        # and with the power state free again, the next press is taken
+        with mock.patch.object(dashboard, "fleet_bin", return_value=str(blocker)):
+            status, resume = dashboard.power_action({"action": "resume"})
+            self.assertEqual(status, 202, resume)
+            self.wait_for(resume["job"]["id"])
+
+    def test_a_throttle_holds_the_power_state_while_it_runs(self):
+        """It answers at once rather than as a job, but a drain must not start underneath it."""
+        with self.farm():
+            seen = []
+
+            def slow_tool(args, timeout=None, env=None):
+                seen.append(dashboard.power_action({"action": "drain"})[0])
+                return 0, "balanced\n", ""
+
+            with mock.patch.object(dashboard, "run_tool", slow_tool):
+                status, payload = dashboard.power_action({"action": "throttle"})
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(seen, [409], "a drain must not start while the throttle is running")
+        self.assertEqual(dashboard.running_jobs(), [],
+                         "and the throttle lets go of it as soon as it has answered")
+
+    def test_a_second_drain_while_one_is_running_is_refused(self):
+        gate = self.state / "gate"
+        blocker = self.state / "fleet"
+        blocker.write_text('#!/bin/sh\nwhile [ ! -f "%s" ]; do sleep 0.02; done\n' % gate)
+        blocker.chmod(0o755)
+        with mock.patch.object(dashboard, "fleet_bin", return_value=str(blocker)):
+            self.assertEqual(dashboard.power_action({"action": "drain"})[0], 202)
+            status, payload = dashboard.power_action({"action": "drain"})
+            self.assertEqual(status, 409)
+            self.assertIn("already running", payload["error"])
+            self.assertEqual(payload["job"]["action"], "drain")
+            gate.write_text("go")
+            self.wait_for(payload["job"]["id"])
+
+    def test_the_routes_need_the_write_token_and_the_preview_is_a_read(self):
+        with self.farm() as box:
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                    mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+                self.assertEqual(fetch_json(base, "/api/power", method="POST",
+                                            body={"action": "throttle"})[0], 403)
+                # a read, so it answers on a loopback bind with no token at all, and for every
+                # action it takes: what a control is about to do must cost nothing to ask
+                box.calls.write_text("")
+                for action in ("throttle", "drain", "resume"):
+                    status, payload = fetch_json(base, f"/api/power/preview?action={action}")
+                    self.assertEqual(status, 200, action)
+                    self.assertEqual(payload["action"], action)
+                    self.assertTrue(payload["sentence"], action)
+                self.assertEqual(payload["lane_count"], 0)
+                self.assertEqual(fetch_json(base, "/api/power/preview?action=drain",
+                                            token="s3cret")[1]["lane_count"], 2)
+                self.assertEqual(box.calls.read_text(), "",
+                                 "a preview must not run a single tool")
+                status, payload = fetch_json(base, "/api/power", token="s3cret", method="POST",
+                                             body={"action": "throttle"})
+                self.assertEqual(status, 200, payload)
+                self.assertEqual(payload["action"], "throttle")
+                self.assertIn('fleet-parsed mode {"mode": "balanced"}', box.calls.read_text(),
+                              "and the press that follows it does")
+
+
+class CiWriteTest(unittest.TestCase):
+    """Queueing a change for verification, and cancelling one. Both are checked against what this
+    farm has before a word of them reaches a command line."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = pathlib.Path(self.tmp.name, "state")
+        self.config = pathlib.Path(self.tmp.name, "config")
+        (self.state / "ci").mkdir(parents=True)
+        self.config.mkdir()
+        (self.config / "projects.toml").write_text('[alpha]\nrepo = "acme/alpha"\n')
+        (self.state / "ci" / "queue.json").write_text(json.dumps({
+            "updated": 1784600000,
+            "running": [{"id": "ci-running", "state": "running"}],
+            "queued": [{"id": "ci-waiting", "state": "queued"}],
+            "recent": [{"id": "ci-old", "state": "passed"}]}))
+        for target, value in (("STATE", str(self.state)), ("CONFIG", str(self.config))):
+            patcher = mock.patch.object(dashboard, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    @contextlib.contextmanager
+    def farm(self, **env):
+        with fake_tools({"fleet": FLEET_FAKE}, env=env or None) as box:
+            with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
+                yield box
+
+    def finish(self, job_id, seconds=5):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            record = dashboard.read_job(job_id)[1]
+            if record.get("state") != "running":
+                return record
+            time.sleep(0.02)
+        self.fail(f"job {job_id} never finished")
+
+    def test_queueing_a_change_is_a_job_running_the_enqueue_verb(self):
+        with self.farm() as box:
+            status, payload = dashboard.ci_enqueue({"project": "alpha", "pr": "128"})
+            self.assertEqual(status, 202, payload)
+            self.assertEqual(payload["pr"], 128)
+            done = self.finish(payload["job"]["id"])
+            recorded = box.calls.read_text()
+        self.assertEqual(done["state"], "done", done)
+        self.assertIn("enqueued", done["output"])
+        self.assertIn('fleet-parsed ci enqueue {"branch": null, "pr": 128, "project": "alpha"}',
+                      recorded)
+
+    def test_a_project_this_farm_does_not_have_never_reaches_the_cli(self):
+        with self.farm() as box:
+            for body in ({"project": "ghost", "pr": 1}, {"project": "", "pr": 1},
+                         {"project": "../alpha", "pr": 1},
+                         {"project": "alpha", "pr": "0"}, {"project": "alpha", "pr": "-3"},
+                         {"project": "alpha", "pr": "main"}, {"project": "alpha"}):
+                status, payload = dashboard.ci_enqueue(body)
+                self.assertEqual(status, 400, body)
+                self.assertNotIn("Traceback", json.dumps(payload))
+            self.assertEqual(box.calls.read_text(), "")
+
+    def test_cancelling_sends_the_separator_the_option_parser_needs(self):
+        with self.farm() as box:
+            status, payload = dashboard.ci_cancel({"id": "ci-waiting"})
+            recorded = box.calls.read_text()
+        self.assertEqual(status, 200, payload)
+        self.assertIn("fleet ci cancel -- ci-waiting", recorded)
+        self.assertIn('fleet-parsed ci cancel {"id": "ci-waiting"}', recorded)
+
+    def test_a_run_that_is_not_in_the_queue_is_refused_with_the_ones_that_are(self):
+        with self.farm() as box:
+            status, payload = dashboard.ci_cancel({"id": "ci-old"})     # already finished
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["runs"], ["ci-running", "ci-waiting"])
+            for run_id in ("", "../../etc/passwd", "-h"):
+                self.assertEqual(dashboard.ci_cancel({"id": run_id})[0], 400, run_id)
+            self.assertEqual(box.calls.read_text(), "")
+
+    def test_a_refusing_cli_is_a_400_carrying_what_it_said(self):
+        with self.farm(FLEET_FAKE_FAIL="fleet ci: the queue is locked by another writer"):
+            status, payload = dashboard.ci_cancel({"id": "ci-running"})
+        self.assertEqual(status, 400)
+        self.assertIn("locked", payload["error"])
+
+    def test_both_routes_need_the_write_token(self):
+        with self.farm():
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                    mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+                for route, body in (("/api/ci/enqueue", {"project": "alpha", "pr": 7}),
+                                    ("/api/ci/cancel", {"id": "ci-running"})):
+                    self.assertEqual(fetch_json(base, route, method="POST", body=body)[0], 403)
+                status, payload = fetch_json(base, "/api/ci/enqueue", token="s3cret",
+                                             method="POST", body={"project": "alpha", "pr": 7})
+                self.assertEqual(status, 202, payload)
+                self.finish(payload["job"]["id"])
+                status, payload = fetch_json(base, "/api/ci/cancel", token="s3cret",
+                                             method="POST", body={"id": "ci-running"})
+                self.assertEqual(status, 200, payload)
+
+
+class LoginStateTest(unittest.TestCase):
+    """Whether this farm is logged in, read from files on this machine. Asking the vendor would
+    be a request per account per tick, and an account being throttled is made worse by asking."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = pathlib.Path(self.tmp.name)
+        self.extra = self.home / ".fleet" / "claude-accounts"
+        self.extra.mkdir(parents=True)
+        (self.home / ".claude").mkdir()
+        for target, value in (("HOME", str(self.home)), ("EXTRA_DIR", str(self.extra)),
+                              ("FARM_ALIAS", "farm")):
+            patcher = mock.patch.object(dashboard.CA, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(dashboard.CX, "AUTH", str(self.home / ".codex" / "auth.json"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def credentials(self, directory, expires_in):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / ".credentials.json").write_text(json.dumps(
+            {"claudeAiOauth": {"expiresAt": (time.time() + expires_in) * 1000}}))
+
+    def snapshot(self, rows):
+        return mock.patch.object(dashboard, "accounts_snapshot",
+                                 return_value={"at": 1790000000.0, "accounts": rows,
+                                               "errors": {}})
+
+    def states(self, rows=()):
+        with self.snapshot(list(rows)):
+            payload = dashboard.accounts_login_state()
+        return {row["name"]: row for row in payload["accounts"]}, payload
+
+    def test_a_login_that_is_there_and_in_date_is_logged_in(self):
+        self.credentials(self.home / ".claude", 8 * 3600)
+        rows, payload = self.states([{"name": "default", "session": 12, "read_at": 1790000000.0}])
+        self.assertEqual(rows["default"]["state"], "logged_in")
+        self.assertIn("Logged in", rows["default"]["sentence"])
+        self.assertIsNotNone(dashboard.parse_iso(rows["default"]["read_at"]))
+        self.assertIsNotNone(dashboard.parse_iso(payload["at"]))
+        self.assertFalse(payload["pending"])
+
+    def test_an_account_with_no_credentials_is_waiting_for_its_first_login(self):
+        (self.extra / "farm-two").mkdir()
+        rows, _ = self.states()
+        self.assertEqual(rows["farm-two"]["state"], "waiting_for_login")
+        self.assertIn("ssh -t farm", rows["farm-two"]["sentence"])
+        self.assertIn("CLAUDE_CONFIG_DIR=" + str(self.extra / "farm-two"),
+                      rows["farm-two"]["sentence"])
+
+    def test_a_login_file_that_cannot_be_read_is_unknown_not_never_logged_in(self):
+        """`CA.token_expiry` answers None for four different things, and only one of them means
+        the account was never logged in. Drawing a working account as one that was never set up
+        sends the operator to /login, which may replace a credential that was fine."""
+        torn = self.extra / "farm-torn"
+        torn.mkdir()
+        (torn / ".credentials.json").write_text('{"claudeAiOauth": {"expi')
+        other = self.extra / "farm-other-schema"
+        other.mkdir()
+        (other / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"token": "x"}}))
+        empty = self.extra / "farm-empty-file"
+        empty.mkdir()
+        (empty / ".credentials.json").write_text("")
+        never = self.extra / "farm-never"
+        never.mkdir()
+        rows, _ = self.states()
+        for name in ("farm-torn", "farm-other-schema", "farm-empty-file"):
+            self.assertEqual(rows[name]["state"], "unknown", name)
+            self.assertNotIn("ssh -t farm", rows[name]["sentence"], name)
+            self.assertNotIn("/login", rows[name]["sentence"], name)
+        # and the one that really has no file is still told how to log in
+        self.assertEqual(rows["farm-never"]["state"], "waiting_for_login")
+        self.assertIn("ssh -t farm", rows["farm-never"]["sentence"])
+
+    def test_a_login_file_this_farm_may_not_read_is_unknown(self):
+        locked = self.extra / "farm-locked"
+        locked.mkdir()
+        path = locked / ".credentials.json"
+        path.write_text(json.dumps({"claudeAiOauth": {"expiresAt": 1}}))
+        path.chmod(0o000)
+        self.addCleanup(path.chmod, 0o600)
+        if os.access(path, os.R_OK):
+            self.skipTest("this user reads every file whatever its mode")
+        rows, _ = self.states()
+        self.assertEqual(rows["farm-locked"]["state"], "unknown")
+        self.assertIn("could not read", rows["farm-locked"]["sentence"])
+        self.assertNotIn(str(locked), rows["farm-locked"]["sentence"], "never a path on a card")
+
+    def test_a_token_whose_moment_has_passed_is_expired_even_behind_a_429(self):
+        self.credentials(self.extra / "farm-one", -3600)
+        rows, _ = self.states([{"name": "farm-one", "stale_error": "429 rate-limited, 9m to retry",
+                                "read_at": None}])
+        self.assertEqual(rows["farm-one"]["state"], "expired")
+        self.assertIn("keepalive", rows["farm-one"]["sentence"])
+
+    def test_a_throttled_account_says_the_farm_cannot_tell_rather_than_logged_out(self):
+        self.credentials(self.extra / "farm-one", 8 * 3600)
+        rows, _ = self.states([{"name": "farm-one",
+                                "stale_error": "429 rate-limited, 9m to retry"}])
+        self.assertEqual(rows["farm-one"]["state"], "rate_limited")
+        self.assertIn("slow down", rows["farm-one"]["sentence"])
+
+    def test_a_throttled_account_stays_throttled_when_the_copy_is_reworded(self):
+        """The refresher rewrites every reason for a person before this row ever sees it, so
+        reading the state back out of that sentence made rate_limited depend on the words "slow
+        down" surviving in the copy. Reword the sentence and every throttled account silently
+        became "unknown", with nothing failing."""
+        self.credentials(self.extra / "farm-one", 8 * 3600)
+        rows = [{"name": "farm-one", "stale_error": "HTTPError 429: too many requests"}]
+        published, _ = dashboard.plain_account_trouble(rows, {})
+        self.assertEqual(published[0]["trouble"], "rate_limited")
+        # the copy a person reads is the page's to change, and changing it changes no state
+        published[0]["stale_error"] = "The vendor has asked this farm to wait a while."
+        states, _ = self.states(published)
+        self.assertEqual(states["farm-one"]["state"], "rate_limited")
+        self.assertNotIn("429", json.dumps(published), "no reader's text on a card")
+
+    def test_codex_is_a_row_of_its_own_with_its_own_login_line(self):
+        rows, _ = self.states()
+        self.assertEqual(rows["codex"]["engine"], "codex")
+        self.assertEqual(rows["codex"]["state"], "waiting_for_login")
+        self.assertIn("codex login", rows["codex"]["sentence"])
+
+    def test_every_row_is_one_of_the_five_states_and_carries_a_sentence(self):
+        self.credentials(self.home / ".claude", 8 * 3600)
+        (self.extra / "farm-two").mkdir()
+        rows, _ = self.states()
+        for row in rows.values():
+            self.assertIn(row["state"], dashboard.LOGIN_STATES, row)
+            self.assertTrue(row["sentence"].endswith(".") or "ssh" in row["sentence"], row)
+
+    def test_the_route_reads_no_vendor_and_runs_no_tool(self):
+        self.credentials(self.home / ".claude", 8 * 3600)
+        with fake_tools({}) as box:
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), running_server() as base:
+                status, payload = fetch_json(base, "/api/accounts/login-state")
+            self.assertEqual(status, 200)
+            self.assertEqual(box.calls.read_text(), "")
+        self.assertEqual(payload["cooldown_seconds"], dashboard.ACCOUNTS_WAKE_COOLDOWN)
+
+
+class AccountsRefreshTest(unittest.TestCase):
+    """"Refresh now" wakes the reader this server already runs, and refuses to be leaned on."""
+
+    def setUp(self):
+        self.wake = RecordingEvent()
+        for target, value in (("_accounts_wake", self.wake),):
+            patcher = mock.patch.object(dashboard, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.dict(dashboard._accounts_wake_at, {"at": 0.0}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_press_wakes_the_reader_and_the_next_one_is_refused_for_a_minute(self):
+        now = 1790000000.0
+        status, payload = dashboard.accounts_refresh_request(now)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.wake.wakes, 1)
+        status, payload = dashboard.accounts_refresh_request(now + 5)
+        self.assertEqual(status, 429)
+        self.assertEqual(self.wake.wakes, 1, "a refused press must not read the vendor")
+        self.assertIn("55 seconds", payload["error"])
+        self.assertEqual(payload["retry_after"], 55)
+        status, _ = dashboard.accounts_refresh_request(now + 61)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.wake.wakes, 2)
+
+    def test_the_route_needs_the_write_token(self):
+        with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+            self.assertEqual(fetch_json(base, "/api/accounts/refresh", method="POST")[0], 403)
+            self.assertEqual(self.wake.wakes, 0)
+            status, payload = fetch_json(base, "/api/accounts/refresh", token="s3cret",
+                                         method="POST")
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(self.wake.wakes, 1)
+            self.assertEqual(fetch_json(base, "/api/accounts/refresh", token="s3cret",
+                                        method="POST")[0], 429)
+
+
 class MachineReadingTest(unittest.TestCase):
     """The machine readings are Linux only, and the page must survive being run anywhere else."""
 
@@ -509,7 +1498,9 @@ class MachineReadingTest(unittest.TestCase):
             with mock.patch.object(dashboard.M, "MEMINFO", os.path.join(state, "nope")), \
                  mock.patch.object(dashboard.M, "LOADAVG", os.path.join(state, "nope")), \
                  mock.patch.object(dashboard.M, "STATE", state), \
-                 mock.patch.object(dashboard, "STATE", state):
+                 mock.patch.object(dashboard, "STATE", state), \
+                 blank_machine_snapshot():
+                dashboard.machine_refresh()          # the refresher reads it, the route serves it
                 with running_server() as base:
                     status, body = fetch_json(base, "/api/metrics")
         self.assertEqual(status, 200)
@@ -517,6 +1508,56 @@ class MachineReadingTest(unittest.TestCase):
         self.assertIsNone(body["load"])
         self.assertTrue(body["capacity"]["can_spawn"])
         self.assertIn(dashboard.M.NO_MACHINE_READING, body["capacity"]["warnings"])
+
+    def test_the_strip_says_pending_until_the_first_pass_instead_of_lying(self):
+        with blank_machine_snapshot():
+            with running_server() as base:
+                for route in ("/api/metrics", "/api/mode", "/api/sweep"):
+                    status, body = fetch_json(base, route)
+                    self.assertEqual(status, 200, route)
+                    self.assertTrue(body["pending"], route)
+
+    def test_a_reading_that_failed_keeps_the_last_good_numbers_and_says_so(self):
+        """The defect the envelope exists to prevent: an hour-old load served with `at` set to
+        now, no error, and nothing on the page saying not to trust it."""
+        healthy = {"load": [0.1], "mem": {"used_pct": 12}}
+        with blank_machine_snapshot():
+            with mock.patch.object(dashboard.M, "collect", return_value=healthy), \
+                    mock.patch.object(dashboard.MODE, "status", return_value={"mode": "full"}), \
+                    mock.patch.object(dashboard, "sweep_status", return_value={"enabled": True}):
+                dashboard.machine_refresh()
+            good = dashboard._machine_part("metrics")
+            self.assertEqual(good["load"], [0.1])
+            self.assertIsNone(good["error"])
+            self.assertIsNone(good["stale_since"])
+
+            time.sleep(1.1)                  # the stamps are ISO seconds, so a pass has to land
+            with mock.patch.object(dashboard.M, "collect",
+                                   side_effect=OSError("/proc/loadavg is gone")), \
+                    mock.patch.object(dashboard.MODE, "status", return_value={"mode": "full"}), \
+                    mock.patch.object(dashboard, "sweep_status", return_value={"enabled": True}):
+                dashboard.machine_refresh()
+                dashboard.machine_refresh()
+            after = dashboard._machine_part("metrics")
+            # the power mode and the sweep countdown ride the same envelope
+            mode = dashboard._machine_part("mode")
+        self.assertEqual(after["load"], [0.1], "the last good numbers stay on the strip")
+        self.assertEqual(after["at"], good["at"], "and they are still stamped when they were true")
+        self.assertEqual(after["stale_since"], good["at"])
+        self.assertIn("live numbers", after["error"])
+        self.assertNotIn("Traceback", json.dumps(after))
+        self.assertEqual(mode["stale_since"], good["at"])
+        self.assertEqual(mode["mode"], "full")
+
+    def test_the_first_pass_failing_is_not_published_as_a_blank_success(self):
+        with blank_machine_snapshot():
+            with mock.patch.object(dashboard.M, "collect", side_effect=OSError("no sensors")), \
+                    mock.patch.object(dashboard.MODE, "status", return_value={"mode": "full"}), \
+                    mock.patch.object(dashboard, "sweep_status", return_value={"enabled": True}):
+                dashboard.machine_refresh()
+            answer = dashboard._machine_part("metrics")
+        self.assertIsNone(answer["at"], "nothing was ever read, so nothing can be stamped")
+        self.assertIn("live numbers", answer["error"])
 
 
 class ChecksOnAChangeTest(unittest.TestCase):
@@ -950,6 +1991,15 @@ class DashboardProjectsTest(unittest.TestCase):
         (self.state / "state" / (slug + ".json")).write_text(
             json.dumps({"slug": slug, "project": project, "status": status}))
 
+    def finish(self, job_id, seconds=5):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            record = dashboard.read_job(job_id)[1]
+            if record.get("state") != "running":
+                return record
+            time.sleep(0.02)
+        self.fail(f"job {job_id} never finished")
+
     def test_no_registry_is_an_empty_list_not_an_error(self):
         self.assertEqual(dashboard.projects(), [])
 
@@ -991,30 +2041,56 @@ class DashboardProjectsTest(unittest.TestCase):
         self.registry("[alpha\nrepo = ")
         self.assertEqual(dashboard.projects(), [])
 
-    def test_adding_a_project_runs_the_cli_and_returns_the_new_row(self):
+    def test_adding_a_project_is_a_job_running_the_cli(self):
+        """It clones a repository, so it answers at once with a job id: a browser held open for
+        five minutes loses the outcome to any reload."""
         registry = self.config / "projects.toml"
         with fake_tools({"fleet": FLEET_FAKE},
                         env={"FLEET_FAKE_REGISTRY": str(registry)}) as box:
             with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
                 status, payload = dashboard.add_project({"name": "gamma", "repo": "acme/gamma",
                                                          "port_base": 5800})
+                self.assertEqual(status, 202, payload)
+                self.assertEqual(payload["name"], "gamma")
+                self.assertEqual(payload["repo"], "acme/gamma")
+                self.assertEqual(payload["job"]["label"], "Adding gamma")
+                done = self.finish(payload["job"]["id"])
             recorded = box.calls.read_text()
-        self.assertEqual(status, 200, payload)
-        self.assertEqual(payload["name"], "gamma")
-        self.assertEqual(payload["repo"], "acme/gamma")
-        self.assertEqual(payload["lanes_open"], 0)
+        self.assertEqual(done["state"], "done", done)
+        self.assertEqual([row["name"] for row in dashboard.projects()], ["gamma"])
         self.assertIn("add-project --name gamma --repo acme/gamma --port-base 5800", recorded)
         # what fleet's own option loop made of it, not just what was typed at it
         self.assertIn('fleet-parsed add-project {"branch": "main", "name": "gamma", '
                       '"port_base": "5800", "repo": "acme/gamma"}', recorded)
 
-    def test_a_refused_registration_is_a_400_carrying_what_the_cli_said(self):
+    def test_a_second_press_does_not_start_a_second_clone(self):
+        gate = self.state / "gate"
+        cloner = self.state / "fleet"
+        cloner.write_text('#!/bin/sh\nprintf "ran\\n" >> "%s"\n'
+                          'while [ ! -f "%s" ]; do sleep 0.02; done\n'
+                          % (self.state / "ran", gate))
+        cloner.chmod(0o755)
+        with mock.patch.object(dashboard, "fleet_bin", return_value=str(cloner)):
+            status, first = dashboard.add_project({"name": "gamma", "repo": "acme/gamma"})
+            self.assertEqual(status, 202, first)
+            status, refusal = dashboard.add_project({"name": "delta", "repo": "acme/delta"})
+            self.assertEqual(status, 409, refusal)
+            self.assertIn("Adding gamma", refusal["error"])
+            self.assertEqual(refusal["job"]["id"], first["job"]["id"])
+            gate.write_text("go")
+            self.finish(first["job"]["id"])
+        self.assertEqual((self.state / "ran").read_text().strip().splitlines(), ["ran"])
+
+    def test_a_refused_registration_is_a_failed_job_carrying_what_the_cli_said(self):
         with fake_tools({"fleet": FLEET_FAKE},
                         env={"FLEET_FAKE_FAIL": "already registered with different settings"}) as box:
             with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
                 status, payload = dashboard.add_project({"name": "gamma", "repo": "acme/gamma"})
-        self.assertEqual(status, 400)
-        self.assertIn("already registered", payload["error"])
+                self.assertEqual(status, 202, payload)
+                failed = self.finish(payload["job"]["id"])
+        self.assertEqual(failed["state"], "failed")
+        self.assertIn("already registered", failed["error"])
+        self.assertNotIn("Traceback", json.dumps(failed))
 
     def test_a_bad_name_or_repository_never_reaches_the_cli(self):
         with fake_tools({"fleet": FLEET_FAKE}) as box:
@@ -1054,6 +2130,177 @@ class DashboardProjectsTest(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(payload, {"name": "gamma"})
             adder.assert_called_once_with({"name": "gamma", "repo": "acme/gamma"})
+
+class ProjectRemovalTest(unittest.TestCase):
+    """Taking a project off the registry. The registry only: worktrees and checkouts are not this
+    route's business, and a project with work in flight is not removed at all."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.config = pathlib.Path(self.tmp.name, "config")
+        self.state = pathlib.Path(self.tmp.name, "state")
+        (self.state / "state").mkdir(parents=True)
+        self.config.mkdir()
+        for target, value in (("CONFIG", str(self.config)), ("STATE", str(self.state))):
+            patcher = mock.patch.object(dashboard, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.registry = self.config / "projects.toml"
+        self.registry.write_text(
+            '# the farm\'s projects, in the order they were registered\n'
+            '[alpha]\n'
+            'repo = "acme/alpha"\n'
+            'port_base = 5200\n'
+            '\n'
+            '["beta"]\n'
+            'repo = "acme/beta"\n'
+            'port_base = 5400\n'
+            '\n'
+            '["beta".ports]\n'
+            'vite_base = 5400\n'
+            'api_base = 8400\n'
+            'e2e_base = 6400\n')
+
+    def lane(self, slug, project, status):
+        (self.state / "state" / (slug + ".json")).write_text(
+            json.dumps({"slug": slug, "project": project, "status": status}))
+
+    def finish(self, job_id, seconds=5):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            record = dashboard.read_job(job_id)[1]
+            if record.get("state") != "running":
+                return record
+            time.sleep(0.02)
+        self.fail(f"job {job_id} never finished")
+
+    def test_removing_a_project_drops_its_tables_and_leaves_the_file_alone(self):
+        status, payload = dashboard.remove_project({"name": "beta"})
+        self.assertEqual(status, 200, payload)
+        text = self.registry.read_text()
+        self.assertNotIn("beta", text)
+        self.assertIn("# the farm's projects", text)          # the operator's own words survive
+        self.assertIn("[alpha]", text)
+        self.assertEqual([row["name"] for row in dashboard.projects()], ["alpha"])
+
+    def test_the_answer_names_the_port_block_that_is_free_again(self):
+        payload = dashboard.remove_project({"name": "beta"})[1]
+        self.assertEqual(payload["port_base"], 5400)
+        self.assertEqual(payload["freed"], "5400 to 5499")
+        self.assertIn("5400 to 5499", payload["sentence"])
+        self.assertIn("untouched", payload["sentence"])
+        self.assertTrue(pathlib.Path(payload["backup"]).exists())
+        self.assertIn("[alpha]", pathlib.Path(payload["backup"]).read_text())
+
+    def test_a_project_with_lanes_open_is_refused_with_the_count(self):
+        self.lane("beta-1", "beta", "running")
+        self.lane("beta-2", "beta", "pr_open")
+        self.lane("beta-3", "beta", "merged")
+        status, payload = dashboard.remove_project({"name": "beta"})
+        self.assertEqual(status, 409)
+        self.assertIn("2 lane(s) open", payload["error"])
+        self.assertEqual(payload["lanes_open"], 2)
+        self.assertIn("beta", self.registry.read_text())
+
+    def test_a_removal_waits_for_the_add_that_is_writing_the_same_file(self):
+        """Both writers own `projects.toml`, and the server is threaded: a remove whose read
+        landed before an add's append and whose replace landed after it dropped the new
+        project, and the guard cannot see that, because it only compares against the text this
+        reader read."""
+        gate = pathlib.Path(self.tmp.name, "gate")
+        cloner = pathlib.Path(self.tmp.name, "fleet")
+        cloner.write_text('#!/bin/sh\nwhile [ ! -f "%s" ]; do sleep 0.02; done\n' % gate)
+        cloner.chmod(0o755)
+        before = self.registry.read_text()
+        with mock.patch.object(dashboard, "fleet_bin", return_value=str(cloner)):
+            status, adding = dashboard.add_project({"name": "gamma", "repo": "acme/gamma"})
+            self.assertEqual(status, 202, adding)
+            status, refusal = dashboard.remove_project({"name": "beta"})
+            self.assertEqual(status, 409, refusal)
+            self.assertIn("Adding gamma", refusal["error"])
+            self.assertEqual(self.registry.read_text(), before, "and nothing was rewritten")
+            gate.write_text("go")
+            self.finish(adding["job"]["id"])
+        # with the registry free again the removal goes through, and leaves its own record
+        status, payload = dashboard.remove_project({"name": "beta"})
+        self.assertEqual(status, 200, payload)
+        self.assertNotIn("beta", self.registry.read_text())
+        removals = [record for record in dashboard._all_jobs()
+                    if record["action"] == "remove_project"]
+        self.assertEqual([record["state"] for record in removals], ["done"])
+        self.assertEqual(dashboard.running_jobs(), [], "and it does not hold the key after")
+
+    def test_a_refused_removal_lets_go_of_the_registry(self):
+        for body in ({"name": "ghost"}, {"name": "../../etc/passwd"}):
+            dashboard.remove_project(body)
+        self.lane("beta-1", "beta", "running")
+        self.assertEqual(dashboard.remove_project({"name": "beta"})[0], 409)
+        self.assertEqual(dashboard.running_jobs(), [])
+        with mock.patch.object(dashboard, "CONFIG", str(self.config / "gone")):
+            self.assertEqual(dashboard.remove_project({"name": "beta"})[0], 404)
+        self.assertEqual(dashboard.running_jobs(), [])
+
+    def test_a_name_that_is_not_registered_is_a_404_and_a_bad_one_a_400(self):
+        before = self.registry.read_text()
+        self.assertEqual(dashboard.remove_project({"name": "ghost"})[0], 404)
+        for name in ("", "../../etc/passwd", "a b", "x" * 41):
+            self.assertEqual(dashboard.remove_project({"name": name})[0], 400, name)
+        self.assertEqual(self.registry.read_text(), before)
+
+    def test_the_route_needs_the_write_token(self):
+        with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+            self.assertEqual(fetch_json(base, "/api/projects/remove", method="POST",
+                                        body={"name": "beta"})[0], 403)
+            status, payload = fetch_json(base, "/api/projects/remove", token="s3cret",
+                                         method="POST", body={"name": "beta"})
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(payload["name"], "beta")
+
+    def test_the_next_port_block_is_above_the_highest_one_registered(self):
+        self.assertEqual(dashboard.next_port_base(), 5500)
+        self.registry.write_text("")
+        self.assertEqual(dashboard.next_port_base(), 5200)
+
+    def test_a_farm_at_the_ceiling_is_refused_rather_than_handed_the_same_block(self):
+        """Clamping to PORT_BASE_MAX handed the project at the top and the one after it the same
+        numbers, which is the collision this default exists to prevent."""
+        self.registry.write_text(f'[alpha]\nport_base = {dashboard.PORT_BASE_MAX}\n')
+        self.assertIsNone(dashboard.next_port_base())
+        with fake_tools({"fleet": FLEET_FAKE}) as box:
+            with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
+                status, payload = dashboard.add_project({"name": "gamma", "repo": "acme/gamma"})
+            self.assertEqual(box.calls.read_text(), "", "nothing may be cloned for this")
+        self.assertEqual(status, 400, payload)
+        self.assertIn(str(dashboard.PORT_BASE_MAX), payload["error"])
+        self.assertEqual(dashboard.running_jobs(), [])
+        # one block below the ceiling is still handed out
+        self.registry.write_text(
+            f'[alpha]\nport_base = {dashboard.PORT_BASE_MAX - dashboard.PORT_BLOCK_SIZE}\n')
+        self.assertEqual(dashboard.next_port_base(), dashboard.PORT_BASE_MAX)
+
+    def test_the_answer_names_the_dev_server_block_and_not_the_shared_ports(self):
+        """`fleet add-project` writes port_base alone: api_base and e2e_base are the same
+        numbers for every project here, and are not a project's to free."""
+        payload = dashboard.remove_project({"name": "beta"})[1]
+        self.assertIn("dev server port block", payload["sentence"])
+        self.assertIn("5400 to 5499", payload["sentence"])
+        self.assertNotIn("8400", payload["sentence"])
+        self.assertNotIn("6400", payload["sentence"])
+
+    def test_registering_without_a_port_base_takes_the_next_free_block(self):
+        with fake_tools({"fleet": FLEET_FAKE},
+                        env={"FLEET_FAKE_REGISTRY": str(self.registry)}) as box:
+            with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
+                status, payload = dashboard.add_project({"name": "gamma",
+                                                         "repo": "acme/gamma"})
+                self.assertEqual(status, 202, payload)
+                self.assertEqual(payload["port_base"], 5500)
+                self.finish(payload["job"]["id"])
+            recorded = box.calls.read_text()
+        self.assertIn("--port-base 5500", recorded)
+
 
 class DashboardAgentLogTest(unittest.TestCase):
     """What one lane has been doing, read from the engine's own stream. The stream is machine
@@ -1282,18 +2529,40 @@ elif args.cmd == "inbox":
 
 FLEET_FAKE = f'''#!{sys.executable}
 {RECORD}
+import argparse
 argv = sys.argv[1:]
 command, rest = (argv[0] if argv else ""), argv[1:]
 failure = os.environ.get("FLEET_FAKE_FAIL", "")
 if failure:
     sys.exit(failure)
+
+
+def parsed(what, fields):
+    record("fleet-parsed " + what + " " + json.dumps(fields, sort_keys=True))
+
+
+def case_loop(words, flags):
+    """fleet/bin/fleet parses with hand written case loops: a word starting with a dash is an
+    option or a fatal error, and a bare `--` is one of the fatal ones. Mirrored here, because a
+    separator the dashboard sent "to be safe" would land as a lane name."""
+    found, positional = {{}}, []
+    for word in words:
+        if word in flags:
+            found[word] = True
+        elif word.startswith("-"):
+            sys.exit("unknown flag: " + word)
+        else:
+            positional.append(word)
+    return found, positional
+
+
 if command == "msg":
     # fleet/bin/fleet cmd_msg: slug is "${{1:-}}", the message is "$*" after one shift.
     slug = rest[0] if rest else ""
-    record("fleet-parsed msg " + json.dumps([slug, " ".join(rest[1:])]))
+    parsed("msg", [slug, " ".join(rest[1:])])
     print("queued for " + slug)
 elif command == "add-project":
-    # fleet/bin/fleet cmd_add_project: a case loop over long options, anything else is fatal.
+    # cmd_add_project: a case loop over long options, anything else is fatal.
     fields, pending = {{"branch": "main", "port_base": "5200"}}, list(rest)
     while pending:
         head = pending.pop(0)
@@ -1303,16 +2572,173 @@ elif command == "add-project":
             sys.exit("unknown " + head)
     if not fields.get("name") or not fields.get("repo"):
         sys.exit("need --name and --repo owner/name")
-    record("fleet-parsed add-project " + json.dumps(fields, sort_keys=True))
+    parsed("add-project", fields)
     registry = os.environ.get("FLEET_FAKE_REGISTRY", "")
     if registry:
         with open(registry, "a") as handle:
             handle.write('[%s]\\nrepo = "%s"\\npath = "/srv/%s"\\nbranch = "%s"\\n'
                          % (fields["name"], fields["repo"], fields["name"], fields["branch"]))
     print("registered project '%s'" % fields["name"])
+elif command == "kill":
+    # cmd_kill: --retire, then anything else beginning with a dash is fatal, then the slug.
+    flags, positional = case_loop(rest, {{"--retire"}})
+    if not positional:
+        sys.exit("usage: fleet kill [--retire] <slug>")
+    parsed("kill", {{"slug": positional[0], "retire": bool(flags.get("--retire"))}})
+    if flags.get("--retire"):
+        print("retired lane (no live siblings)")
+    print("killed " + positional[0])
+elif command == "ci":
+    sub, tail = (rest[0] if rest else ""), rest[1:]
+    if sub == "enqueue":
+        # lib/ci.py parses with argparse: options only, and one of --pr or --branch.
+        parser = argparse.ArgumentParser(prog="fleet ci enqueue")
+        parser.add_argument("--project", required=True)
+        parser.add_argument("--pr", type=int)
+        parser.add_argument("--branch")
+        args = parser.parse_args(tail)
+        if (args.pr is None) == (args.branch is None):
+            sys.exit("fleet ci: one of --pr or --branch is required")
+        parsed("ci enqueue", vars(args))
+        print("enqueued ci-42 (acme/%s %s)" % (args.project, args.pr or args.branch))
+    elif sub == "cancel":
+        # argparse again, and `id` is a POSITIONAL: without `--` a leading dash is an option.
+        parser = argparse.ArgumentParser(prog="fleet ci cancel")
+        parser.add_argument("id")
+        args = parser.parse_args(tail)
+        parsed("ci cancel", {{"id": args.id}})
+        print("cancelled queued run")
+    elif sub == "daemon":
+        action = tail[0] if tail else "start"
+        if action not in ("run", "start", "stop", "status"):
+            sys.exit("fleet ci: invalid choice: " + action)
+        parsed("ci daemon", {{"action": action}})
+        print("fleet ci daemon: " + action)
+    else:
+        sys.exit("fleet ci: invalid choice: " + sub)
+elif command == "daemon":
+    action = rest[0] if rest else "status"
+    if action not in ("start", "on", "stop", "off", "status", "tick"):
+        print("usage: fleet daemon start|stop|status|tick")     # cmd_daemon does not fail here
+    else:
+        parsed("daemon", {{"action": action}})
+        print("fleet daemon: " + ("active" if action in ("start", "on") else "stopped"))
+elif command == "autosweep":
+    action = rest[0] if rest else "status"
+    parsed("autosweep", {{"action": action, "minutes": rest[1] if len(rest) > 1 else ""}})
+    print("autosweep " + ("ON" if action == "on" else "OFF" if action == "off" else "status"))
+elif command in ("game-mode", "gamemode"):
+    action = rest[0] if rest else "status"
+    if action not in ("on", "off", "status"):
+        sys.exit("usage: fleet game-mode on|off|status")
+    parsed("game-mode", {{"action": action}})
+    print("== game-mode %s ==" % action.upper())
+    print("live lanes: 2" if action == "on" else "daemon started")
+elif command == "mode":
+    # cmd_mode hands straight to lib/mode.py, which takes one of five words or prints the mode.
+    word = rest[0] if rest else ""
+    if word and word not in ("auto", "full", "soft", "balanced", "hard"):
+        sys.exit("fleet mode: unknown mode " + word)
+    parsed("mode", {{"mode": word}})
+    print("mode: %s   35%% CPU   spawns PAUSED" % (word or "auto"))
+elif command == "accounts":
+    parsed("accounts", {{"args": rest}})
+    print("  default          session  12%  weekly  40%")
+elif command == "models":
+    sub = rest[0] if rest else "list"
+    if sub not in ("list", "enable", "disable", "test", "auth"):
+        sys.exit("usage: fleet models [list | enable <id> | disable <id> | test <id> | auth <id>]")
+    parsed("models", {{"action": sub, "id": rest[1] if len(rest) > 1 else ""}})
+    print("models: " + sub)
 else:
     sys.exit("unknown command " + command)
 '''
+
+
+class AgentKillTest(unittest.TestCase):
+    """Stopping a lane from the page. Which of Stop and Retire a page may offer is the lane's
+    restart policy's business, so the answer carries it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.state = pathlib.Path(self.tmp.name)
+        (self.state / "state").mkdir()
+        self.lane("lane-1", restart="until-pr")
+        self.lane("lane-2", restart=None)
+        patcher = mock.patch.object(dashboard, "STATE", str(self.state))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def lane(self, slug, restart=None):
+        record = {"slug": slug, "project": "alpha", "lane": "dash-v2", "status": "running"}
+        if restart:
+            record["restart"] = restart
+        (self.state / "state" / (slug + ".json")).write_text(json.dumps(record))
+
+    @contextlib.contextmanager
+    def farm(self, **env):
+        with fake_tools({"fleet": FLEET_FAKE}, env=env or None) as box:
+            with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
+                yield box
+
+    def test_stopping_a_lane_runs_the_verb_and_sends_no_separator(self):
+        with self.farm() as box:
+            status, payload = dashboard.agent_kill({"slug": "lane-1"})
+            recorded = box.calls.read_text()
+        self.assertEqual(status, 200, payload)
+        self.assertIn("fleet kill lane-1", recorded)
+        self.assertIn('fleet-parsed kill {"retire": false, "slug": "lane-1"}', recorded)
+        # a bare `--` is an unknown flag to cmd_kill's case loop, so it is never sent
+        self.assertNotIn("--", recorded)
+
+    def test_retiring_a_lane_adds_the_flag_that_stops_the_respawns(self):
+        with self.farm() as box:
+            status, payload = dashboard.agent_kill({"slug": "lane-1", "retire": True})
+            recorded = box.calls.read_text()
+        self.assertEqual(status, 200, payload)
+        self.assertIn('fleet-parsed kill {"retire": true, "slug": "lane-1"}', recorded)
+        self.assertTrue(payload["retired"])
+        self.assertIn("retired", payload["sentence"])
+
+    def test_the_answer_carries_the_policy_the_confirm_has_to_word(self):
+        with self.farm():
+            with_policy = dashboard.agent_kill({"slug": "lane-1"})[1]
+            without = dashboard.agent_kill({"slug": "lane-2"})[1]
+        self.assertEqual(with_policy["restart"], "until-pr")
+        self.assertIn("respawn", with_policy["sentence"])
+        self.assertIsNone(without["restart"])
+        self.assertIn("no restart policy", without["sentence"])
+
+    def test_a_name_that_is_not_a_lane_never_reaches_the_cli(self):
+        with self.farm() as box:
+            status, payload = dashboard.agent_kill({"slug": "ghost"})
+            self.assertEqual(status, 404)
+            self.assertIn("no lane named", payload["error"])
+            for slug in ("../etc/passwd", "-rf", "", "lane 1"):
+                status, payload = dashboard.agent_kill({"slug": slug})
+                self.assertEqual(status, 400, slug)
+            self.assertEqual(box.calls.read_text(), "")
+
+    def test_a_failing_cli_is_a_400_carrying_what_it_said(self):
+        with self.farm(FLEET_FAKE_FAIL="no such tmux session: lane-1"):
+            status, payload = dashboard.agent_kill({"slug": "lane-1"})
+        self.assertEqual(status, 400)
+        self.assertIn("no such tmux session", payload["error"])
+        self.assertNotIn("Traceback", json.dumps(payload))
+
+    def test_the_route_needs_the_write_token(self):
+        with self.farm():
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                    mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                    running_server() as base:
+                status, payload = fetch_json(base, "/api/agents/kill", method="POST",
+                                             body={"slug": "lane-1"})
+                self.assertEqual(status, 403)
+                status, payload = fetch_json(base, "/api/agents/kill", token="s3cret",
+                                             method="POST", body={"slug": "lane-1"})
+                self.assertEqual(status, 200, payload)
+                self.assertEqual(payload["slug"], "lane-1")
 
 
 class DashboardMailTest(unittest.TestCase):
@@ -1696,6 +3122,21 @@ class DashboardMailTest(unittest.TestCase):
             self.assertIn('hq-parsed msg ["winston", "preview is up"]', calls)
             self.assertNotIn("stranger", calls)
 
+    def test_a_sent_message_wakes_the_office_reader_rather_than_waiting_a_cadence(self):
+        # The message is in the office at once, but this dashboard reads the office every 45
+        # seconds, so without the wake a sender watches their own message take that long to
+        # appear in the thread they just sent it to.
+        wake = RecordingEvent()
+        with self.office():
+            with mock.patch.object(dashboard, "_refresh_wake", wake):
+                dashboard.mail_refresh()
+                status, payload = dashboard.mail_send({"to": "winston", "text": "preview is up"})
+                self.assertEqual(status, 200, payload)
+                self.assertTrue(payload["refreshing"])
+                self.assertEqual(wake.wakes, 1)
+                self.assertEqual(dashboard.mail_send({"to": "stranger", "text": "x"})[0], 400)
+                self.assertEqual(wake.wakes, 1, "a refused send has nothing to wait for")
+
     def test_a_message_beginning_with_a_dash_is_delivered_not_swallowed_as_an_option(self):
         # hq reads its two positionals with argparse, which takes a leading dash as an option:
         # "-h" printed the subcommand help and exited 0, so this route answered "sent" for a
@@ -1836,33 +3277,44 @@ class RefresherTest(unittest.TestCase):
         def count():
             passes.append(time.monotonic())
 
+        stop = threading.Event()
         with mock.patch.object(dashboard, "_refresh_once", count):
-            thread = threading.Thread(target=dashboard._refresher, args=(30,), daemon=True)
+            thread = threading.Thread(target=dashboard._refresher, args=(30, stop), daemon=True)
             thread.start()
-            for _ in range(200):
-                if passes:
-                    break
-                time.sleep(0.01)
-            dashboard._refresh_wake.set()
-            for _ in range(200):
-                if len(passes) > 1:
-                    break
-                time.sleep(0.01)
+            try:
+                for _ in range(200):
+                    if passes:
+                        break
+                    time.sleep(0.01)
+                dashboard._refresh_wake.set()
+                for _ in range(200):
+                    if len(passes) > 1:
+                        break
+                    time.sleep(0.01)
+            finally:
+                # A refresher left running past this test spawns tools into every test that
+                # follows it, and moves the snapshots they are asserting about.
+                stop.set()
+                dashboard._refresh_wake.set()
+                thread.join(timeout=5)
         self.assertGreater(len(passes), 1, "a woken refresher must not wait out its sleep")
+        self.assertFalse(thread.is_alive(), "the refresher must stop when it is told to")
 
 class ReadsCostNothingTest(unittest.TestCase):
     """The page redraws every few seconds. Every read this lane added must therefore be pure
     memory and files: one tool call on a read path is a few thousand an hour, against the API
     budget every agent on this machine shares."""
 
-    # The older panes have their own cadence and their own owners, so they are named here rather
-    # than silently included: /api/ci, /api/sweep, /api/mode and /api/metrics each ask the
-    # machine something on a read, and changing that is not this lane's to do.
+    # EVERY read route, with none held back. The panes that used to ask the machine on a read
+    # (/api/ci, /api/sweep, /api/mode, /api/metrics) are served from their own refreshers now.
     QUIET_ROUTES = ("/", "/index.html", "/static/app.js", "/api/access", "/api/version",
                     "/api/config", "/api/health", "/api/projects", "/api/identities",
                     "/api/fleet", "/api/agent?slug=lane-1", "/api/agent/log?slug=lane-1",
                     "/api/mail/boxes", "/api/mail/thread?box=winston", "/api/mail/feed?hours=24",
-                    "/api/mail/who")
+                    "/api/mail/who", "/api/services", "/api/ci", "/api/ci/log?id=ci-1&tier=build",
+                    "/api/sweep", "/api/mode", "/api/metrics", "/api/accounts", "/api/models",
+                    "/api/jobs", "/api/jobs/drain-1", "/api/power/preview?action=drain",
+                    "/api/accounts/login-state")
 
     def test_no_read_route_runs_a_tool_touches_the_network_or_writes_to_disk(self):
         mail = DashboardMailTest("test_the_office_timeline_is_assembled_here_and_never_by_running_hq_feed")
@@ -1876,6 +3328,17 @@ class ReadsCostNothingTest(unittest.TestCase):
                 json.dumps({"slug": "lane-1", "project": "alpha", "status": "running"}))
             (state / "logs" / "lane-1.jsonl").write_text(
                 json.dumps({"type": "result", "result": "done"}) + "\n")
+            (state / "jobs").mkdir()
+            (state / "jobs" / "drain-1.json").write_text(json.dumps(
+                {"id": "drain-1", "action": "drain", "state": "done",
+                 "started_at": "2026-09-22T08:00:00Z", "ended_at": "2026-09-22T08:01:00Z",
+                 "output": "", "pid": os.getpid()}))
+            (state / "ci" / "logs" / "ci-1").mkdir(parents=True)
+            (state / "ci" / "logs" / "ci-1" / "build.log").write_text("it built\n")
+            (state / "ci" / "queue.json").write_text(json.dumps({
+                "updated": 1784600000, "running": [], "queued": [],
+                "recent": [{"id": "ci-1", "state": "passed",
+                            "tiers": [{"name": "build", "log": "build.log"}]}]}))
             config = box.root / "fleet-config"
             config.mkdir()
             (config / "projects.toml").write_text('[alpha]\nrepo = "acme/alpha"\n')
@@ -1949,6 +3412,19 @@ class OneClockTest(unittest.TestCase):
                 parsed = dashboard.parse_iso(stamp)
                 self.assertIsNotNone(parsed, stamp)
                 self.assertEqual(parsed.utcoffset().total_seconds(), 0, stamp)
+
+    def test_a_reading_that_has_not_changed_keeps_the_moment_it_already_implied(self):
+        # hq reports an AGE, so deriving a stamp from it again a second later moves it a second:
+        # every row carrying it redraws, and two snapshots of a quiet office never compare equal.
+        mail = DashboardMailTest("test_the_office_timeline_is_assembled_here_and_never_by_running_hq_feed")
+        mail.setUp()
+        self.addCleanup(mail.doCleanups)
+        with mail.office():
+            dashboard.who_refresh()
+            first = dashboard.mail_who()["sessions"]
+            time.sleep(1.1)
+            dashboard.who_refresh()
+            self.assertEqual(dashboard.mail_who()["sessions"], first)
 
     def test_a_session_says_when_it_was_last_seen_as_well_as_how_long_ago(self):
         now = 1789996000.0

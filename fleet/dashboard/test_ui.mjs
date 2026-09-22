@@ -40,13 +40,17 @@ ok("the page is a shell, not an application", () => {
   assert.ok(scripts[0][1].split("\n").length < 12, "the inline script stays a handful of lines");
   assert.match(html, /<script type="module" src="\/static\/app\.js">/);
   assert.match(html, /<link rel="stylesheet" href="\/static\/app\.css">/);
+  // The queue and the machine tabs are written in their own lane, and their stylesheets are
+  // linked from here from the start, so neither lane has to edit the other's file to land.
+  assert.match(html, /<link rel="stylesheet" href="\/static\/queue\.css">/);
+  assert.match(html, /<link rel="stylesheet" href="\/static\/machine\.css">/);
 });
 
 ok("the page carries the chrome the views expect", () => {
   for (const id of ["sidebar", "navlinks", "topbar", "productTitle", "viewTitle", "capacity",
     "projectFilter", "freshness", "themeSwitch", "paletteOpen", "palette", "paletteInput",
     "paletteList", "view", "drawer", "drawerTitle", "drawerBody", "drawerScrim", "toasts",
-    "favicon", "sidebarTitle"]) {
+    "favicon", "sidebarTitle", "powerMode"]) {
     assert.ok(html.includes(`id="${id}"`), `index.html is missing #${id}`);
   }
   const shell = read("static/app.js");
@@ -61,14 +65,22 @@ ok("the page carries the chrome the views expect", () => {
 const REQUIRED_FILES = [
   "static/app.css", "static/app.js",
   "static/core/api.js", "static/core/ui.js", "static/core/fmt.js", "static/core/identity.js",
-  "static/views/overview.js", "static/views/agents.js", "static/views/mail.js",
-  "static/views/queue.js", "static/views/projects.js", "static/views/accounts.js",
-  "static/views/system.js",
+  "static/views/board.js", "static/views/agents.js", "static/views/mail.js",
+  "static/views/queue.js",
 ];
 
-ok("every file the design record names exists", () => {
+/* The machine tab is written in another lane. It is checked like every other view once its
+   file is on the farm, and its absence is not a failure of this one. */
+const MACHINE = "static/views/machine.js";
+const hasMachine = fs.existsSync(path.join(HERE, MACHINE));
+
+ok("every file the design record names exists, and the four it removes are gone", () => {
   for (const relative of REQUIRED_FILES) {
     assert.ok(fs.existsSync(path.join(HERE, relative)), `missing ${relative}`);
+  }
+  for (const gone of ["static/views/overview.js", "static/views/projects.js",
+    "static/views/accounts.js", "static/views/system.js"]) {
+    assert.ok(!fs.existsSync(path.join(HERE, gone)), `${gone} is still here`);
   }
 });
 
@@ -308,7 +320,7 @@ ok("layout lives in the stylesheet and no route writes a style attribute", () =>
     const source = read(relative);
     const styles = [...source.matchAll(/style:\s*([^,)}]+)/g)].map((found) => found[1].trim());
     for (const value of styles) {
-      assert.match(value, /^widthStyle\(/,
+      assert.match(value, /^(widthStyle|splitStyle)\(/,
         `${relative} writes a style attribute instead of using a class: ${value}`);
     }
   }
@@ -374,20 +386,20 @@ ok("a refusal carries the server's own sentence to whoever has to act on it", ()
   assert.equal(api.serverReason(new api.ApiError(500, { detail: "x" }, "/api/projects")), "");
   assert.equal(api.serverReason(new TypeError("fetch failed")), "");
   assert.equal(api.serverReason(null), "");
-  for (const relative of ["static/views/projects.js", "static/views/agents.js", "static/views/mail.js"]) {
+  for (const relative of ["static/views/agents.js", "static/views/mail.js"]) {
     assert.ok(read(relative).includes("serverReason"),
       `${relative} throws the server's reason away and writes its own sentence instead`);
   }
 });
 
+const TABS = ["board", "mail", "queue", ...(hasMachine ? ["machine"] : [])];
 const VIEWS = await Promise.all(
-  ["overview", "agents", "mail", "queue", "projects", "accounts", "system"]
-    .map((name) => import(`./static/views/${name}.js`).then((module) => module.default)),
+  TABS.map((name) => import(`./static/views/${name}.js`).then((module) => module.default)),
 );
 
 ok("every view declares the same contract", () => {
   const ids = VIEWS.map((view) => view.id);
-  assert.deepEqual(ids, ["overview", "agents", "mail", "queue", "projects", "accounts", "system"]);
+  assert.deepEqual(ids, TABS);
   for (const view of VIEWS) {
     assert.equal(typeof view.title, "string");
     assert.ok(view.title.length > 0);
@@ -398,35 +410,163 @@ ok("every view declares the same contract", () => {
   }
 });
 
-await okAsync("a card with no numbers says so in words, and never prints a time it does not have", async () => {
-  const { troubleNote } = await import("./static/views/accounts.js");
-  const said = "This account has no login on the farm yet. Log in once: ssh -t farm claude";
-  const sentence = (node) => words(node);
+ok("the browser check runs every hostile and screenshot pass, by glob", () => {
+  const runner = read("test_browser.sh");
+  assert.match(runner, /test_hostile\*\.mjs/, "a lane's own hostile pass would never run");
+  assert.match(runner, /test_screens\*\.mjs/, "a lane's own screenshot pass would never run");
+  assert.match(runner, /PORT=\$own_port/, "two lanes' checks would collide on one socket");
+  /* Every port in here is asked of the kernel. A number written in the file is a number the
+     other lane's run on this machine takes at the same second. */
+  assert.match(runner, /own_port=\$\(free_port\)/, "the per-check port is not a free one");
+  assert.match(runner, /PORT=\$\{PORT:-\$\(free_port\)\}/, "the shared stub's port is not a free one");
+  assert.ok(!/(?:^|[\s{(])(?:PORT|own_port)=\$?\{?[A-Za-z_]*:?-?\d/m.test(runner),
+    "a port number is written into the file, so the other lane's run takes the same socket");
+});
 
-  // No numbers and no time: the card must not turn a missing time into "from not known".
-  const fresh = sentence(troubleNote({ name: "farm-one", read_at: null, stale_error: said }));
-  assert.equal(fresh, `No numbers yet. ${said}`);
-  assert.ok(!/not known/.test(fresh), fresh);
+ok("the four old addresses still land on the thing they named", () => {
+  const shell = read("static/app.js");
+  const table = shell.match(/const REDIRECTS = \{([\s\S]*?)\n\};/);
+  assert.ok(table, "the shell has no redirect table, so yesterday's bookmark is a blank page");
+  for (const [from, to] of [["overview", "board"], ["agents", "board"],
+    ["projects", "machine"], ["accounts", "machine"], ["system", "machine"]]) {
+    assert.match(table[1], new RegExp(`${from}: \\["${to}"`), `#/${from} does not land on ${to}`);
+  }
+  assert.match(table[1], /projects: \["machine", "projects"\]/, "the projects section is not named");
+  assert.match(table[1], /accounts: \["machine", "accounts"\]/, "the accounts section is not named");
+  // The address bar is rewritten, so the reader can bookmark where they actually are.
+  assert.match(shell, /history\.replaceState/);
+});
 
-  // Numbers that have stopped refreshing, with a time behind them.
-  const kept = sentence(troubleNote({
-    name: "farm-two", session: 42, read_at: (Date.now() / 1000) - 900,
-    stale_error: "The vendor did not answer the last time the farm asked.",
-  }));
-  assert.match(kept, /^These numbers are as of 15m ago and have not refreshed\./);
-  assert.match(kept, /The vendor did not answer/);
+ok("the header carries the power setting as a control, not as a word", () => {
+  const shell = read("static/app.js");
+  assert.match(shell, /POWER_MODES/, "the header does not read the one table of settings");
+  assert.match(shell, /apiPost\("\/api\/mode"/, "the header control does not post the setting");
+  assert.match(shell, /"data-write": ""/, "the header control is not marked as a write");
+  const ui = read("static/core/ui.js");
+  for (const word of ["Full", "Shared", "Background", "Paused", "Automatic"]) {
+    assert.ok(ui.includes(`"${word}"`), `the power setting cannot reach ${word}`);
+  }
+  assert.ok(shell.includes('api.access.writable'), "the header control ignores a read-only page");
+});
 
-  // Numbers with no time at all: no "as of" is written.
-  const timeless = sentence(troubleNote({
-    name: "farm-three", weekly: 71, read_at: null,
-    stale_error: "The login on this account has expired. Log in again.",
-  }));
-  assert.equal(timeless, "These numbers have not refreshed. The login on this account has expired. Log in again.");
-  assert.ok(!/as of/.test(timeless), timeless);
+ok("the Board is the four things the amendment names", () => {
+  const board = read("static/views/board.js");
+  assert.match(board, /setupChecklist/, "no setup checklist");
+  assert.match(board, /machineStrip/, "no machine strip");
+  assert.match(board, /accountsStrip/, "no accounts strip");
+  assert.match(board, /agentsPane/, "the agents pane is not on the Board");
+  assert.match(board, /queuePane/, "the queue pane is not on the Board");
+  assert.match(board, /role: "separator"/, "the splitter is not a separator");
+  assert.match(board, /murmur\.board\.split/, "the splitter position is not kept");
+  assert.match(board, /"#\/queue"/, "the queue pane has no way into the Queue tab");
+  // The checklist has no dismiss: the only way to put it away is to fix what it names, so
+  // the thing it draws carries no control at all.
+  const checklist = board.slice(board.indexOf("function setupChecklist"));
+  assert.ok(!checklist.slice(0, checklist.indexOf("\n}\n")).includes('h("button"'),
+    "the setup checklist can be dismissed without fixing anything");
+  const css = read("static/app.css");
+  assert.match(css, /@media \(max-width: 1100px\) \{[\s\S]*?\.board-canvas \{ grid-template-columns: minmax\(0, 1fr\)/,
+    "the two panes do not stack on a narrow screen");
+});
 
-  // Nothing wrong: no sentence at all.
-  assert.equal(troubleNote({ name: "farm-four", session: 42, read_at: 1 }), null);
-  assert.equal(troubleNote({ name: "farm-five", stale_error: "   " }), null);
+ok("the agents pane has two selects and a search, and no chips", () => {
+  const source = read("static/views/agents.js");
+  assert.match(source, /id: "agentSpawner"/);
+  assert.match(source, /id: "agentStatus"/);
+  assert.match(source, /id: "agentSearch"/);
+  assert.ok(!/class: "chip"/.test(source), "the chips are still here");
+  assert.match(source, /Started by/);
+  assert.match(source, /Lane, branch or change number/);
+});
+
+/* The rule that decides which lanes stay on screen, read on its own. The pane used to be
+   filtered by whatever string the select handed it, so the option labelled "Anyone (6)"
+   filtered by the words "Anyone (6)" and left the reader with an empty pane and the advice to
+   clear a filter they had just cleared. */
+await okAsync("the first option of a filter select clears the filter, it does not empty the pane", async () => {
+  const { filterAgents } = await import("./static/views/agents.js");
+  const rows = [
+    { slug: "one", spawned_by: "winston", status: "running", project: "murmur", lane: "board" },
+    { slug: "two", spawned_by: "winston", status: "pr_open", project: "murmur", lane: "mail" },
+    { slug: "three", spawned_by: "rubicon", status: "failed", project: "other", lane: "queue" },
+  ];
+  assert.equal(filterAgents(rows, {}).length, 3, "a pane with no filter hides a lane");
+  assert.equal(filterAgents(rows, { spawner: "" }).length, 3, "Anyone is not a name to filter by");
+  assert.equal(filterAgents(rows, { status: "" }).length, 3, "Any status is not a status to filter by");
+  assert.equal(filterAgents(rows, { spawner: "winston" }).length, 2);
+  assert.equal(filterAgents(rows, { status: "run" }).length, 1);
+  assert.equal(filterAgents(rows, { project: "murmur" }).length, 2);
+  assert.equal(filterAgents(rows, { search: "QUEUE" }).length, 1, "the search is not case sensitive");
+  // A status the five meanings do not have is not a filter: it came from somewhere it should
+  // not have, and the honest answer is every lane, not none.
+  assert.equal(filterAgents(rows, { status: "Any status (3)" }).length, 3,
+    "a status outside the vocabulary empties the pane");
+  assert.equal(filterAgents(rows, { search: "  " }).length, 3, "a search of blanks is no search");
+  assert.equal(filterAgents(null, {}).length, 0, "a route that answered no list must not throw");
+  const source = read("static/views/agents.js");
+  assert.match(source, /selectedIndex === 0/, "the select that clears is read by label, not by position");
+  assert.match(read("static/core/ui.js"), /localName === "option"/,
+    "an option's value is written as a property, so it reports its own label as its value");
+});
+
+ok("stopping a lane and retiring it are asked about before they happen", () => {
+  const source = read("static/views/agents.js");
+  assert.match(source, /apiPost\("\/api\/agents\/kill", \{ slug, retire: choice\.retire \}\)/,
+    "the drawer does not post the route the server lane serves");
+  assert.match(source, /Stop this pass/, "a lane with a restart policy has no pass to stop");
+  assert.match(source, /Retire this lane/);
+  assert.match(source, /Stop this lane/, "a lane with no policy is offered the wrong two words");
+  assert.match(source, /under a new name/, "the confirm does not say the runner will start it again");
+  assert.match(source, /data-confirm-yes/, "there is no confirm step at all");
+});
+
+ok("every word the mail amendment fixes is on the page, and no jargon with it", () => {
+  const source = read("static/views/mail.js");
+  for (const label of ["Conversations", "Everyone", "every agent on this farm",
+    "Unread since you last looked", "Show all ", "People", "Here now",
+    "Not heard from lately (", "Last seen ", "Message to ", "Sent as dashboard, not as you",
+    "Everything the office did", "The office last answered "]) {
+    assert.ok(source.includes(label), `the mail page never says "${label}"`);
+  }
+  /* The words the amendment forbids, looked for in the sentences this page writes itself.
+     A route it reads is not a sentence, and a class name is not either. */
+  const said = [...source.matchAll(/"([^"\\]{8,})"|`([^`\\]{8,})`/g)]
+    .map((found) => found[1] || found[2])
+    .filter((text) => text.includes(" ") && !text.startsWith("/api/"));
+  const jargon = [];
+  for (const text of said) {
+    for (const word of ["mailbox", "mailboxes", "feed", "hq", "issue", "thread id"]) {
+      if (new RegExp(`\\b${word}\\b`, "i").test(text)) jargon.push(`${word}: ${text}`);
+    }
+  }
+  assert.deepEqual(jargon, [], `the mail page speaks in jargon:\n${jargon.join("\n")}`);
+});
+
+ok("the mail page holds itself to the window and sends before the office answers", () => {
+  const source = read("static/views/mail.js");
+  assert.match(source, /fixed: true/, "the mail page still scrolls as one document");
+  assert.match(source, /state: "sending"/, "a sent message does not appear at once");
+  assert.match(source, /sent, it will show here at the next refresh/);
+  const css = read("static/app.css");
+  assert.match(css, /body\.fixed-page #view \{[^}]*overflow: hidden/, "the page under the panes can scroll");
+  assert.match(css, /\.mail-pane \.pane-scroll \{[^}]*overflow-y: auto/, "a pane has no scroll of its own");
+  assert.match(css, /@media \(max-width: 1100px\) \{[\s\S]*?\.people-count, \.people-close \{ display: inline-flex/,
+    "the people pane does not become a count under 1100 px");
+  assert.match(css, /@media \(max-width: 800px\) \{[\s\S]*?\.convo-select \{ display: flex/,
+    "the conversations do not become a select under 800 px");
+});
+
+ok("every write control on these pages is marked and switched off without a token", () => {
+  for (const relative of ["static/views/agents.js", "static/views/mail.js", "static/app.js"]) {
+    const source = read(relative);
+    assert.ok(source.includes("data-write"), `${relative} has a write control nobody marked`);
+    assert.ok(/access\.reason|api\.access\.reason/.test(source),
+      `${relative} switches a control off without saying why`);
+  }
+  // A read-only dashboard is legitimate and must not look broken: one line on every tab says
+  // so in the server's own words, instead of leaving the reader to find a dead button.
+  assert.match(read("static/app.js"), /function readOnlyNote/);
+  assert.match(read("static/app.css"), /\.readonly-strip/);
 });
 
 await okAsync("a lane that put part of its work down says so", async () => {
@@ -465,13 +605,13 @@ ok("the status vocabulary is written down once", () => {
   }
 });
 
-ok("the page and the shell agree on the seven entries, exactly", () => {
+ok("the page and the shell agree on the four entries, exactly", () => {
   const registry = read("static/app.js");
   const icons = registry.match(/const ICONS = \{([\s\S]*?)\n\};/);
   assert.ok(icons, "the shell has no icon table");
   const named = [...icons[1].matchAll(/^\s{2}([a-z]+):/gm)].map((found) => found[1]);
-  assert.deepEqual(named, VIEWS.map((view) => view.id),
-    "the icons and the views are not the same seven, in the same order");
+  assert.deepEqual(named, ["board", "mail", "queue", "machine"],
+    "the icons and the tabs are not the same four, in the same order");
   for (const icon of icons[1].match(/'[^']*'/g) || []) {
     assert.match(icon, /^'<(path|circle)/, "an icon is not drawn by this page");
   }
@@ -665,8 +805,12 @@ await okAsync("the two write routes say what they did", async () => {
   assert.equal((await send("/api/mail/send", { to: "all", text: "" })).status, 400);
 
   const project = await send("/api/projects", { name: "newone", repo: "your-org/newone", port_base: 5300 });
-  assert.equal(project.body.name, "newone");
-  assert.equal(typeof project.body.ports.web, "number");
+  // Registering clones the repository, so the answer is a job, not the row (amendment 7).
+  assert.equal(project.status, 202);
+  assert.equal(project.body.job.action, "add_project");
+  assert.ok(project.body.job.id);
+  const job = await get(`/api/jobs/${project.body.job.id}`);
+  assert.equal(job.body.action, "add_project");
   assert.equal(typeof (await send("/api/projects", { name: "" })).body.error, "string");
 });
 
@@ -691,9 +835,10 @@ await okAsync("a limit window is labelled by its own name", async () => {
     for (const scoped of account.scoped || []) windows.push(scoped.label);
   }
   assert.ok(windows.includes("long context"), "a scoped window keeps its own label");
-  const source = read("static/views/accounts.js");
+  const source = read("static/views/board.js");
   assert.ok(!/fable/i.test(source), "no window may be singled out by name in the page");
-  assert.ok(!/<svg|base64/i.test(source), "an engine mark comes from the server, not from a logo in the page");
+  assert.ok(!/<svg|base64/i.test(source), "a mark comes from the server, not from a logo in the page");
+  assert.match(source, /Out of room/, "a subscription with nothing left does not say so on the Board");
 });
 
 await okAsync("the quiet farm carries what the live farm showed and no other state does", async () => {

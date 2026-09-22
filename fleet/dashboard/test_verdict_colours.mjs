@@ -50,19 +50,16 @@ for (const scheme of ["light", "dark"]) {
   await page.goto(`${URL}/#/queue`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1600);
 
-  const collapsed = await page.evaluate(() => {
-    const head = [...document.querySelectorAll(".section-head")]
-      .find((node) => /recent/i.test(node.textContent));
-    return head ? head.querySelector("button").getAttribute("aria-expanded") : null;
-  });
-  if (scheme === "light") check("recent starts collapsed", collapsed === "false", String(collapsed));
-
-  await page.evaluate(() => {
-    const head = [...document.querySelectorAll(".section-head")]
-      .find((node) => /recent/i.test(node.textContent));
-    if (head) head.querySelector("button").click();
-  });
-  await page.waitForTimeout(700);
+  /* The queue is one table with three bands, so every verdict is on the screen already: there
+     is nothing to expand before the colours can be read. What this check still wants from the
+     page is that all three bands are there, and that the recent one is not hiding the rows the
+     colours live in. */
+  const bands = await page.evaluate(() => [...document.querySelectorAll(".q-band")]
+    .map((node) => node.innerText.replace(/\s+/g, " ").trim()));
+  if (scheme === "light") {
+    check("the queue names its three bands", bands.length === 3, bands.join(" | "));
+    check("the recent band counts what finished", /Recent \(\d+\)/.test(bands[2] || ""), bands[2]);
+  }
 
   const measured = await page.evaluate(() => {
     const out = {};
@@ -75,10 +72,15 @@ for (const scheme of ["light", "dark"]) {
         text: getComputedStyle(pill).color,
       };
     }
-    for (const card of document.querySelectorAll(".ci-card")) {
+    /* The row's coloured edge is drawn by queue.css, which index.html links next to app.css.
+       A page served without it still has to read correctly, so the edge is measured when it is
+       there and the dot speaks for the row when it is not. */
+    for (const row of document.querySelectorAll(".q-row")) {
       const meaning = ["run", "wait", "fail", "done", "pause"]
-        .find((name) => card.classList.contains(name));
-      if (meaning && out[meaning]) out[meaning].edge = getComputedStyle(card).borderLeftColor;
+        .find((name) => row.classList.contains(name));
+      const cell = row.querySelector("td");
+      const shadow = cell ? getComputedStyle(cell).boxShadow : "none";
+      if (meaning && out[meaning] && shadow && shadow !== "none") out[meaning].edge = shadow;
     }
     return out;
   });

@@ -150,38 +150,101 @@ link, live activity and cost. Stop it with `fleet dashboard stop`, never with a 
 ### What the dashboard serves
 
 Reads are open when the dashboard is bound to this machine only, and need the bearer token once
-the bind is wide. Writes always need it. The page and its own files are open either way, or the
-page could never be opened to hand over the token in the first place.
+the bind is wide. Writes always need it, and a request whose `Origin` or `Sec-Fetch-Site` says it
+came from another site is refused whatever token it carries. The page and its own files are open
+either way, or the page could never be opened to hand over the token in the first place.
+
+**Read, from the snapshot.** Not one of these runs a tool, reaches the network or writes to disk.
+Background threads read the machine instead: one every 45 seconds for the health table, the
+services, the mailboxes, the office timeline and the session list; one every 15 seconds for the
+verification queue's observations; one every 5 seconds for the live machine numbers; one every 10
+minutes for the subscription accounts. A page redraws every few seconds, so a tool call on a read
+path is a few thousand calls an hour against the budget every agent on this machine shares. An
+answer says `pending` until the first pass, and keeps the last good values when a pass fails, with
+`stale_since` saying when they were still true.
 
 | Route | Method | Answers |
 |---|---|---|
 | `/static/<file>` | GET | the front end's files, confined to `dashboard/static` |
 | `/api/config` | GET | the page's name, this build, and which optional parts this farm has |
 | `/api/health` | GET | one row per prerequisite: `ok`, `missing`, `off` or `error`, each with a fix |
+| `/api/services` | GET | the agent runner, the verification runner, the sweep timer and this dashboard: state, since when, and what each one is for |
+| `/api/metrics` | GET | load, memory, disk, GPU, temperature and whether this farm can spawn |
+| `/api/mode` | GET | the power mode: the setting, what it resolves to, and the caps it applies |
+| `/api/sweep` | GET | whether the sweep timer is enabled, and how long until the next pass |
+| `/api/ci` | GET | the verification queue: running, waiting and recent, with the runner's own state |
+| `/api/ci/log?id&tier` | GET | the last 256 KB of one stage's log, with `truncated` when there is more |
 | `/api/projects` | GET | the registered projects, with lanes open now and last activity |
-| `/api/projects` | POST | registers one, by running `fleet add-project` |
+| `/api/fleet`, `/api/agent?slug` | GET | every lane, and one lane's whole record |
 | `/api/agent/log?slug&tail=200` | GET | that lane's log as words, at most 2000 lines |
-| `/api/agent/msg` | POST | `{slug, text}`, delivered by `fleet msg` at the lane's next checkpoint |
+| `/api/accounts` | GET | each subscription's windows, with the last good numbers when a read failed |
+| `/api/accounts/login-state` | GET | per account: `logged_in`, `waiting_for_login`, `expired`, `rate_limited` or `unknown`, each with a sentence and when it was last read. `waiting_for_login` means the credentials file is ABSENT; one that is there but cannot be read is `unknown`, never an invitation to log in over it |
+| `/api/jobs`, `/api/jobs/<id>` | GET | the long actions in flight, and one action's record |
+| `/api/power/preview?action=` | GET | what throttle, drain or resume will do, with the lanes a drain would stop, by name |
 | `/api/mail/boxes` | GET | the head office's mailboxes, with a count for the last day |
 | `/api/mail/thread?box&since` | GET | one mailbox's messages, newest last |
 | `/api/mail/feed?hours=24` | GET | the whole office as one timeline, newest first, built here |
 | `/api/mail/who` | GET | the live sessions, from `hq who` |
 
-Every time in these answers is an ISO 8601 stamp in UTC, so two of them can be merged and
-sorted: the moment an answer was true, a message's own stamp, a session's last sign of life.
-A branch claim is the one line with no moment of its own: it is a fact about now, so it leads
-the timeline and says "held now" where the others say how long ago they happened.
-| `/api/mail/send` | POST | `{to, text}`, sent through `hq msg` as this dashboard's own name |
+**Write.** Every one of these needs the token, names its own timeout in the code, passes argv as a
+list (never a shell string), and answers with one sentence a person can act on rather than with a
+traceback. `--` goes before a positional only where the CLI parses options with argparse
+(`hq msg`, `fleet ci cancel`); `fleet`'s own case loops refuse a bare `--` as an unknown flag, so
+none is sent to them.
 
-One background thread refreshes the health table, the mailboxes, the office timeline and the
-session list every 45 seconds. No GET runs a tool, reaches the network or writes to disk: the
-page redraws every few seconds, and a tool call on a read path is a few thousand calls an hour
-against the API budget every agent on the machine shares. An answer says `pending` until that
-thread's first pass, and keeps the last good values when a pass fails, with `stale_since` saying
-when they were still true. They read through `gh` and never through `hq inbox`, because a plain
-inbox read moves a cursor shared by every process signing as one name on one machine, so a page
-polling it would quietly consume an agent's mail. With no `hq` installed, or none pointed at an
-office, every mail route answers with one sentence and the command that fixes it.
+| Route | Body | Runs |
+|---|---|---|
+| `/api/services` | `{service, action}` | `fleet daemon start\|stop`, `fleet ci daemon start\|stop`, `fleet autosweep on\|off`; a restart is the stop and then the start. The dashboard's own row refuses and names `fleet dashboard restart` |
+| `/api/power` | `{action}` | throttle: `fleet mode balanced`, at once. drain: `fleet game-mode on`, as a job. resume: `fleet game-mode off`, as a job |
+| `/api/agents/kill` | `{slug, retire}` | `fleet kill [--retire] <slug>`; the answer carries the lane's restart policy and what the press did |
+| `/api/ci/enqueue` | `{project, pr}` | `fleet ci enqueue --project <name> --pr <n>`, as a job |
+| `/api/ci/cancel` | `{id}` | `fleet ci cancel -- <id>`, for a run that is running or waiting |
+| `/api/projects` | `{name, repo, port_base?}` | `fleet add-project`, as a job (it clones the repository); without a port base it takes the next free block above the highest registered one, and is refused with a sentence when there is no free block left |
+| `/api/projects/remove` | `{name}` | a guarded rewrite of `projects.toml` (there is no fleet verb): refused while the project has lanes open or while a project is being added, keeps a copy of the previous file, and names the dev server port block that is free again |
+| `/api/accounts/add`, `/api/accounts/remove` | `{name, engine}` / `{name}` | the login command and its steps; removal moves the account to `dead-account-backups` |
+| `/api/accounts/refresh` | | wakes this server's own account reader, and is refused for sixty seconds afterwards: one press is one request per account to the vendor |
+| `/api/models` | `{action, id}` | enable, disable or test one model, each a real request to the provider |
+| `/api/mode` | `{mode}` | the power mode, applied at once |
+| `/api/agent/msg` | `{slug, text}` | `fleet msg`, delivered at the lane's next checkpoint |
+| `/api/mail/send` | `{to, text}` | `hq msg -- <to> <text>` as this dashboard's own name, then wakes the office reader |
+
+### Long actions are jobs
+
+Draining the farm, resuming it, queueing a verification and adding a project can outlast a
+request, so they answer `202` at once with a job record instead of holding the connection open:
+
+```json
+{"job": {"id": "drain-1790000000-a1b2c3", "action": "drain", "key": "power",
+         "label": "Drain the farm", "command": "fleet game-mode on", "state": "running",
+         "started_at": "2026-09-22T08:00:00Z", "ended_at": null, "output": ""}}
+```
+
+The record is a file under `$FLEET_STATE/jobs/<id>.json`, so a page that was reloaded, or a second
+page, can still read how it ended: `GET /api/jobs/<id>` for one, `GET /api/jobs` for the ones in
+flight. A job ends `done` or `failed`, with the exit code, the tail of what the tool said and, on
+a failure, one sentence naming it. A job whose dashboard is gone reads as `failed` rather than as
+running for ever, and a finished record is forgotten after a day, by the 45 second refresher and
+not only by the next job to start.
+
+The refusal is about the RESOURCE, not the verb. A job holds a `key`, and starting anything that
+holds the same key is refused with `409` and the record of the one in flight, because pressing
+Drain twice must not drain twice. Throttle, drain and resume all hold `power`, since this farm has
+one power state and `fleet game-mode on` and `fleet game-mode off` are opposites: without that,
+Drain and Resume ran at once and whichever call landed last decided where the farm ended up.
+Adding a project and removing one both hold `projects`, the registry being one file: a second
+press cannot start a second clone, and a removal cannot rewrite the file underneath a clone that
+is about to append to it.
+
+Every time in any of these answers is an ISO 8601 stamp in UTC, so two of them can be merged and
+sorted: the moment an answer was true, a message's own stamp, a session's last sign of life, when
+a service last became active. A branch claim is the one line with no moment of its own: it is a
+fact about now, so it leads the timeline and says "held now" where the others say how long ago
+they happened.
+
+The mail routes read through `gh` and never through `hq inbox`, because a plain inbox read moves a
+cursor shared by every process signing as one name on one machine, so a page polling it would
+quietly consume an agent's mail. With no `hq` installed, or none pointed at an office, every mail
+route answers with one sentence and the command that fixes it.
 
 A lane ends by opening a pull request and stopping. Merging is a human decision.
 
