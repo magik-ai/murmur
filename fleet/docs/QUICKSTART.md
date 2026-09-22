@@ -112,27 +112,49 @@ fleet dashboard status        # is it running, and on what socket
 fleet dashboard token         # the bearer token the board needs before it can change anything
 ```
 
-Prefer `fleet events` and `fleet status --json` over grepping logs. Open the board once as
-`http://127.0.0.1:7878/?token=<token>` and the tab keeps the token; reaching it from another
-machine is `FLEET_DASH_BIND` in `~/.config/fleet/env` plus `fleet dashboard restart`, and then
-the token covers reading too.
+Prefer `fleet events` and `fleet status --json` over grepping logs.
 
-The board itself is a small product, seven tabs down the left side:
+Open the board once as `http://127.0.0.1:7878/?token=<token>`. The tab keeps the token from then
+on, so you paste it once per browser and never again. Reaching the board from another machine is
+`FLEET_DASH_BIND` in `~/.config/fleet/env` plus `fleet dashboard restart`, and then the token
+covers reading as well as writing.
+
+The board is a small product of its own, four tabs down the left side:
 
 | Tab | Answers, in one line |
 |---|---|
-| Overview | what needs me right now |
-| Agents | who is running, on what, how far along |
-| Mail | what the agents said to each other |
-| Queue | what is being checked before a merge |
-| Projects | which repositories this farm serves |
-| Accounts | how much subscription time is left |
-| System | is the machine healthy and fully set up |
+| Board | who is running, what is being verified, is the machine healthy: the screen you keep open |
+| Mail | what the agents said to each other, and where you reply to one of them |
+| Queue | every merge-result verification run, and the log of the stage that failed |
+| Machine | set up and run the farm: power, services, accounts, engines, projects, health, settings |
+
+**The Board is the one to leave open.** Two strips sit under the header: the machine strip (load,
+memory, disk, GPU, temperature, capacity, the countdown to the next sweep) and the accounts strip
+(one card per subscription with its session and weekly bars and the reset countdown, red when it
+is out of room). Below them the page is a two-pane canvas: agents on the left, the verification
+queue on the right (running and waiting runs, plus a count of recent ones that links to the Queue
+tab). One splitter between the panes is draggable, its position is remembered by your browser, and
+under 1100 px the two panes stack into one column. Clicking an agent opens a drawer with its
+brief, its result, its checks, its log and a box to send it a message.
+
+While a prerequisite is still missing, or no agent has ever run on this farm, the Board is a setup
+checklist instead: one line per step, with the spawn command already filled in with the name of
+your first registered project. The checklist goes away on its own once the farm is complete.
+
+The header carries the same controls on every tab: the product name (`FLEET_DASH_TITLE`), the
+capacity pill with the reason on hover, a project filter, the freshness label, the jump palette,
+the theme switch, and the power mode. The power mode is a four-state control, Full, Shared,
+Background and Paused, plus Automatic, and it is the same setting as `fleet mode`: Full leaves
+every core to the agents, Shared and Background hand CPU back to whatever else you are doing,
+Paused stops new spawns, and Automatic picks one of the four from how busy the machine is.
 
 Every live panel carries a freshness label, "Live" or "Stale" with a time, so you can always tell
-whether you are looking at the current state or the last good read. Press Cmd+K (Ctrl+K on
-Linux and Windows) anywhere on the page to jump straight to a tab, an agent, a project or a
-mailbox, and use the switch in the header to flip the page between light and dark.
+whether you are looking at the current state or the last good read. Mail runs 45 seconds behind
+the office by design, and the label is how you see that rather than guess at it.
+
+Press Cmd+K (Ctrl+K on Linux and Windows) anywhere on the page to open the jump palette and go
+straight to a tab, an agent, a project or a conversation. The switch in the header flips the whole
+page between light and dark, and the choice is remembered per browser.
 
 ### 10. Review, merge, clean up
 

@@ -1,6 +1,6 @@
 # Sharp edges
 
-Thirteen things every operator of a farm has to know. Each one is a real failure mode of this design,
+Twenty things every operator of a farm has to know. Each one is a real failure mode of this design,
 not a hypothetical: the mechanism is explained, and so is the guard that already exists, because
 knowing where the guard stops is the useful part.
 
@@ -223,6 +223,9 @@ the message lands in the office from that one name, never from the person who ty
 **The guard.** `FLEET_DASH_HQ_AGENT` is a setting, so a farm can give its dashboard a name that
 reads plainly as "someone at the board wrote this", and that sender carries the same colour and
 glyph in the thread as any other mailbox, so a reader never mistakes it for an agent's own voice.
+The composer in the Mail tab says it on screen, under the Send button: "Sent as dashboard, not as
+you." A sent message appears in the open thread at once as "sending" and settles to "sent" on the
+server's answer, so you never press Send twice.
 
 **Where the guard stops.** There is no login on the dashboard. Two people sharing one board send
 under the same name, and a reader of the thread cannot tell them apart afterwards. If a message
@@ -323,6 +326,144 @@ right command; on the request path it is a route that answers an error.
 
 ---
 
+## 15. Drain and Resume do far more than pause and unpause
+
+**Mechanism.** The Power section of the Machine tab has two buttons whose names undersell them.
+**Drain** runs `fleet game-mode on`, which salvages every live lane's work to git, stops the agent
+runner so nothing respawns, kills the lanes to release their RAM, and stops the verification
+database. **Resume** runs `fleet game-mode off`, which starts the agent runner again, and that
+runner respawns every `until-pr` and `until-merged` lane from its brief. Resume can therefore put
+a dozen agents back on the machine in a minute, spending subscription, from one click.
+
+**The guard.** Neither acts on the press. Drain's confirmation lists by name the lanes it will
+salvage and kill, and says that it stops the agent runner and the verification database. Resume's
+confirmation says that the agent runner restarts and will respawn the restart-policy lanes. Both
+run as jobs you can watch (edge 17), and the dashboard keeps running through both: it never stops
+itself.
+
+**Where the guard stops.** Salvage is not a merge. A verification run in flight loses its verdict
+and has to be enqueued again, and a lane with no restart policy loses whatever salvage could not
+push. If all you want is a quiet machine for the next twenty minutes, throttle instead (edge 16)
+and leave the lanes alive.
+
+---
+
+## 16. Throttling caps the whole farm, not just new spawns
+
+**Mechanism.** The power control's "Throttle the farm and stop new agents" runs `fleet mode
+balanced`. That caps CPU and memory for **every** running agent, not only for the next one: a lane
+in the middle of a build gets a third of the machine and takes correspondingly longer, and a lane
+with a timeout of its own can hit it. The name reads like a spawn switch; the mechanism is a
+machine-wide cap.
+
+**The guard.** The confirmation names the CPU and memory caps it is about to apply and says that
+the verification database is released. The change is live, needs no root and no restart, and
+`fleet mode auto` (Automatic in the header) hands the machine back.
+
+**Where the guard stops.** The four modes are the only lever there is. A flag that pauses spawns
+while leaving running lanes at full speed is a separate, later change in `lib/mode.py`; until it
+lands, "stop new agents" and "slow the running ones" are one switch, and the honest choice for a
+farm you want to stop properly is Drain.
+
+```bash
+fleet mode              # what the farm is on now
+fleet mode balanced     # what the Throttle button does
+fleet mode auto         # give the machine back to the agents
+```
+
+---
+
+## 17. A long action answers with a job, and a second press is refused
+
+**Mechanism.** Drain, Resume, adding a project and enqueueing a verification can all take longer
+than thirty seconds, which is longer than a page should hold a request open. Each answers
+immediately with a job id recorded under `$FLEET_STATE/jobs`, and the page follows it by polling.
+So a button that comes back at once has not finished: it has started.
+
+**The guard.** The control that started a job stays disabled and shows the running job until it
+ends, and the server refuses a second press of an action that is already running. A double click,
+an impatient second click and a second browser tab all hit the same refusal, so the farm cannot be
+drained twice.
+
+**Where the guard stops.** The refusal is per action on this server, not per farm: nothing stops a
+drain from the page while somebody runs `fleet game-mode on` in a terminal. And closing the tab
+does not cancel anything. The job runs to its end and its record holds the result, so if you lose
+the page, reopen it and read the job rather than pressing the button again.
+
+---
+
+## 18. The queue runner and the agent runner are two different services
+
+**Mechanism.** `fleet daemon` is the supervisor that respawns `--restart` lanes. `fleet ci daemon`
+is the worker that takes candidates off the verification queue and runs the tiers. They share a
+word and nothing else. Starting `fleet daemon` because the queue is not moving changes nothing
+about the queue, and stopping the one you did not mean to stop takes out the other half of the
+farm quietly.
+
+**The guard.** The Machine tab's Services section is one row per service with its own state and
+its own buttons: agent runner (`fleet-daemon.service`), verification runner (`fleet-ci.service`),
+sweep timer (`fleet-sweep.timer`) and the dashboard. The Queue tab's runner switch is
+`fleet ci daemon start|stop` and only that. The states are read from a snapshot refreshed every 45
+seconds, so opening a tab never runs a tool.
+
+**The commands, so they are never confused:**
+
+```bash
+fleet daemon status        # lanes are not respawning
+fleet ci daemon status     # the verification queue is not moving
+```
+
+**Where the guard stops.** The dashboard's own row is read-only, because a page cannot restart the
+server that is drawing it; it shows the command instead. And a service that systemd reports as
+active can still be wedged: active is not the same as working.
+
+---
+
+## 19. Enable and Test on an engine each spend a real request
+
+**Mechanism.** In Machine, Engines, the enable switch runs `fleet models enable <id>` and Test runs
+`fleet models test <id>`. Both send one real request to the provider, because an engine is only
+routable when it passes a live health check: authentication and limits are things you cannot know
+without asking. That request comes out of the same subscription window a lane would use, and on an
+account near its limit it can be the request that trips it.
+
+**The guard.** The buttons say so on screen before you press them, the table keeps the last test
+result with the time it was taken (so you do not re-test to learn something already on the page),
+and only an installed engine gets a switch at all: the rest show "not installed" with the install
+hint and no button to press.
+
+**Where the guard stops.** There is no dry run. Testing four engines is four requests, and a pass
+means only that the provider answered once, a minute ago, not that it will answer during a
+fourteen-hour night.
+
+---
+
+## 20. Provider keys never go through the page, and neither does spawning
+
+**Mechanism.** A key typed into a web form is in the request, in anything between the browser and
+the server, and in the browser's own memory and autofill. The dashboard therefore has no field for
+a provider key and no route that accepts one. `fleet models auth <id>` reads the key from standard
+input, never from a command line, so it stays out of your shell history too, and writes it to
+`$FLEET_STATE/secrets/<id>.key` with mode 600.
+
+```bash
+fleet models auth <id> < ~/keys/<id>.key   # the key never reaches argv
+fleet models enable <id>                   # now the live check can run
+```
+
+**The guard.** The same line is drawn around everything where money or identity is at stake:
+spawning stays a command typed by a person under a codename, and `fleet dashboard stop`,
+`fleet dashboard restart`, `fleet clean --force` and `fleet sweep --force` have no button either.
+Adding an *account* is the one credential flow the page does help with, and it helps without
+touching the credential: it prints the exact command to run in a terminal, then watches the
+credentials file and flips the row to "logged in" by itself when the login lands.
+
+**Where the guard stops.** None of this stops you. A key pasted onto a command line is in your
+history, and a key pasted into a mail message is in the head office repository forever. The page
+declining to take it is a guard on the page, not on the operator.
+
+---
+
 ## The short version
 
 1. `--force` means "yes, destroy it". `--dry-run` first, always.
@@ -340,3 +481,9 @@ right command; on the request path it is a route that answers an error.
 13. A dashboard run by your own systemd unit needs `EnvironmentFile` or it never sees the config.
 14. A hundred mailboxes is a hundred calls on the first pass. The dashboard builds the timeline
     itself; `hq feed` is for a terminal, never for a page.
+15. Drain salvages, stops and kills every lane; Resume respawns them all and spends subscription.
+16. Throttle slows the running agents too. There is no spawn-only pause yet.
+17. A long action returns a job id, not a result, and refuses a second press while it runs.
+18. `fleet daemon` respawns lanes; `fleet ci daemon` runs the verification queue. Different things.
+19. Enabling or testing an engine spends one real request on that subscription.
+20. Provider keys go in over stdin at a terminal, never through the page.

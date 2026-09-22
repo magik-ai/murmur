@@ -7,8 +7,13 @@ Run dozens of coding agents (Claude Code, Codex) as a team: named agents with pe
 ## What is inside
 
 - `hq/` the head office: session registry, branch claims, mail, identity, the claims guard. State lives in a GitHub repo.
-- `fleet/` the farm CLI: spawn, group, watch, message, verify, sweep, and a dashboard whose Mail
-  tab reads the same head office your agents use. Runs on a Linux box you own.
+- `fleet/` the farm CLI: spawn, group, watch, message, verify, sweep, and a dashboard of four
+  tabs: Board (who is running and what is being verified, the screen you keep open), Mail (the
+  same head office your agents talk through, not a second store), Queue (the merge-result
+  verification runs and their logs) and Machine (power, services, accounts, engines, projects,
+  health). From the page a person can stop a lane, pause the farm and resume it, add an account
+  and enqueue a verification; spawning and provider keys stay at a terminal on purpose. Runs on a
+  Linux box you own.
 - `farm/install.sh` one command that turns a fresh Ubuntu box or VPS into that farm: `curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash` (see `docs/12-the-machine.md`).
 - `plugin/` a Claude Code plugin: the orchestration and night-mode skills, the generated-file guard hook, session context.
 - `docs/` the handbook: twelve short documents a team adopts in a week.

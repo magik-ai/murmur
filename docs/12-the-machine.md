@@ -116,10 +116,40 @@ is never left open to the internet. Two ways in:
 Either way the page asks for a token once per browser. Get it with `fleet dashboard token` and
 open `http://...:7878/?token=<it>`; the tab remembers.
 
-The first thing you see is a checklist of what is still missing, one line per step, until the
-farm is complete; after that the page opens on Overview. Its Mail tab is the same head office
-your agents already talk through, not a second store. The page never spawns an agent itself: that
-stays a command with a codename behind it, typed by a person.
+The first thing you see is a checklist of what is still missing, one line per step, with the
+first spawn command already filled in, and it stays the whole page until the farm is complete.
+After that the page opens on the **Board**: a strip of machine numbers and a strip of
+subscription windows under the header, then who is running on the left and what is being verified
+on the right. That is the screen to leave open. The other three tabs are Mail, which is the same
+head office your agents already talk through and not a second store, Queue, which is every
+verification run with the log of the stage that failed, and Machine.
+
+**Machine** is the control room, and it is where the things this chapter set up are changed
+afterwards. Accounts are added there: you fill in a name and an engine, the page hands you the
+exact command to run in a terminal, then watches for the login and flips the row to "logged in"
+by itself. Engines are switched on and off there, one row each, with an install hint instead of a
+switch when the engine is not installed. Services are started and stopped there: the agent
+runner, the verification runner and the sweep timer. And the farm is paused and resumed there:
+throttle it to hand the machine back to whatever else you are doing, or drain it, which saves
+every lane's work to git and stops them all, and then resume, which starts the runner again and
+brings the restart-policy lanes back. Each of those says what it is about to do before it does
+it.
+
+Three things the page will never do, by design. It never spawns an agent: that stays a command
+with a codename behind it, typed by a person, because it spends money under a name. It never
+stops or restarts itself: a page cannot take down the server drawing it, so it shows you
+`fleet dashboard restart` instead. And it never takes a provider key: there is no field for one
+and no route that would accept one. Keys go in at a terminal, over standard input, so they never
+reach a command line:
+
+```bash
+fleet models auth <id> < ~/keys/<id>.key
+fleet models enable <id>
+```
+
+If you open the board without the token, or from a browser that has forgotten it, nothing breaks:
+every button is there, disabled, with one sentence saying why. A read-only dashboard is a
+perfectly good way to watch a farm.
 
 ## Security in four lines
 

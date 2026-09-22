@@ -82,10 +82,28 @@ It needs published statuses, and then exactly one writer per check name, never
 two systems reporting one context in parallel.
 
 If your farm runs a web dashboard, its Queue tab is where all of this becomes
-visible: one row per change, the stage that is currently running, and the same
-"a farm verdict can differ from the hosted one" explanation spelled out on
-screen instead of buried in a log. The tab reports what the farm found. It
-still has no vote.
+visible and operable: one row per change, a compact strip of its stages, and a
+detail panel with the log of whichever stage you click, so a failure is read on
+screen instead of over ssh. Three controls sit above the table. **Verify a
+change** takes a change number and a project and queues a candidate. **Cancel**
+ejects a waiting run or stops a running one. **Runner on and off** starts and
+stops the worker that takes candidates off the queue, which is a different
+service from the one that supervises agents, and stopping it leaves the queue
+filling up rather than emptying. On the reference farm those are these
+commands:
+
+```bash
+fleet ci enqueue --project <PROJECT> --pr <N>   # queue a candidate
+fleet ci status                                 # queued / running / passed / failed / conflict
+fleet ci cancel <id>                            # eject a waiting run, or stop a running one
+fleet ci daemon start | stop | status           # the queue worker, not the agent supervisor
+fleet ci log <id>                               # the full log of a run, past what the page shows
+```
+
+The tab reports what the farm found, and it is worth reading in full, because a
+combination failure here is a real failure. It still has no vote: nothing it
+shows is a status on the change, no green here resolves a protected check, and a
+merge is still made on the hosted verdict alone.
 
 ## A merge is a deployment
 

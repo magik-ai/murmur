@@ -71,11 +71,21 @@ fleet clean --all                    # remove finished agents' worktrees
 Spawn a worker with `--issue N` (it reads the GitHub issue), `--task "…"`
 (inline brief), or `--brief-file path` (a brief written on the farm).
 
-The dashboard is a small product of its own, seven tabs down the side: Overview for what needs
-you right now, Agents for who is running and how far along, Mail for what the agents said to
-each other, Queue for what is being checked before a merge, Projects for which repositories this
-farm serves, Accounts for how much subscription time is left, and System for whether the machine
-is healthy and fully set up. `FLEET_DASH_TITLE` names the board (default `murmur`), and
+The dashboard is a small product of its own, four tabs down the side. **Board** is the screen you
+keep open: the machine and accounts strips under the header, then agents on the left and the
+verification queue on the right, with a draggable splitter between them, and a setup checklist
+instead of all of it until the farm is complete. **Mail** is the head office as a three-pane
+conversation app: mailboxes, thread, and a composer pinned to the bottom. **Queue** is one row per
+merge-result verification run, with a detail panel that carries each stage's log. **Machine** is
+the control room: power, services, accounts, engines, projects, health and settings.
+
+What you can do from the page: stop or retire a lane, message a running lane, send mail as the
+dashboard, throttle the farm or drain and resume it, start and stop the agent runner, the
+verification runner and the sweep timer, add and remove an account, enable, disable and test an
+engine, register and remove a project, and enqueue or cancel a verification. What stays at a
+terminal on purpose: spawning (money and identity belong to a session with a name), provider keys
+(`fleet models auth <id>` reads them from stdin), the dashboard's own stop and restart, and the
+`--force` forms of `clean` and `sweep`. `FLEET_DASH_TITLE` names the board (default `murmur`), and
 `FLEET_DASH_HQ_AGENT` sets the identity any mail sent from the browser carries (default
 `dashboard`), never the name of whoever is looking at the screen.
 
