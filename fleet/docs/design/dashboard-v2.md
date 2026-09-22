@@ -233,3 +233,56 @@ Where this section conflicts with sections 2 to 8, this section wins.
   needs is defined in its own file.
 - **docs**: fleet/docs/QUICKSTART.md, fleet/docs/sharp-edges.md, fleet/README.md, README.md,
   docs/12-the-machine.md, docs/06-ci-and-merge.md.
+
+## 11. Models, not Engines (owner review 2026-09-22, evening)
+
+The owner: "not Engines but Models; make adding popular services and models understandable so
+everything can be done there; right now nothing is clear and it is a visual mess." Decisions:
+
+**The word.** The section and every label say "Models". A row is a model the agents can be
+spawned with. "Engine" survives only as the internal launcher kind (claude, codex, generic) and
+never on screen.
+
+**The table.** One row per catalog entry, six columns, nothing else: Model (label, id under it
+in mono, provider glyph from `color`), Runs as (the command, or "not installed" with the pill),
+Access (how it is paid for: "your Claude subscription", "your ChatGPT subscription", "API key",
+read from the catalog's `access` field, falling back to a sentence derived from `auth_env` and
+`tos`), Status (one pill: On, Off, Needs a key, Not installed, Failing; the health detail as the
+pill's title and as a muted line under it when failing), Last test (age), Actions (Switch on or
+off when installed and keyed, Test, Remove for a model the operator added; nothing for a
+shipped one that is not installed except the install hint in the Runs as cell). The role and the
+quality notes leave the table: they are in the row's detail drawer, opened by clicking the name.
+No dated notes, no "PREPARED, do not enable" copy: the shipped catalog carries none, and a
+farm's own catalog is the operator's to write.
+
+**Adding.** A button "Add a model" opens a dialog in the drawer with numbered steps:
+1. Pick a service from presets (cards: Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code,
+   OpenCode, Aider, Ollama local, Custom command). Each card says in one line how it is paid
+   for and whether it is safe to run headless (from `tos`). A preset already in the catalog is
+   shown as "already added" and not choosable.
+2. Name it (an id, prefilled from the preset, editable for Custom) and pick the model variant
+   where the preset lists any (for example gemini-2.5-pro).
+3. Access. Subscription presets: the login command to run in a terminal (as accounts do). Key
+   presets: the exact command `fleet models auth <id>` with "paste the key when it asks", and
+   the sentence that a key never goes through this page. Local presets: the install and pull
+   commands.
+4. Register: POST /api/models/add writes the entry to the farm's catalog (creating
+   `~/.config/fleet/models.toml` from the example on first write), then the dialog runs Test and
+   shows the result, then Switch on. The dialog polls the row until the test answers.
+Remove: only for entries the operator added (a `source = "added"` field); shipped entries can
+only be switched off. Remove asks, then deletes the entry and its stored key.
+
+**Presets** live in the server (`fleet/lib/model_presets.py`), one dict per service with id,
+label, colour, kind (subscription | key | local), bin, install_hint, auth_env, run template,
+health prompt, tos sentence, variants, docs URL. GET /api/models/presets serves them. The
+shipped example catalog keeps claude and codex only; the rest are presets a person adds.
+
+**Routes.** GET /api/models/presets; POST /api/models/add {preset, id, variant?, bin?, run?,
+auth_env?} (Custom needs bin and run); POST /api/models/remove {id}; POST /api/models
+{action: enable|disable|test, id} as today. All writes behind the token and the cross-site
+refusal; the catalog is rewritten through a guarded TOML writer that escapes values; a key
+never arrives in a request body (a body carrying `key` is refused with the sentence).
+
+**GET /api/engines** keeps its route for one release with the same fields plus `access`,
+`status`, `source`, `variant`; the page reads it as the models table. `/api/models` (the bare
+listing) stays.
