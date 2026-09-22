@@ -164,12 +164,13 @@ page could never be opened to hand over the token in the first place.
 | `/api/agent/msg` | POST | `{slug, text}`, delivered by `fleet msg` at the lane's next checkpoint |
 | `/api/mail/boxes` | GET | the head office's mailboxes, with a count for the last day |
 | `/api/mail/thread?box&since` | GET | one mailbox's messages, newest last |
-| `/api/mail/feed?hours=24` | GET | the whole office as one timeline, from `hq feed` |
+| `/api/mail/feed?hours=24` | GET | the whole office as one timeline, newest first, built here |
 | `/api/mail/who` | GET | the live sessions, from `hq who` |
 
 Every time in these answers is an ISO 8601 stamp in UTC, so two of them can be merged and
 sorted: the moment an answer was true, a message's own stamp, a session's last sign of life.
-The office timeline also keeps hq's own short label next to the stamp.
+A branch claim is the one line with no moment of its own: it is a fact about now, so it leads
+the timeline and says "held now" where the others say how long ago they happened.
 | `/api/mail/send` | POST | `{to, text}`, sent through `hq msg` as this dashboard's own name |
 
 One background thread refreshes the health table, the mailboxes, the office timeline and the

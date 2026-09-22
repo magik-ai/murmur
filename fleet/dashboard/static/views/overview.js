@@ -1,7 +1,7 @@
 /* Overview answers one question: what needs me now. Everything here is a summary with a way
    into the tab that owns it. Nothing is shown here that cannot be opened somewhere else. */
 
-import { h, card, section, panel, emptyState, skeletonStack, agentMeaning, MEANINGS } from "../core/ui.js";
+import { h, card, section, panel, emptyState, errorState, skeletonStack, agentMeaning, MEANINGS } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
 import { list } from "../core/api.js";
 
@@ -192,12 +192,22 @@ export function windowsOf(account) {
   return out;
 }
 
-/* The office answers an envelope with the events under their own name, and each event
-   carries the time as the office wrote it. A number is counted from; a line is shown. */
+/* The office answers an envelope with the events under their own name, newest first, and each
+   event carries the time as the office wrote it. A number is counted from; a line is shown. */
 function events(data) {
   // The office feed carries claims, sessions and notes as well as messages. This card is about
   // what the agents said to each other, so it shows messages and leaves the rest to the Mail tab.
   return list(data && data.events).filter((item) => (item.kind || "mail") === "mail");
+}
+
+/* An office the server could not read is not a quiet office, and the difference is the whole
+   point of this card. The failure is said out loud, whether or not there are old messages
+   under it. */
+function officeNote(data) {
+  if (!data || !data.error) return null;
+  return h("p", { class: "readonly-note" }, data.stale_since
+    ? `The office last answered ${eventTime(data.stale_since)}. ${data.error}`
+    : data.error);
 }
 
 function eventTime(value) {
@@ -217,12 +227,18 @@ function mailCard(context) {
     panel(resource, {
       loading: () => h("div", { class: "card-pad" }, skeletonStack(3)),
       isEmpty: (data) => !events(data).length,
-      empty: () => h("div", { class: "card-pad" },
-        h("p", { class: "muted" }, "The agents have not said anything in the last day.")),
-      ready: (data) => h("div", { class: "feed" }, events(data).slice(-5).reverse().map((item, index) =>
-        h("div", { class: "item", key: `feed${index}` },
-          h("span", { class: "at" }, eventTime(item.at)),
-          h("span", null, fmt.shorten(item.text, 120))))),
+      /* Nothing to show has two causes and they are not the same answer. Only a read that
+         worked may say the agents were silent; a read that failed says what failed. */
+      empty: (data) => h("div", { class: "card-pad" }, data && data.error
+        ? errorState({ title: "The office could not be read", body: data.error, command: "" })
+        : h("p", { class: "muted" }, "The agents have not said anything in the last day.")),
+      ready: (data) => [
+        officeNote(data),
+        h("div", { class: "feed", key: "said" }, events(data).slice(0, 5).map((item, index) =>
+          h("div", { class: "item", key: `feed${index}` },
+            h("span", { class: "at" }, eventTime(item.at)),
+            h("span", null, fmt.shorten(item.text, 120))))),
+      ],
     }));
 }
 

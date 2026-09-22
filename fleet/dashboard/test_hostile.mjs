@@ -390,6 +390,53 @@ for (const [route, hash, name] of [
   await context.close();
 }
 
+/* The office feed is the card that made the live farm lie: the route answered an error, the
+   card had no events to show, and it said the agents had been silent for a day. A failed read
+   and a quiet office are not the same answer and must never share a sentence. */
+
+const QUIET = JSON.stringify({ at: new Date().toISOString(), stale_since: null, error: null, pending: false, hours: 24, events: [] });
+const BROKEN = JSON.stringify({ at: null, stale_since: null, error: "hq did not answer within 60s", pending: false, hours: 24, events: [] });
+const OLD = JSON.stringify({
+  at: new Date(Date.now() - 600000).toISOString(),
+  stale_since: new Date(Date.now() - 600000).toISOString(),
+  error: "could not resolve host github.com",
+  pending: false,
+  hours: 24,
+  events: [{ at: new Date(Date.now() - 900000).toISOString(), at_label: null, kind: "mail", text: "dali to all: the search lane is merged" }],
+});
+const WAITING = JSON.stringify({ at: null, stale_since: null, error: null, pending: true, hours: 24, events: [] });
+
+for (const [name, body, wants, forbids] of [
+  ["a quiet office says the agents were silent", QUIET, /have not said anything/, /could not be read/],
+  ["a failed read says what failed", BROKEN, /could not be read|did not answer/, /have not said anything/],
+  ["an old answer is shown with the reason it is old", OLD, /search lane is merged/, /have not said anything/],
+]) {
+  const { page, context, thrown } = await open({
+    hash: "#/overview",
+    overrides: { "/api/mail/feed": body },
+  });
+  const card = await page.evaluate(() => {
+    const found = [...document.querySelectorAll(".card")].find((node) => /^Last said/.test(node.innerText));
+    return found ? found.innerText : "";
+  });
+  check(`last said: ${name}`, wants.test(card) && !forbids.test(card) && thrown.length === 0, card.replace(/\s+/g, " ").slice(0, 140));
+  await context.close();
+}
+
+{
+  const { page, context } = await open({
+    hash: "#/overview",
+    overrides: { "/api/mail/feed": WAITING },
+  });
+  const seen = await page.evaluate(() => {
+    const found = [...document.querySelectorAll(".card")].find((node) => /^Last said/.test(node.innerText));
+    return { text: found ? found.innerText : "", bones: found ? found.querySelectorAll(".skeleton").length : 0 };
+  });
+  check("last said: a first pass that has not run yet waits, it does not report silence",
+    seen.bones > 0 && !/have not said anything/.test(seen.text), `${seen.bones} placeholders, "${seen.text.replace(/\s+/g, " ").slice(0, 80)}"`);
+  await context.close();
+}
+
 /* -------------------------------------------------------------------- how much it asks for */
 
 {

@@ -1413,9 +1413,45 @@ def mail_fetch_thread(office, number, since):
     return messages
 
 
+def _decorate_box(box, messages, cutoff):
+    """The two facts a mailbox row shows, counted once when its thread arrives rather than on
+    every publish: a pass over an office of a hundred names publishes a hundred times."""
+    recent = [message for message in messages
+              if (parse_iso(message.get("created_at")) or cutoff) >= cutoff]
+    box["count_24h"] = len(recent)
+    # One clock. A sender's own stamp in the body is for display; a box's last activity is
+    # the forge's `created_at`, which is the clock its `updated_at` is on too.
+    box["last_at"] = (messages[-1]["created_at"] if messages else box.get("updated_at"))
+
+
+def _publish_mail(boxes, threads, seen, error=None):
+    """The office as it is known SO FAR. Called after the box list and again as each thread
+    lands, so a page opened on a big office fills in front of the reader instead of showing
+    nothing until the last mailbox has been read.
+
+    Everything published is copied: the caller keeps filling its own dictionaries, and a
+    reader copying the snapshot under the lock must not meet one of them mid write.
+    """
+    rows = mail_box_order([dict(box) for box in boxes])
+    with _snapshot_lock:
+        if error:
+            _mail_snapshot["boxes"] = rows
+            _mail_snapshot["threads"] = dict(threads)
+            _mail_snapshot["seen"] = dict(seen)
+            _snapshot_failed(_mail_snapshot, error)
+        else:
+            _snapshot_succeeded(_mail_snapshot, {"boxes": rows, "threads": dict(threads),
+                                                 "seen": dict(seen)})
+
+
 def mail_refresh():
     """One pass over the office. Called by the refresher thread, and once inline before the
-    first answer, never on every request."""
+    first answer, never on every request.
+
+    The box list is one call and the threads are one call each, so the first pass on an office
+    of a hundred mailboxes is a hundred calls. They are published as they arrive, and a box
+    whose `updated_at` has not moved since the last pass is not read again at all.
+    """
     if mail_unavailable():
         return                       # nothing to read; the routes say so themselves
     with _snapshot_lock:
@@ -1427,48 +1463,35 @@ def mail_refresh():
         seen = dict(_mail_snapshot["seen"])
     office = hq_office()
     since = _iso(time.time() - MAIL_WINDOW_HOURS * 3600)
+    cutoff = parse_iso(since)
     try:
         boxes = mail_fetch_boxes(office)
     except Exception as exc:
         with _snapshot_lock:
             _snapshot_failed(_mail_snapshot, str(exc)[:200])
         return
-    threads, fresh_seen, error = {}, {}, None
+    # Every box starts from the thread already held, so the list of mailboxes is on screen
+    # before the first thread is asked for.
+    threads = {box["name"]: previous.get(box["name"], []) for box in boxes}
+    fresh_seen, error = {}, None
+    for box in boxes:
+        _decorate_box(box, threads[box["name"]], cutoff)
+    _publish_mail(boxes, threads, fresh_seen)
     for box in boxes:
         name = box["name"]
         stamp = box.get("updated_at")
         if name in previous and stamp is not None and seen.get(name) == stamp:
             # Nothing has been written to this box since the last pass. Fetching it again would
             # spend the shared API budget to learn that.
-            threads[name] = previous[name]
             fresh_seen[name] = stamp
             continue
         try:
             threads[name] = mail_fetch_box_thread(office, box, since)
             fresh_seen[name] = stamp
+            _decorate_box(box, threads[name], cutoff)
         except Exception as exc:
-            threads[name] = previous.get(name, [])
             error = str(exc)[:200]
-    cutoff = parse_iso(since)
-    for box in boxes:
-        messages = threads.get(box["name"]) or []
-        recent = [message for message in messages
-                  if (parse_iso(message.get("created_at")) or cutoff) >= cutoff]
-        box["count_24h"] = len(recent)
-        # One clock. A sender's own stamp in the body is for display; a box's last activity is
-        # the forge's `created_at`, which is the clock its `updated_at` is on too.
-        box["last_at"] = (messages[-1]["created_at"] if messages else box.get("updated_at"))
-    boxes = mail_box_order(boxes)
-    if error:
-        with _snapshot_lock:
-            _mail_snapshot["boxes"] = boxes
-            _mail_snapshot["threads"] = threads
-            _mail_snapshot["seen"] = fresh_seen
-            _snapshot_failed(_mail_snapshot, error)
-        return
-    with _snapshot_lock:
-        _snapshot_succeeded(_mail_snapshot,
-                            {"boxes": boxes, "threads": threads, "seen": fresh_seen})
+        _publish_mail(boxes, threads, fresh_seen, error)
 
 
 def _refresh_once():
@@ -1551,9 +1574,21 @@ _who_snapshot = _blank_snapshot(sessions=[])
 _feed_snapshots = {}
 _feed_windows = [float(MAIL_WINDOW_HOURS)]
 FEED_WINDOWS_TRACKED = 8
-# `hq feed` fetches the claims branch and makes several forge calls, so it is slower than a
-# single read and, far more to the point, it writes to disk. It belongs on the thread.
-MAIL_FEED_TIMEOUT = 60
+# The timeline is ASSEMBLED HERE, never by running `hq feed`. That command re-reads every
+# mailbox in the office for itself: on the farm with ninety nine of them it takes eighty seven
+# seconds, which is past any timeout a page can wait behind, so the route answered an error and
+# the Overview said the agents had been silent all day. Everything the timeline shows is
+# already held: the threads this server reads for the Mail tab, the sessions `hq who` reports
+# in 0.7s, and the live branch claims.
+FEED_TEXT_LIMIT = 200
+# A day of a busy office is thousands of messages, and no reader scrolls past the newest few
+# hundred. The cut keeps the newest, which is the end a timeline is read from.
+FEED_MAX_EVENTS = 200
+# `hq claims` reads one git branch. It is the one part of the timeline this server cannot
+# assemble from what it already holds, so it is guarded like every other tool call and the
+# timeline simply loses its claim lines when it does not answer.
+CLAIM_LINE = re.compile(r"^(?P<repo>\S+)\s+(?P<branch>\S+)\s+(?P<owner>\S+)\s+until\s+"
+                        r"(?P<until>\S+)\s*(?P<note>.*)$")
 
 
 def _first_line(text, fallback):
@@ -1561,45 +1596,89 @@ def _first_line(text, fallback):
     return lines[0].strip()[:200] if lines else fallback
 
 
-FEED_STAMP = "%d %b %H:%M"
+def _feed_text(value):
+    """One line, cut to what a timeline row can show. A message that arrives as five paragraphs
+    is a message this list would otherwise be nothing but."""
+    return " ".join(str(value or "").split())[:FEED_TEXT_LIMIT]
 
 
-def feed_iso(label, now=None):
-    """hq prints a feed line's time as a local label with no year and no zone, which cannot be
-    sorted against the stamps every other answer here carries. Rebuild it as UTC: this year in
-    this machine's zone, or last year when that would put the event in the future. The month
-    name is read in the locale hq wrote it in, which is this machine's."""
-    try:
-        parsed = time.strptime(label, FEED_STAMP)
-    except (TypeError, ValueError):
-        return None
-    now = time.time() if now is None else now
-
-    def stamp_for(year):
-        # mktime with tm_isdst = -1 asks the system which side of a daylight change this is.
-        return time.mktime((year, parsed.tm_mon, parsed.tm_mday, parsed.tm_hour,
-                            parsed.tm_min, 0, 0, 1, -1))
-
-    stamp = stamp_for(time.localtime(now).tm_year)
-    if stamp > now + 86400:
-        stamp = stamp_for(time.localtime(now).tm_year - 1)
-    return _iso(stamp)
+def _feed_seconds(event):
+    when = parse_iso(event.get("at"))
+    return when.timestamp() if when else None
 
 
-def _parse_feed(out, now=None):
+def _mail_events(threads):
+    """Every message in every mailbox, as one line each. The threads are the ones the Mail tab
+    already reads, so the timeline costs this server nothing it was not already paying."""
+    events = []
+    for name, messages in (threads or {}).items():
+        for message in messages or []:
+            events.append({
+                "at": message.get("created_at") or None,
+                "at_label": None,
+                "kind": "mail",
+                "text": _feed_text(f"{message.get('sender') or '?'} to {name}: "
+                                   f"{message.get('text') or ''}"),
+            })
+    return events
+
+
+def _session_events(sessions):
+    """Who said hello, and when. The session list is `hq who`, which answers in under a second
+    and is read once a pass for the Mail tab's own panel."""
+    events = []
+    for session in sessions or []:
+        task = _feed_text(session.get("task"))
+        state = "active" if session.get("state") == "live" else "quiet"
+        name = session.get("name") or "?"
+        events.append({"at": session.get("since"), "at_label": None, "kind": "session",
+                       "text": _feed_text(f"{name} {state}" + (f": {task}" if task else ""))})
+    return events
+
+
+def _parse_claims(out):
+    """The live branch claims, one line each.
+
+    A claim has no moment: it is a fact about now, and the only time it carries is when it runs
+    out. So it gets no stamp to be sorted by and says "held now" where the others say how long
+    ago they happened, and the assembly puts these at the top of the list.
+    """
     events = []
     for line in (out or "").splitlines():
-        if not line.strip():
-            continue
-        match = FEED_LINE.match(line)
-        if match:
-            label = match.group("at").strip()
-            events.append({"at": feed_iso(label, now), "at_label": label,
-                           "kind": match.group("kind"), "text": match.group("text").strip()})
-        else:
-            # "office quiet for the last 24h" and anything else hq chooses to say.
-            events.append({"at": None, "at_label": None, "kind": "note", "text": line.strip()})
+        match = CLAIM_LINE.match(line.strip())
+        if not match:
+            continue                 # "no active claims", and anything else hq chooses to say
+        events.append({"at": None, "at_label": "held now", "kind": "claim",
+                       "text": _feed_text(f"{match.group('owner')} holds {match.group('repo')}"
+                                          f"#{match.group('branch')} "
+                                          f"until {match.group('until')}")})
     return events
+
+
+def read_claims():
+    """The claim lines, or none of them. A slow or failing `hq claims` costs the timeline its
+    claims and nothing else: the messages and the sessions are the substance."""
+    rc, out, _err = run_tool([hq_binary(), "claims"], timeout=MAIL_GH_TIMEOUT)
+    return _parse_claims(out) if rc == 0 else []
+
+
+def assemble_feed(threads, sessions, claims):
+    """One office timeline, newest first. Claims lead it: they are what is true now, not what
+    happened at some point in the day."""
+    timed = _mail_events(threads) + _session_events(sessions)
+    # A message whose stamp cannot be read is shown rather than hidden, at the end of the list:
+    # losing mail is the worse failure of the two.
+    timed.sort(key=lambda event: (_feed_seconds(event) is not None, _feed_seconds(event) or 0),
+               reverse=True)
+    return list(claims) + timed
+
+
+def feed_in_window(events, hours, now=None):
+    now = time.time() if now is None else now
+    cutoff = now - hours * 3600
+    kept = [event for event in events
+            if _feed_seconds(event) is None or _feed_seconds(event) >= cutoff]
+    return kept[:FEED_MAX_EVENTS]
 
 
 def _parse_who(out, now=None):
@@ -1645,20 +1724,34 @@ def who_refresh():
 
 
 def feed_refresh():
+    """The timeline for every window asked for, built from the office this server already
+    holds. It runs after the mail and session passes, so what it assembles is this pass's
+    answer, and it is exactly as fresh, or as stale, as the office read that produced it."""
     if mail_unavailable():
         return
     with _snapshot_lock:
         windows = list(_feed_windows)
+        tried = _mail_snapshot["tried"]
+        threads = dict(_mail_snapshot["threads"])
+        error = _mail_snapshot["error"]
+        stale_since = _mail_snapshot["stale_since"] or _mail_snapshot["at"]
+        sessions = list(_who_snapshot["sessions"])
+    if not tried:
+        return                       # the office has not been read yet; a timeline now is a guess
+    events = assemble_feed(threads, sessions, read_claims())
     for window in windows:
-        rc, out, err = run_tool([hq_binary(), "feed", "--hours", _feed_key(window)],
-                                timeout=MAIL_FEED_TIMEOUT)
+        kept = feed_in_window(events, window)
         with _snapshot_lock:
             entry = _feed_snapshots.setdefault(
                 _feed_key(window), _blank_snapshot(events=[], hours=window))
-            if rc != 0:
-                _snapshot_failed(entry, _first_line(err or out, f"hq feed exited {rc}"))
+            if error:
+                # The office could not be read. The timeline still shows what was held, and
+                # says so: "the forge is unreachable" and "nobody said anything" look identical
+                # once the words are gone, and only one of them is worth acting on.
+                entry.update({"events": kept, "hours": window, "tried": True,
+                              "error": error, "stale_since": stale_since})
             else:
-                _snapshot_succeeded(entry, {"events": _parse_feed(out), "hours": window})
+                _snapshot_succeeded(entry, {"events": kept, "hours": window})
 
 
 def mail_feed(hours=None):

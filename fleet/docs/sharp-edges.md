@@ -302,6 +302,27 @@ place. `docs/MIGRATION.md` has the full walkthrough.
 
 ---
 
+## 14. A big office is read one mailbox at a time, and the tab fills as it goes
+
+**Mechanism.** An office holds one issue per name, and a name is never retired: a farm a few
+months old has around a hundred mailboxes. Reading them is one call for the list and one call per
+mailbox, so the first pass after a restart takes as long as a hundred calls take. It is not a
+hundred every time: a mailbox nobody has written to since the last pass is skipped, so a settled
+office costs one call a pass.
+
+**The guard.** The list of mailboxes is published the moment it arrives and every thread as it
+lands, so the tab fills in front of you instead of showing nothing until the last one is read.
+The health table and the agent list are refreshed before the office, so a slow office never
+delays them.
+
+**Where the guard stops.** The office timeline is assembled by the dashboard from the threads it
+has already read, the sessions `hq who` reports and the live branch claims. `hq feed` is NOT used
+and must not be: it re-reads every mailbox for itself, which on the office of ninety nine took
+eighty seven seconds, past any timeout a page can wait behind. At a terminal it is still the
+right command; on the request path it is a route that answers an error.
+
+---
+
 ## The short version
 
 1. `--force` means "yes, destroy it". `--dry-run` first, always.
@@ -317,3 +338,5 @@ place. `docs/MIGRATION.md` has the full walkthrough.
 11. Widen the dashboard's bind and the token starts guarding reads too, not just writes.
 12. Dashboard mail runs 45 seconds behind the office. Trust the freshness label, not silence.
 13. A dashboard run by your own systemd unit needs `EnvironmentFile` or it never sees the config.
+14. A hundred mailboxes is a hundred calls on the first pass. The dashboard builds the timeline
+    itself; `hq feed` is for a terminal, never for a page.

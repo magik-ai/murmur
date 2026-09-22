@@ -81,7 +81,7 @@ Existing routes keep their shapes. New or changed:
 | `/api/agent/msg` | POST `{slug, text}` | runs `fleet msg <slug> <text>`, returns `{ok}` | mutate |
 | `/api/mail/boxes` | GET | `[{name, number, last_at, count_24h}]` from the office's `inbox` issues | read |
 | `/api/mail/thread?box&since` | GET | `[{sender, at, text}]` parsed from the issue's comments, `since` ISO, never through `hq inbox` | read |
-| `/api/mail/feed?hours=24` | GET | `[{at, kind: mail|claim|session, text}]` from `hq feed` | read |
+| `/api/mail/feed?hours=24` | GET | `[{at, at_label, kind: mail|claim|session, text}]`, newest first, assembled here from the mailbox threads, `hq who` and `hq claims`, never by running `hq feed` | read |
 | `/api/mail/who` | GET | `[{name, task, since}]` from `hq who` | read |
 | `/api/mail/send` | POST `{to, text}` | `HQ_AGENT=<dashboard identity> hq msg <to> <text>`; `to` must be a known box or `all` | mutate |
 | `/static/*` | GET | the front end files, path confined to `dashboard/static` | open |

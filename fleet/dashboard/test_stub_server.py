@@ -261,12 +261,13 @@ def event(seconds_ago, kind, text, label=None):
     return {"at": iso(ago(seconds_ago)), "at_label": label, "kind": kind, "text": text}
 
 
+# Newest first, the order the route sends and the page draws.
 MAIL_FEED = [
-    event(20000, "session", "dali said hello and took the search lane", "5h ago"),
-    event(7200, "claim", "winston claimed demo/web-empty-states", "2h ago"),
-    event(4200, "claim", "rubicon claimed storefront/checkout-retry"),
-    event(1800, "note", "the office snapshot was refreshed"),
     event(600, "mail", "dali to all: search typo tolerance is merged", "10m ago"),
+    event(1800, "note", "the office snapshot was refreshed"),
+    event(4200, "claim", "rubicon claimed storefront/checkout-retry"),
+    event(7200, "claim", "winston claimed demo/web-empty-states", "2h ago"),
+    event(20000, "session", "dali said hello and took the search lane", "5h ago"),
 ]
 
 MAIL_WHO = [

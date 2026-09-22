@@ -264,9 +264,10 @@ function timelinePane(context) {
         body: "The timeline shows mail, branch claims and sessions together.",
         command: "hq feed",
       })),
+      /* The route sends the timeline newest first, which is the order it is read in. */
       ready: (data) => [
         envelopeNote(data),
-        h("div", { class: "feed", key: "items" }, listOf(data, "events").slice().reverse().map((item, index) =>
+        h("div", { class: "feed", key: "items" }, listOf(data, "events").map((item, index) =>
           h("div", { class: "item", key: `t${index}` },
             h("span", { class: "at" }, item.at_label || when(item.at) || "recently"),
             h("span", { class: "tag" }, item.kind || "mail"),

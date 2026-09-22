@@ -1255,6 +1255,7 @@ parser = argparse.ArgumentParser(prog="hq")
 sub = parser.add_subparsers(dest="cmd", required=True)
 one = sub.add_parser("msg"); one.add_argument("name"); one.add_argument("text")
 two = sub.add_parser("feed"); two.add_argument("--hours", type=float, default=24)
+three = sub.add_parser("claims"); three.add_argument("--repo")
 sub.add_parser("who")
 sub.add_parser("inbox")
 args = parser.parse_args()
@@ -1262,10 +1263,16 @@ if args.cmd == "msg":
     record("hq-parsed msg " + json.dumps([args.name, args.text]))
     print("sent to %s (inbox issue #7) as %s" % (args.name, os.environ.get("HQ_AGENT", "?")))
 elif args.cmd == "feed":
-    record("hq-parsed feed " + json.dumps(args.hours))
-    print("21 Sep 09:14  [mail] winston -> all: the queue is open")
-    print("21 Sep 09:20  [claim] claim dash/server by dali")
-    print("office was busy")
+    sys.exit("hq feed must never be called by the dashboard: it re-reads the whole office "
+             "and takes longer than any timeout a page can wait behind")
+elif args.cmd == "claims":
+    if os.environ.get("HQ_CLAIMS_FAIL"):
+        sys.exit("hq: could not fetch the claims branch")
+    print("%-28s %-40s %-12s until %s  %s"
+          % ("acme/dash", "dash/server", "dali", "2026-09-22T18:00:00Z", "reading it"))
+    print("%-28s %-40s %-12s until %s  %s"
+          % ("acme/web", "web/empty-states", "winston", "2026-09-22T12:00:00Z", ""))
+    print("no active claims on acme/nothing")
 elif args.cmd == "who":
     print("winston            live  updated  0.3h ago  dashboard work")
     print("dali               STALE updated  9.1h ago  ")
@@ -1532,9 +1539,44 @@ class DashboardMailTest(unittest.TestCase):
                 self.assertIsNone(dashboard.mail_boxes()["at"])
             self.assertEqual(box.calls.read_text(), "")
 
-    def test_the_feed_and_the_session_list_are_read_from_the_snapshot_not_run(self):
-        # `hq feed` fetches the claims branch and makes several forge calls, so running it to
-        # answer a GET would put a disk write and the network on the request path.
+    def test_the_mailboxes_are_published_before_a_single_thread_is_read(self):
+        """The office on the farm holds ninety nine mailboxes. The list of them is one call;
+        their threads are ninety nine more. Waiting for all of them before publishing anything
+        left the Mail tab empty for a minute, which reads as a broken page, so the list goes
+        out first and every thread as it lands."""
+        now = time.time()
+        stamp = lambda back: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - back))
+        boxes = [{"number": number, "title": f"inbox: agent-{number}",
+                  "updatedAt": stamp(60 * number)} for number in range(1, 7)]
+        comments = {number: [{"created_at": stamp(60 * number),
+                              "body": f"**from dali** ({stamp(60 * number)}):\nline {number}"}]
+                    for number in range(1, 7)}
+        watched = []
+        with self.office(boxes=boxes, comments=comments):
+            real = dashboard.mail_fetch_box_thread
+
+            def watch(office, box, since):
+                published = dashboard.mail_boxes()
+                watched.append((len(published["boxes"]), published["pending"],
+                                sum(row["count_24h"] for row in published["boxes"])))
+                return real(office, box, since)
+
+            with mock.patch.object(dashboard, "mail_fetch_box_thread", watch):
+                dashboard.mail_refresh()
+            final = dashboard.mail_boxes()
+        self.assertEqual(len(watched), 6)
+        # every mailbox is on screen, and not waiting, before the first thread is asked for
+        self.assertEqual(watched[0], (6, False, 0))
+        # and the messages arrive one box at a time, not all at the end
+        self.assertEqual([row[2] for row in watched], [0, 1, 2, 3, 4, 5])
+        self.assertEqual(sum(row["count_24h"] for row in final["boxes"]), 6)
+        self.assertIsNone(final["error"])
+
+    def test_the_office_timeline_is_assembled_here_and_never_by_running_hq_feed(self):
+        # `hq feed` re-reads every mailbox in the office for itself. On the farm with ninety
+        # nine of them that is eighty seven seconds, past any timeout a page can wait behind,
+        # so the route answered an error and the Overview said nobody had spoken all day. The
+        # timeline is built from the threads this server already holds instead.
         with self.office() as box:
             pending = dashboard.mail_feed("6")
             self.assertTrue(pending["pending"])
@@ -1545,28 +1587,65 @@ class DashboardMailTest(unittest.TestCase):
                             "a window nobody has asked for must wake the refresher")
 
             dashboard._refresh_once()
+            ran = box.calls.read_text()
+            self.assertNotIn("hq feed", ran)
+            self.assertIn("hq who", ran)
+            self.assertIn("hq claims", ran)
             box.calls.write_text("")
             feed = dashboard.mail_feed("6")
             who = dashboard.mail_who()
             self.assertEqual(box.calls.read_text(), "")
             self.assertFalse(feed["pending"])
             self.assertEqual(feed["hours"], 6.0)
-            first = feed["events"][0]
-            self.assertEqual(first["at_label"], "21 Sep 09:14")
-            self.assertEqual(first["kind"], "mail")
-            self.assertEqual(first["text"], "winston -> all: the queue is open")
-            # a sortable stamp next to hq's label, or the timeline cannot be merged with
-            # anything else on the page
-            self.assertEqual(dashboard.parse_iso(first["at"]).minute, 14)
-            self.assertEqual(feed["events"][1]["kind"], "claim")
-            self.assertEqual(feed["events"][2],
-                             {"at": None, "at_label": None, "kind": "note",
-                              "text": "office was busy"})
+            kinds = [event["kind"] for event in feed["events"]]
+            self.assertEqual(kinds[:2], ["claim", "claim"])
+            self.assertIn("mail", kinds)
+            self.assertIn("session", kinds)
+            # A claim is a fact about now, so it carries no moment, only when it runs out.
+            self.assertEqual(feed["events"][0], {
+                "at": None, "at_label": "held now", "kind": "claim",
+                "text": "dali holds acme/dash#dash/server until 2026-09-22T18:00:00Z"})
+            said = [event["text"] for event in feed["events"] if event["kind"] == "mail"]
+            self.assertIn("rubicon to winston: the trials lane is green", said)
+            # a comment nobody wrote through hq is still one line of the office's day
+            self.assertIn("? to all: a comment with no sender prefix", said)
+            # the message older than the window is not in it
+            self.assertNotIn("dali to winston: the old one", said)
+            stamped = [event["at"] for event in feed["events"] if event["at"]]
+            self.assertEqual(stamped, sorted(stamped, reverse=True), "newest first")
+            self.assertIn("winston active: dashboard work",
+                          [event["text"] for event in feed["events"]])
             self.assertEqual([session["name"] for session in who["sessions"]],
                              ["winston", "dali"])
             self.assertEqual(who["sessions"][0]["age_hours"], 0.3)
             self.assertEqual(who["sessions"][0]["task"], "dashboard work")
             self.assertEqual(who["sessions"][1]["state"], "stale")
+
+    def test_a_timeline_line_is_one_line_and_never_longer_than_a_row(self):
+        now = time.time()
+        stamp = lambda back: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - back))
+        boxes = [{"number": 7, "title": "inbox: winston", "updatedAt": stamp(60)}]
+        comments = {7: [{"created_at": stamp(60),
+                         "body": "**from dali** (2026-09-21T08:00:00Z):\n"
+                                 + "the report\n\n" + "word " * 200}]}
+        with self.office(boxes=boxes, comments=comments):
+            dashboard._refresh_once()
+            line = [event for event in dashboard.mail_feed()["events"]
+                    if event["kind"] == "mail"][0]
+            self.assertEqual(len(line["text"]), dashboard.FEED_TEXT_LIMIT)
+            self.assertNotIn("\n", line["text"])
+            self.assertTrue(line["text"].startswith("dali to winston: the report word"))
+
+    def test_the_timeline_keeps_its_messages_when_the_claims_cannot_be_read(self):
+        with self.office() as box:
+            with mock.patch.dict(os.environ, {"HQ_CLAIMS_FAIL": "1"}):
+                dashboard._refresh_once()
+            feed = dashboard.mail_feed()
+            self.assertIn("hq claims", box.calls.read_text())
+            self.assertIsNone(feed["error"])
+            kinds = {event["kind"] for event in feed["events"]}
+            self.assertEqual(kinds, {"mail", "session"})
+            self.assertTrue(feed["events"])
 
     def test_the_default_window_is_warmed_and_the_tracked_set_stays_bounded(self):
         with self.office():
@@ -1578,16 +1657,25 @@ class DashboardMailTest(unittest.TestCase):
                                  dashboard.FEED_WINDOWS_TRACKED)
             self.assertIn(float(dashboard.MAIL_WINDOW_HOURS), dashboard._feed_windows)
 
-    def test_a_failing_hq_keeps_the_last_feed_and_says_since_when(self):
+    def test_an_unreadable_office_keeps_the_last_timeline_and_says_since_when(self):
+        """The timeline is only as good as the office read behind it, and it says so. An
+        empty list with no reason is the answer that made the Overview claim a working farm
+        had been silent for a day."""
         with self.office() as box:
             dashboard._refresh_once()
             good = dashboard.mail_feed()
-            (box.bin / "hq").write_text("#!/bin/sh\necho 'the office is unreachable' >&2\nexit 1\n")
+            office = dashboard.mail_boxes()
+            self.assertIsNone(good["error"])
+            box.fail.write_text("")
             dashboard._refresh_once()
             stale = dashboard.mail_feed()
             self.assertEqual(stale["events"], good["events"])
-            self.assertEqual(stale["stale_since"], good["at"])
-            self.assertIn("unreachable", stale["error"])
+            # as stale as the office read behind it, to the second, not as stale as the
+            # assembly that followed it
+            self.assertEqual(stale["stale_since"], office["at"])
+            self.assertEqual(stale["stale_since"], dashboard.mail_boxes()["stale_since"])
+            self.assertIn("could not resolve host", stale["error"])
+            self.assertFalse(stale["pending"])
 
     def test_sending_signs_as_the_dashboard_and_only_to_a_real_mailbox(self):
         with self.office() as box:
@@ -1777,7 +1865,7 @@ class ReadsCostNothingTest(unittest.TestCase):
                     "/api/mail/who")
 
     def test_no_read_route_runs_a_tool_touches_the_network_or_writes_to_disk(self):
-        mail = DashboardMailTest("test_the_feed_and_the_session_list_are_read_from_the_snapshot_not_run")
+        mail = DashboardMailTest("test_the_office_timeline_is_assembled_here_and_never_by_running_hq_feed")
         mail.setUp()
         self.addCleanup(mail.doCleanups)
         with mail.office() as box:
@@ -1814,7 +1902,7 @@ class ReadsCostNothingTest(unittest.TestCase):
 
     def test_the_same_holds_before_the_refresher_has_ever_run(self):
         # The first seconds after a start are exactly when a page is opened and read hardest.
-        mail = DashboardMailTest("test_the_feed_and_the_session_list_are_read_from_the_snapshot_not_run")
+        mail = DashboardMailTest("test_the_office_timeline_is_assembled_here_and_never_by_running_hq_feed")
         mail.setUp()
         self.addCleanup(mail.doCleanups)
         with mail.office() as box:
@@ -1835,22 +1923,8 @@ class OneClockTest(unittest.TestCase):
     """Every time this server hands out is an ISO 8601 stamp in UTC, so two answers can be
     merged, sorted and compared. Three formats in one tab is three formats to get wrong."""
 
-    def test_a_feed_label_becomes_a_stamp_and_rolls_back_over_the_new_year(self):
-        # hq prints "21 Sep 09:14": no year, no zone, unsortable against everything else.
-        new_year = time.mktime((2026, 1, 2, 10, 0, 0, 0, 1, -1))
-        december = dashboard.feed_iso(time.strftime("%d %b %H:%M",
-                                                    time.localtime(new_year - 20 * 86400)),
-                                      now=new_year)
-        january = dashboard.feed_iso(time.strftime("%d %b %H:%M",
-                                                   time.localtime(new_year - 86400)),
-                                     now=new_year)
-        self.assertTrue(december.startswith("2025-12"), december)
-        self.assertTrue(january.startswith("2026-01"), january)
-        self.assertIsNone(dashboard.feed_iso("sometime"))
-        self.assertIsNone(dashboard.feed_iso(None))
-
     def test_every_time_a_mail_answer_carries_parses_as_a_timestamp(self):
-        mail = DashboardMailTest("test_the_feed_and_the_session_list_are_read_from_the_snapshot_not_run")
+        mail = DashboardMailTest("test_the_office_timeline_is_assembled_here_and_never_by_running_hq_feed")
         mail.setUp()
         self.addCleanup(mail.doCleanups)
         with mail.office():
@@ -1883,7 +1957,7 @@ class OneClockTest(unittest.TestCase):
         self.assertEqual(sessions[0]["since"], dashboard._iso(now - 7200))
 
     def test_a_stale_envelope_carries_the_moment_it_stopped_being_true(self):
-        mail = DashboardMailTest("test_the_feed_and_the_session_list_are_read_from_the_snapshot_not_run")
+        mail = DashboardMailTest("test_the_office_timeline_is_assembled_here_and_never_by_running_hq_feed")
         mail.setUp()
         self.addCleanup(mail.doCleanups)
         with mail.office() as box:
