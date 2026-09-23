@@ -26,3 +26,9 @@ jobs:
           cd fleet
           python3 dashboard/test_server.py
           python3 tests/models-test.py
+      - name: Hosting (scrub, machines, hosts, runners)
+        run: |
+          cd fleet
+          for test in tests/scrub-test.py tests/hosting-test.py tests/runners-test.py; do
+            if [ -f "$test" ]; then python3 "$test" || exit 1; fi
+          done

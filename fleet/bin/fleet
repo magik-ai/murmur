@@ -1812,6 +1812,17 @@ cmd_dashboard() { # start|stop|restart|status|token
   esac
 }
 
+# A subcommand whose whole body is one python file under lib/. The file may arrive in a later
+# change than the dispatch line, so a missing file is a sentence, not a stack trace.
+cmd_lib_tool() {
+  local command="$1" rel="$2" file="$FLEET_HOME/lib/$2"; shift 2
+  if [ ! -f "$file" ]; then
+    echo "this fleet does not have 'fleet $command' yet (lib/$rel is missing); update it: git -C \"$FLEET_HOME\" pull" >&2
+    return 1
+  fi
+  "$PY" "$file" "$@"
+}
+
 case "${1:-help}" in
   spawn) shift; cmd_spawn "$@";;
   group) shift; cmd_group "$@";;
@@ -1831,6 +1842,9 @@ case "${1:-help}" in
   autosweep) shift; cmd_autosweep "$@";;
   daemon) shift; cmd_daemon "$@";;
   models) shift; cmd_models "$@";;
+  machines) shift; cmd_lib_tool machines machines.py "$@";;
+  hosts) shift; cmd_lib_tool hosts hosts.py "$@";;
+  runner) shift; cmd_lib_tool runner runners/cli.py "$@";;
   accounts) shift; "$PY" "$FLEET_HOME/lib/claude_accounts.py" "$@";;
   events) shift; cmd_events "$@";;
   logs) shift; cmd_logs "$@";;
@@ -1886,6 +1900,10 @@ fleet — headless Claude agent fleet on the farm
   fleet tail <slug>               compact lane state plus its last message
   fleet msg <slug> ["text"]       read or append to a lane's checkpoint inbox
   fleet models                    list and manage routable model engines
+  fleet machines list|plan|create|add|check|adopt|destroy|forget
+                                  farms you own: this one, droplets it created, your own boxes
+  fleet hosts list|check|secret   hosting providers: CLI, login, runner secrets (stdin only)
+  fleet runner test|reap          cloud sandboxes that run one lane (spawn --runner <provider>)
   fleet kill <slug>               stop an agent
   fleet kill [--retire] <slug>   stop a lane; --retire also stops respawns for that lane
   fleet game-mode on|off|status  free RAM for gaming: salvage+stop the farm, then resume
