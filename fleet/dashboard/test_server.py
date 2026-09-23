@@ -1866,7 +1866,8 @@ class ModelAddRemoveTest(unittest.TestCase):
                 ({"preset": "nope", "id": "nope"}, "no such preset"),
                 ({"preset": "gemini", "id": "Gemini", "variant": "gemini-2.5-pro"}, "model id"),
                 ({"preset": "gemini", "id": "gemini"}, "gemini-2.5-pro"),
-                ({"preset": "qwen", "id": "qwen", "variant": "qwen3-coder"}, "{variant}"),
+                ({"preset": "custom", "id": "mine", "bin": "x", "run": "x {task}",
+                  "variant": "qwen3-coder"}, "{variant}"),
                 ({"preset": "ollama", "id": "local"}, "llama3.1"),
                 ({"preset": "custom", "id": "mine"}, "bin"),
                 ({"preset": "custom", "id": "mine", "bin": "x", "run": "x --go"}, "{task}"),
@@ -1940,7 +1941,8 @@ class ModelAddRemoveTest(unittest.TestCase):
                 mock.patch.object(dashboard.subprocess, "run",
                                   side_effect=AssertionError("adding a model ran a command")), \
                 running_server() as base:
-            self.assertEqual(self.add(base, {"preset": "aider", "id": "aider"})[0], 200)
+            self.assertEqual(self.add(base, {"preset": "aider", "id": "aider",
+                                             "variant": "openai/gpt-6-sol"})[0], 200)
 
 
 class ModelStatusTest(unittest.TestCase):

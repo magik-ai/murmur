@@ -12,6 +12,8 @@ A farm's catalog is also written from here: add_model() turns one of lib/model_p
 services into an entry in ~/.config/fleet/models.toml (creating it from the shipped example on
 the first write) and remove_model() takes one back out. Only an entry this farm added carries
 source = "added" and only those can be removed: what came with fleet can be switched off."""
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -23,6 +25,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import model_presets as PRESETS  # noqa: E402
+import model_discovery as DISCOVERY  # noqa: E402
 
 # The checkout this file belongs to, so a clone anywhere works without being told where it is.
 # FLEET_HOME still wins, which is how `bin/fleet` passes its own resolved home down.
@@ -100,6 +103,8 @@ def effective(mid, cat=None, st=None):
     m["source"] = "added" if str(m.get("source") or "") == "added" else "shipped"
     m["variant"] = str(m.get("variant") or "")
     m["preset"] = str(m.get("preset") or "")
+    m["models_on"] = models_on(m)
+    m["default_model"] = default_model(m)
     # a model is routable only if switched on AND its last health test passed (native engines,
     # which ride our own subs, are healthy as long as their binary + auth exist)
     if m.get("engine") in ("codex", "claude"):
@@ -190,10 +195,11 @@ def _shquote(s):
 
 
 def _fill(template, binp, task, variant=""):
-    """One invocation template with this farm's answers in it. {variant} is a local runner's
-    model name (`ollama run llama3.1 ...`); it is substituted here, never left to bash."""
+    """One invocation template with this farm's answers in it. {variant} is the model the command
+    runs (`ollama run llama3.1 ...`, `qwen --model qwen3-coder-plus ...`); it is substituted
+    here, shell-quoted, never left to bash: `opus[1m]` unquoted is a glob."""
     return (str(template).replace("{bin}", binp)
-            .replace("{variant}", str(variant or ""))
+            .replace("{variant}", _shquote(str(variant or "")))
             .replace("{task}", task))
 
 
@@ -452,6 +458,288 @@ def run_test(mid):
     return effective(mid), None
 
 
+# ---------------------------------------------------------------- the models a provider has on
+#
+# A provider row is an agent CLI and the way it is paid for; `models_on` is the list of that
+# provider's models agents may use, and a lane names one with `fleet spawn --model`. Nothing
+# here runs the provider: switching a model on or off only rewrites the list.
+
+CLAUDE_DEFAULT_MODEL = "sonnet"
+CODEX_FALLBACK_MODEL = "gpt-5.6-sol"
+NO_MODEL_CHOICE = "This provider runs the model its own settings choose; change it there."
+
+
+def _env_file_value(key):
+    """A FLEET_* value from $FLEET_CONFIG/env, read the way bin/fleet's _load_env_file reads it."""
+    path = os.path.join(os.path.expanduser(os.environ.get("FLEET_CONFIG", "~/.config/fleet")),
+                        "env")
+    try:
+        with open(path) as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name != key:
+            continue
+        for quote in ('"', "'"):
+            if len(value) >= 2 and value.startswith(quote) and value.endswith(quote):
+                value = value[1:-1]
+        return value
+    return ""
+
+
+def codex_default_model():
+    """The model a codex lane runs when spawn names none, resolved as bin/fleet resolves it."""
+    return (os.environ.get("CODEX_DEFAULT_MODEL") or os.environ.get("FLEET_CODEX_MODEL")
+            or _env_file_value("FLEET_CODEX_MODEL") or CODEX_FALLBACK_MODEL)
+
+
+def default_model(m):
+    """The model a lane on this provider gets when `fleet spawn` names none."""
+    engine = str((m or {}).get("engine") or "")
+    if engine == "claude":
+        return CLAUDE_DEFAULT_MODEL
+    if engine == "codex":
+        return codex_default_model()
+    return str((m or {}).get("variant") or "")
+
+
+def takes_model(m):
+    """Whether this provider's command can be told which model to run at all."""
+    if str((m or {}).get("engine") or "") in ("claude", "codex"):
+        return True
+    return "{variant}" in str((m or {}).get("run") or "")
+
+
+def models_on(m):
+    """The ids switched on for this provider. A catalog that still carries the retired
+    `models = "sonnet, opus"` string is read as the first models_on until something is saved."""
+    listed = (m or {}).get("models_on")
+    if isinstance(listed, list):
+        return [str(x) for x in listed if isinstance(x, str) and x]
+    old = (m or {}).get("models")
+    if isinstance(old, str) and old.strip():
+        return [x.strip() for x in old.split(",") if x.strip()]
+    return []
+
+
+def _table_bounds(lines, mid):
+    header = re.compile(r"^\s*\[\s*\"?" + re.escape(mid) + r"\"?\s*\]\s*(#.*)?$")
+    any_header = re.compile(r"^\s*\[")
+    start = next((i for i, line in enumerate(lines) if header.match(line)), None)
+    if start is None:
+        return None, None
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if any_header.match(lines[i]):
+            end = i
+            break
+    return start, end
+
+
+def _open_brackets(text, depth=0):
+    """How many `[` are still open after this TOML value text. A bracket inside a quoted string
+    (`"opus[1m]"`) or a comment is not one, so a model id never closes a list early."""
+    quote, i = "", 0
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\" and quote == '"':
+                i += 1
+            elif c == quote:
+                quote = ""
+        elif c in "\"'":
+            quote = c
+        elif c == "#":
+            break
+        elif c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+        i += 1
+    return max(depth, 0)
+
+
+def _same_but_models(before, after, mid):
+    """Whether two parsed catalogs differ only in this table's models_on and models."""
+    def rest(cat):
+        cat = dict(cat)
+        cat[mid] = {k: v for k, v in dict(cat.get(mid) or {}).items()
+                    if k not in ("models_on", "models")}
+        return cat
+    return rest(before) == rest(after)
+
+
+def _with_models_on(text, mid, ids):
+    """The catalog text with this table's models_on set, the retired `models` string taken out,
+    and every other line as it was."""
+    lines = text.splitlines(True)
+    start, end = _table_bounds(lines, mid)
+    if start is None:
+        return text, False
+    key = re.compile(r"^\s*(models_on|models)\s*=")
+    body, first, depth = [], None, 0
+    for line in lines[start + 1:end]:
+        if depth > 0:                               # the rest of a hand-written multi-line list
+            depth = _open_brackets(line, depth)
+            continue
+        if key.match(line):
+            first = len(body) if first is None else first
+            depth = _open_brackets(line.split("=", 1)[1])
+            continue
+        body.append(line)
+    at = first
+    if at is None:
+        # after the table's last key, above the blank lines and comments that open the next one
+        at = len(body)
+        while at > 0 and (not body[at - 1].strip() or body[at - 1].lstrip().startswith("#")):
+            at -= 1
+    body.insert(at, f"{'models_on':<10} = {_toml_value(list(ids))}\n")
+    head = lines[start] if lines[start].endswith("\n") else lines[start] + "\n"
+    return "".join(lines[:start] + [head] + body + lines[end:]), True
+
+
+def select_refusal(m, on=(), off=(), confirm_cost=()):
+    """{error} that refuses this change, or {} when it may go on. Shared by `fleet models on|off`
+    and POST /api/models/select, so the page and the terminal refuse the same things. A model
+    that can cost money the subscription does not cover, not on yet and not named in
+    confirm_cost, is refused as {error, cost_note, model}, so the page can ask and send again."""
+    if not m:
+        return {"error": "no such provider"}
+    if (on or off) and not takes_model(m):
+        return {"error": NO_MODEL_CHOICE}
+    for mid in list(on) + list(off):
+        if not PRESETS.MODEL_RE.match(str(mid or "")):
+            return {"error": f"{str(mid)[:80]!r} is not a model name: {PRESETS.MODEL_RULE}"}
+    confirmed = set(confirm_cost or ())
+    already = set(m.get("models_on") or [])
+    for mid in on:
+        note = DISCOVERY.cost_note(m.get("engine"), mid)
+        if note and mid not in already and mid not in confirmed:
+            return {"error": (f"{mid} can cost money your subscription does not cover: {note}. "
+                              f"Confirm it: fleet models on {m['id']} {mid} --confirm-cost {mid}"),
+                    "cost_note": note, "model": mid}
+    default = m.get("default_model") or ""
+    if default and default in off:
+        return {"error": (f"{default} is the model a lane gets when fleet spawn names none, so it "
+                          "stays on")}
+    return {}
+
+
+def select_problem(m, on=(), off=(), confirm_cost=()):
+    """The one sentence that refuses this change, or ""."""
+    return select_refusal(m, on, off, confirm_cost).get("error", "")
+
+
+@contextlib.contextmanager
+def _catalog_lock():
+    """One writer of models_on at a time: two saves at once (the page and `fleet models on`)
+    would otherwise both read the old list and the second would undo the first. The lock is a
+    sidecar file beside the catalog, since the catalog itself is replaced by rename."""
+    folder = os.path.dirname(CONFIG) or "."
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "." + os.path.basename(CONFIG) + ".lock"), "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def set_models(mid, on=(), off=(), confirm_cost=()):
+    """(the provider as effective() sees it, an error sentence). Adds `on` to the provider's
+    models_on and takes `off` out, in this farm's own catalog. It runs nothing."""
+    try:
+        with _catalog_lock():
+            return _set_models(mid, on, off, confirm_cost)
+    except OSError as exc:
+        return None, f"could not lock {CONFIG}: {exc}"
+
+
+def _set_models(mid, on, off, confirm_cost):
+    m = effective(mid)
+    problem = select_problem(m, on, off, confirm_cost)
+    if problem:
+        return None, problem
+    ids = list(m["models_on"])
+    if not ids and m["default_model"]:
+        # A provider's first list starts with the model a bare spawn runs, so switching one
+        # more on never turns every default lane into a warning.
+        ids.append(m["default_model"])
+    ids = [x for x in ids if x not in set(off)]
+    for x in on:
+        if x not in ids:
+            ids.append(x)
+    path, err = _own_catalog()
+    if err:
+        return None, err
+    try:
+        with open(path) as handle:
+            text = handle.read()
+        changed, found = _with_models_on(text, mid, ids)
+        if not found:
+            return None, f"{mid} is not a table in {path}"
+        # The rewrite is checked before it lands: a file that no longer parses, or that changed
+        # anything but this list, would quietly drop every provider the farm added.
+        import tomllib
+        try:
+            after = tomllib.loads(changed)
+            ok = (after.get(mid, {}).get("models_on") == ids
+                  and _same_but_models(tomllib.loads(text), after, mid))
+        except tomllib.TOMLDecodeError:
+            ok = False
+        if not ok:
+            return None, (f"{path} could not be rewritten safely, so it was left as it was; "
+                          f"set models_on for [{mid}] by hand")
+        _write_atomic(path, changed)
+    except OSError as exc:
+        return None, f"could not write {path}: {exc}"
+    return effective(mid), ""
+
+
+def spawn_check(engine, model):
+    """(the model the lane will run, a warning, a refusal) for `fleet spawn --engine E --model M`,
+    after bin/fleet has applied its own defaults. The refusal is "" when the spawn may go on."""
+    model = str(model or "")
+    if model and not PRESETS.MODEL_RE.match(model):
+        return model, "", f"--model {model!r} is not a model name: {PRESETS.MODEL_RULE}"
+    m = effective(engine)
+    if not m:
+        return model, "", ""
+    if model and not takes_model(m):
+        return model, "", f"--model: {engine} cannot take one. {NO_MODEL_CHOICE}"
+    resolved = model or m["default_model"]
+    if not resolved and "{variant}" in str(m.get("run") or ""):
+        return "", "", (f"{engine} needs a model: fleet spawn --engine {engine} --model <name> "
+                        f"(see fleet models discover {engine})")
+    listed = m["models_on"]
+    if not resolved or not listed or resolved in listed:
+        return resolved, "", ""
+    note = DISCOVERY.cost_note(m.get("engine"), resolved)
+    if note:
+        return resolved, "", (f"{resolved} is not on for {engine}, and it can cost money the "
+                              f"subscription does not cover: {note}. Switch it on first: "
+                              f"fleet models on {engine} {resolved} --confirm-cost {resolved}")
+    return resolved, (f"warning: {resolved} is not on for {engine} (on: {', '.join(listed)}); "
+                      f"fleet models on {engine} {resolved}"), ""
+
+
+def _selection_args(args):
+    """(provider, models, confirm_cost) from `on|off <provider> <model>... [--confirm-cost m...]`."""
+    provider, models, confirm, into = "", [], [], None
+    for arg in args:
+        if arg == "--confirm-cost":
+            into = confirm
+        elif not provider:
+            provider = arg
+        else:
+            (into if into is not None else models).append(arg)
+    return provider, models, confirm
+
+
 def _human(m):
     return (f"{m['id']}: {'ON' if m['enabled'] else 'off'} · health={m['health']}"
             + (f" · {m['health_detail']}" if m.get('health_detail') else "")
@@ -482,11 +770,43 @@ if __name__ == "__main__":
         m = effective(a[1]); print(m.get(a[2], "") if m else "")
     elif a[0] == "launchcmd":
         # Final non-interactive command for a generic model, with {bin} resolved and {task} set to
-        # read the lane's task file. Substitution happens HERE (robust) not in bash.
+        # read the lane's task file. Substitution happens HERE (robust) not in bash. The third
+        # argument is the lane's --model, which fills {variant} ahead of the row's own.
         m = effective(a[1])
         taskfile = a[2] if len(a) > 2 else ""
+        chosen = a[3] if len(a) > 3 else ""
+        if m and chosen and not PRESETS.MODEL_RE.match(chosen):
+            print(f"--model {chosen!r} is not a model name: {PRESETS.MODEL_RULE}", file=sys.stderr)
+            sys.exit(1)
         if m:
             binp = m.get("bin", a[1])
             run = m.get("run", "{bin} -p {task}")
-            cmd = _fill(run, binp, '"$(cat ' + _shquote(taskfile) + ')"', m.get("variant", ""))
+            cmd = _fill(run, binp, '"$(cat ' + _shquote(taskfile) + ')"',
+                        chosen or m.get("variant", ""))
             print(cmd)
+    elif a[0] == "spawncheck":
+        # bin/fleet cmd_spawn: prints the model the lane will run. A warning goes to stderr
+        # (stdout's first line is the spawn's own result); a refusal is printed and exits 1.
+        resolved, warning, refusal = spawn_check(a[1] if len(a) > 1 else "",
+                                                 a[2] if len(a) > 2 else "")
+        if refusal:
+            print(refusal)
+            sys.exit(1)
+        if warning:
+            print(warning, file=sys.stderr)
+        print(resolved)
+    elif a[0] in ("on", "off"):
+        provider, chosen, confirm = _selection_args(a[1:])
+        if not provider or not chosen:
+            print(f"usage: fleet models {a[0]} <provider> <model>..."
+                  + (" [--confirm-cost <model>...]" if a[0] == "on" else ""), file=sys.stderr)
+            sys.exit(2)
+        if a[0] == "on":
+            m, err = set_models(provider, on=chosen, confirm_cost=confirm)
+        else:
+            m, err = set_models(provider, off=chosen)
+        if err:
+            print(err, file=sys.stderr)
+            sys.exit(1)
+        print(f"{provider}: on {', '.join(m['models_on']) or 'none'}"
+              + (f" (default {m['default_model']})" if m.get("default_model") else ""))

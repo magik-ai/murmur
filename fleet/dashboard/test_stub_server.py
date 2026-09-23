@@ -1352,6 +1352,7 @@ HARNESS = r"""<!doctype html>
 <title>murmur</title>
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/queue.css">
+<link rel="stylesheet" href="/static/models.css">
 <link rel="stylesheet" href="/static/machine.css">
 <link rel="stylesheet" href="/static/hosting.css">
 </head>
@@ -1597,6 +1598,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # The real server clones the repository, so it answers with a job (amendment 7).
             job = job_new("add_project", f"registering {body['name']}", seconds=2)
             return self._json(202, {"job": job})
+        if parsed.path in ("/api/models/discover", "/api/models/select"):  # stub_models.py
+            return self._json(*__import__("stub_models").post(parsed.path, body, models_now()))
         if parsed.path == "/api/models/add":
             return self._json(*self._model_add(body))
         if parsed.path == "/api/models/remove":
@@ -1955,6 +1958,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
+
+
+__import__("stub_github").install(globals())  # the GitHub routes: stub_github.py
 
 
 class Server(socketserver.ThreadingTCPServer):

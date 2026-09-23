@@ -126,28 +126,6 @@ async function measured(page, state, screen, size) {
     ];
   }
   if (screen === "machine" && state === "ready") {
-    const models = await page.evaluate(() => ({
-      columns: [...document.querySelectorAll("#view .m-models thead th")]
-        .map((node) => node.textContent),
-      pills: [...document.querySelectorAll("#view .m-models tbody tr")]
-        .map((row) => row.querySelector("td:nth-child(4) .pill-text").textContent),
-      switches: [...document.querySelectorAll("#view [data-model-switch]")]
-        .map((node) => node.textContent),
-    }));
-    /* Below 640px the same table is a card list, so a phone shows the state, the access and the
-       actions instead of a clipped Model column with the rest behind a sideways drag. */
-    const phone = size.width > 640 ? null : await page.evaluate(() => {
-      const table = document.querySelector("#view .m-models");
-      const wrap = table.closest(".tablewrap");
-      const row = table.querySelector("tbody tr");
-      return {
-        head: getComputedStyle(table.querySelector("thead")).display,
-        row: getComputedStyle(row).display,
-        drag: wrap.scrollWidth - wrap.clientWidth,
-        labels: [...row.querySelectorAll("td[data-col]")]
-          .map((cell) => cell.getAttribute("data-col")).join(","),
-      };
-    });
     const out = [
       ["carries its five sections",
         ["Power", "Services", "Accounts", "Models", "Projects"]
@@ -158,29 +136,13 @@ async function measured(page, state, screen, size) {
         !body.includes("What this farm needs"), "Health is off unless FLEET_DASH_HEALTH=on"],
       ["says the dashboard keeps running through a power action",
         /keeps running through all of these/.test(body), body.slice(0, 160)],
-      ["draws the models table with its six columns",
-        models.columns.join("|") === "Model|Runs as|Access|Status|Last test|Actions",
-        models.columns.join("|")],
-      ["shows every model status as its own pill",
-        ["On", "Failing", "Off", "Needs a key", "Not installed"]
-          .every((word) => models.pills.includes(word)), models.pills.join(", ")],
-      ["labels every switch with the press it makes, not the state",
-        models.switches.length > 0
-        && models.switches.every((word) => /^Switch (on|off)$/.test(word)),
-        models.switches.join(", ")],
     ];
-    if (phone) {
-      out.push(["draws the models table as one card per model",
-        phone.head === "none" && phone.row === "grid" && phone.drag <= 1
-        && /Status/.test(phone.labels) && /Actions/.test(phone.labels),
-        JSON.stringify(phone)]);
-    }
     return out;
   }
   if (screen === "machine" && state === "empty") {
     return [["says what is missing rather than showing empty tables",
-      /No accounts registered/.test(body) && /No projects yet/.test(body)
-      && /No models registered/.test(body), body.slice(0, 200)]];
+      /No accounts registered/.test(body) && /Import your first repository/.test(body)
+      && /No providers connected/.test(body), body.slice(0, 200)]];
   }
   if (screen === "machine" && state === "error") {
     return [
@@ -196,21 +158,8 @@ async function measured(page, state, screen, size) {
   return [];
 }
 
-/* Going to the same address with the same hash does not reload the page, so a drawer opened by
-   the screen before is still there and takes every click meant for the page under it. */
-async function closeAnyDrawer(page) {
-  const shut = await page.evaluate(() => {
-    const host = document.getElementById("drawer");
-    const close = document.getElementById("drawerClose");
-    if (!host || host.hidden || !close) return false;
-    close.click();
-    return true;
-  });
-  if (shut) await page.waitForTimeout(400);
-}
-
-/* The four screens that are not a plain tab: the run detail, the add-account step panel, the
-   models table on its own, and the add-model dialog with every step drawn. */
+/* The two screens that are not a plain tab: the run detail and the add-account step panel. The
+   Models section's screens are test_screens_models.mjs. */
 async function openExtra(page, screen, size, state) {
   if (screen === "queue-detail") {
     const target = await page.evaluate(() => {
@@ -259,58 +208,10 @@ async function openExtra(page, screen, size, state) {
       /ssh -t farm/.test(step) && /Waiting for the first login/.test(step), step.slice(0, 120));
     return true;
   }
-  if (screen === "machine-models") {
-    await closeAnyDrawer(page);
-    /* The table on its own, scrolled to, so the picture of it is the picture of it and not a
-       strip at the bottom of a full page shot. An empty or failing farm still has the section;
-       a loading one has a card of placeholders. */
-    const found = await page.evaluate(() => {
-      const sections = [...document.querySelectorAll("#view .section")];
-      const models = sections.find((item) => /^Models/.test(item.innerText));
-      if (!models) return false;
-      models.scrollIntoView({ block: "start" });
-      // The header is fixed over the top of the page, so a section put flush against the top
-      // loses its own title behind it.
-      window.scrollBy(0, -90);
-      return true;
-    });
-    if (!found) return false;
-    await page.waitForTimeout(300);
-    return true;
-  }
-  if (screen === "machine-model-add") {
-    await closeAnyDrawer(page);
-    const open = await page.evaluate(() => {
-      const button = document.querySelector("[data-add-model]");
-      return Boolean(button) && !button.disabled;
-    });
-    if (!open) return false;
-    await page.click("[data-add-model]");
-    await page.waitForTimeout(500);
-    /* A preset that is already in this farm's catalog cannot be picked, so the picture is
-       taken on one that can: a service with a key, which draws all four steps. */
-    const pickable = await page.evaluate(() => {
-      const node = [...document.querySelectorAll("#drawer [data-preset]")].find((item) => !item.disabled);
-      return node ? node.getAttribute("data-preset") : "";
-    });
-    if (!pickable) return false;
-    await page.click(`#drawer [data-preset='${pickable}']`);
-    await page.waitForTimeout(400);
-    const steps = await page.evaluate(() => {
-      const host = document.getElementById("drawerBody");
-      return { count: host.querySelectorAll(".m-step-no").length, text: host.innerText };
-    });
-    check(`machine add-model ${size.width} draws four numbered steps`,
-      steps.count === 4, `${steps.count} steps`);
-    check(`machine add-model ${size.width} never asks for a key on the page`,
-      !/paste (the |your )?key (here|below|in this)/i.test(steps.text), steps.text.slice(0, 160));
-    return true;
-  }
   return true;
 }
 
-const SCREENS = ["queue", "machine", "queue-detail", "machine-add", "machine-models",
-  "machine-model-add"];
+const SCREENS = ["queue", "machine", "queue-detail", "machine-add"];
 
 for (const state of STATES) {
   for (const size of SIZES) {

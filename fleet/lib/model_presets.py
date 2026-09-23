@@ -33,7 +33,6 @@ in its own `tos` sentence rather than inventing a package name, and the operator
 `docs`. Nothing here is dated: a plan that is out of room today is a fact about a farm, not
 about a service, and belongs in that farm's own models.toml.
 """
-import re
 import copy
 import re
 
@@ -104,11 +103,11 @@ PRESETS = [
         "install_hint": "npm install -g @qwen-code/qwen-code",
         "pull_hint": "",
         "auth_env": "QWEN_CODE_API_KEY",
-        "run": "{bin} -p {task} --output-format stream-json",
+        "run": "{bin} --model {variant} -p {task} --output-format stream-json",
         "health": HEALTH,
         "tos": "LOW: a documented headless mode, and the plan is sold for agentic use",
         "access": "an API key in QWEN_CODE_API_KEY; a flat request quota, no per-token billing",
-        "variants": [],
+        "variants": ["qwen3-coder-plus", "qwen3-coder-next", "qwen3.7-plus"],
         "docs": "https://github.com/QwenLM/qwen-code",
     },
     {
@@ -122,14 +121,14 @@ PRESETS = [
                         "(the package name is the vendor's to give: see docs)",
         "pull_hint": "",
         "auth_env": "KIMI_API_KEY",
-        "run": "{bin} -p {task} --output-format stream-json",
+        "run": "{bin} -m {variant} -p {task} --output-format stream-json",
         "health": HEALTH,
         "tos": "its subscription terms forbid non-interactive use, an API key plan is the "
                "permitted path. The install command and the exact headless flags could not be "
                "confirmed here: check both against the vendor's docs before enabling",
         "access": "an API key in KIMI_API_KEY, billed per token. Not the subscription: that one "
                   "is for interactive use only",
-        "variants": [],
+        "variants": ["kimi-code/kimi-for-coding"],
         "docs": "https://platform.moonshot.ai/docs",
     },
     {
@@ -165,12 +164,12 @@ PRESETS = [
         "install_hint": "curl -fsSL https://opencode.ai/install | bash",
         "pull_hint": "",
         "auth_env": "OPENAI_API_KEY",
-        "run": "{bin} run {task}",
+        "run": "{bin} run -m {variant} {task}",
         "health": HEALTH,
         "tos": "open source, and `opencode run` is its own documented non-interactive command",
         "access": "an API key, billed per token: OPENAI_API_KEY, or ANTHROPIC_API_KEY when you "
                   "point it at a Claude model (set the one your model needs)",
-        "variants": [],
+        "variants": ["openai/gpt-6-sol", "anthropic/claude-sonnet-5"],
         "docs": "https://opencode.ai/docs/cli",
     },
     {
@@ -183,13 +182,13 @@ PRESETS = [
         "install_hint": "pip install aider-chat",
         "pull_hint": "",
         "auth_env": "OPENAI_API_KEY",
-        "run": "{bin} --message {task} --yes",
+        "run": "{bin} --model {variant} --message {task} --yes",
         "health": HEALTH,
         "tos": "open source; --message runs one instruction and exits, --yes answers its "
                "confirmations. It edits and commits in the working tree it is started in",
         "access": "an API key, billed per token: OPENAI_API_KEY (or the provider variable the "
                   "model you choose needs)",
-        "variants": [],
+        "variants": ["openai/gpt-6-sol", "anthropic/claude-sonnet-5"],
         "docs": "https://aider.chat/docs/usage.html",
     },
     {
@@ -233,7 +232,13 @@ PRESETS = [
 CUSTOM = "custom"
 
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
-VARIANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,59}$")
+# The one model rule: every model name that reaches a command line passes it, whichever engine
+# runs it and whether it came from a person, a provider's list or `fleet spawn --model`. A letter
+# or digit first, so no model name can ever read as an option to the CLI it is handed to. The
+# page mirrors it for "Add by name". The provider id rule above is a different thing.
+MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,79}$")
+MODEL_RULE = ("a model name is letters, digits and . _ : / [ ] -, starting with a letter or "
+              "digit, at most 80 characters")
 ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,60}$")
 
 # What a catalog entry may carry out of a preset. `kind` and `variants` and `docs` describe the
@@ -288,7 +293,7 @@ def entry_from(preset_id, overrides=None):
                       "digits and underscores")
 
     variant = str(given.get("variant") or "").strip()
-    if variant and not VARIANT_RE.match(variant):
+    if variant and not MODEL_RE.match(variant):
         return None, f"{variant} is not a model name this page will write into a command"
     if "{variant}" in entry["run"] and not variant:
         choices = ", ".join(preset["variants"]) or "one the service offers"

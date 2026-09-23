@@ -30,6 +30,7 @@ jobs:
         run: |
           cd fleet
           python3 dashboard/test_server.py
+          python3 dashboard/test_github_access.py
           python3 tests/models-test.py
       - name: Hosting (scrub, machines, hosts, runners)
         run: |

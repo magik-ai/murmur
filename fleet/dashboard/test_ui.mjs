@@ -84,11 +84,13 @@ ok("machine: the tab count and the Health section hang on the same feature", () 
 });
 const hasMachine = fs.existsSync(path.join(HERE, MACHINE));
 
-ok("every file the design record names exists, and the four it removes are gone", () => {
+ok("every file the design record names exists, and the three it removes are gone", () => {
   for (const relative of REQUIRED_FILES) {
     assert.ok(fs.existsSync(path.join(HERE, relative)), `missing ${relative}`);
   }
-  for (const gone of ["static/views/overview.js", "static/views/projects.js",
+  /* static/views/projects.js came back as the Machine tab's Projects section (design record
+     github-projects.md, section 7), not as a tab of its own. */
+  for (const gone of ["static/views/overview.js",
     "static/views/accounts.js", "static/views/system.js"]) {
     assert.ok(!fs.existsSync(path.join(HERE, gone)), `${gone} is still here`);
   }

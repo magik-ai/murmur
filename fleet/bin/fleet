@@ -366,8 +366,8 @@ cmd_spawn() {
   if [ "$engine" = "claude" ]; then
     [ -z "$model" ] && model="sonnet"
     # A typo'd model dies minutes later inside the lane, where it reads as a broken agent.
-    case "$model" in sonnet|opus|haiku|fable|claude-*) ;; *)
-      echo "unknown claude model '$model' (sonnet|opus|haiku|fable or a full claude-* id)"; return 1;; esac
+    case "$model" in sonnet|opus|haiku|fable|'opus[1m]'|'sonnet[1m]'|claude-*) ;; *)
+      echo "unknown claude model '$model' (sonnet|opus|haiku|fable|opus[1m]|sonnet[1m] or a full claude-* id)"; return 1;; esac
     if [ -n "$effort" ]; then
       case "$effort" in low|medium|high|xhigh) ;; *) echo "unknown effort '$effort' (low|medium|high|xhigh)"; return 1;; esac
     fi
@@ -386,6 +386,12 @@ cmd_spawn() {
     [ -z "$effort" ] && effort="$CODEX_DEFAULT_EFFORT"
     case "$effort" in low|medium|high|xhigh) ;; *) echo "unknown effort '$effort' (low|medium|high|xhigh)"; return 1;; esac
   fi
+  # The one model rule, and the provider's models_on: a model that is not on warns on stderr
+  # (stdout's first line stays the spawn result), one with a cost note is refused. Prints the
+  # model the lane will run, so a generic lane with no --model records its row's own.
+  local _model_ck
+  _model_ck="$("$PY" "$FLEET_HOME/lib/models.py" spawncheck "$engine" "$model")" || { echo "$_model_ck"; return 1; }
+  model="$_model_ck"
 
   # One code name -> one mark. Registered on first sight; after that the REGISTRY WINS,
   # so an orchestrator that passes a fresh emoji every spawn can't scatter its own agents.
@@ -783,7 +789,7 @@ RUN
     local _menv _msec _mcmd
     _menv=$("$PY" "$FLEET_HOME/lib/models.py" field "$engine" auth_env)
     _msec="$FLEET_STATE/secrets/$engine.key"
-    _mcmd=$("$PY" "$FLEET_HOME/lib/models.py" launchcmd "$engine" "$log.task")
+    _mcmd=$("$PY" "$FLEET_HOME/lib/models.py" launchcmd "$engine" "$log.task" "$model")
     cat > "$log.run.sh" <<RUN
 #!/usr/bin/env bash
 export PATH="\$HOME/.local/bin:\$PATH"
@@ -864,7 +870,10 @@ PY
       local mid="$1"; [ -n "$mid" ] || { echo "usage: fleet models auth <id>  (key on stdin)"; return 1; }
       mkdir -p "$FLEET_STATE/secrets"; cat > "$FLEET_STATE/secrets/$mid.key"; chmod 600 "$FLEET_STATE/secrets/$mid.key"
       echo "$mid: credential stored ($FLEET_STATE/secrets/$mid.key). Now: fleet models enable $mid";;
-    *) echo "usage: fleet models [list | enable <id> | disable <id> | test <id> | auth <id>]";;
+    # A provider's models: what it offers (read without sending a prompt) and which are on.
+    discover) CODEX_BIN="$CODEX_BIN" "$PY" "$FLEET_HOME/lib/model_discovery.py" discover "$@";;
+    on|off)   CODEX_DEFAULT_MODEL="$CODEX_DEFAULT_MODEL" "$PY" "$FLEET_HOME/lib/models.py" "$sub" "$@";;
+    *) echo "usage: fleet models [list | enable <id> | disable <id> | test <id> | auth <id> | discover <id> [--json] | on <id> <model>... [--confirm-cost <model>...] | off <id> <model>...]";;
   esac
 }
 
@@ -2047,6 +2056,10 @@ fleet — headless Claude agent fleet on the farm
   fleet tail <slug>               compact lane state plus its last message
   fleet msg <slug> ["text"]       read or append to a lane's checkpoint inbox
   fleet models                    list and manage routable model engines
+  fleet models discover <id> [--json]
+                                  the models a provider offers, read without a prompt
+  fleet models on|off <id> <model>... [--confirm-cost <model>...]
+                                  switch a provider's models on or off for lanes
   fleet machines list|plan|create|add|check|adopt|destroy|forget
                                   farms you own: this one, droplets it created, your own boxes
   fleet hosts list|check|secret   hosting providers: CLI, login, runner secrets (stdin only)

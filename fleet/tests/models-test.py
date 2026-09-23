@@ -67,8 +67,8 @@ check("Gemini CLI runs the command its own docs give, with the chosen model name
       _by["gemini"]["run"] == "{bin} -m {variant} -p {task} --output-format json"
       and _by["gemini"]["install_hint"] == "npm install -g @google/gemini-cli"
       and _by["gemini"]["auth_env"] == "GEMINI_API_KEY")
-check("Qwen Code keeps the invocation the shipped catalog used",
-      _by["qwen"]["run"] == "{bin} -p {task} --output-format stream-json"
+check("Qwen Code names the model it runs with --model",
+      _by["qwen"]["run"] == "{bin} --model {variant} -p {task} --output-format stream-json"
       and _by["qwen"]["install_hint"] == "npm install -g @qwen-code/qwen-code"
       and _by["qwen"]["auth_env"] == "QWEN_CODE_API_KEY")
 check("Kimi Code names the key plan as the permitted path, not the subscription",
@@ -81,12 +81,12 @@ check("Grok Build is xAI's own CLI, headless on the API key, with the model on t
                                  "--output-format streaming-json")
       and _by["grok"]["auth_env"] == "XAI_API_KEY"
       and _by["grok"]["variants"])
-check("OpenCode runs `opencode run` and installs from its own script",
-      _by["opencode"]["run"] == "{bin} run {task}"
+check("OpenCode runs `opencode run -m` and installs from its own script",
+      _by["opencode"]["run"] == "{bin} run -m {variant} {task}"
       and _by["opencode"]["install_hint"] == "curl -fsSL https://opencode.ai/install | bash"
       and "ANTHROPIC_API_KEY" in _by["opencode"]["access"])
-check("Aider runs one message and answers its own prompts",
-      _by["aider"]["run"] == "{bin} --message {task} --yes"
+check("Aider runs one message on the chosen model and answers its own prompts",
+      _by["aider"]["run"] == "{bin} --model {variant} --message {task} --yes"
       and _by["aider"]["install_hint"] == "pip install aider-chat")
 check("Ollama is local: a variant in the command, an install and a pull",
       _by["ollama"]["kind"] == "local"
@@ -168,7 +168,8 @@ _entry, _err = P.entry_from("gemini", {"variant": "pro; rm -rf /"})
 check("a variant that is not a model name never reaches a command line",
       _entry is None and "model name" in _err, str(_err))
 
-_entry, _err = P.entry_from("qwen", {"variant": "qwen3-coder"})
+_entry, _err = P.entry_from("custom", {"bin": "mycli", "run": "{bin} -p {task}",
+                                       "variant": "qwen3-coder"})
 check("a model name a command line has nowhere to put is refused, not quietly dropped",
       _entry is None and "{variant}" in _err, str(_err))
 
@@ -683,6 +684,829 @@ check("the line the launcher runs carries the model too",
       "gemini-2.5-flash" in _cmd and "$(cat " in _cmd, _cmd)
 
 print()
+print("the one model rule")
+
+# One rule for every model name that reaches a command line (design section 5). A letter or a
+# digit first, so no name can ever be read as an option by the CLI it is handed to.
+
+for _name in ("sonnet", "opus[1m]", "sonnet[1m]", "claude-opus-4-6[1m]", "gpt-6-sol",
+              "kimi-code/kimi-for-coding", "qwen2.5-coder:7b", "MiniMax-M2.5"):
+    check(f"the rule takes {_name}", bool(P.MODEL_RE.match(_name)))
+for _name in ("-rf", "--model", "", "a b", "x;rm", "$(id)", "'q'", "a" * 81, "[1m]"):
+    check(f"the rule refuses {_name[:20]!r}", not P.MODEL_RE.match(_name))
+check("VARIANT_RE is gone: one rule, not two", not hasattr(P, "VARIANT_RE"))
+check("every preset whose command takes a model offers a docs list for the Add dialog",
+      all(p["variants"] for p in P.PRESETS if "{variant}" in p["run"]),
+      str([p["id"] for p in P.PRESETS if "{variant}" in p["run"] and not p["variants"]]))
+check("every generic preset except Custom now carries {variant} in its run",
+      all("{variant}" in p["run"] for p in P.PRESETS
+          if p["engine"] == "generic" and p["id"] != "custom"))
+check("the model flags are the ones each CLI documents",
+      "--model {variant}" in _by["qwen"]["run"] and "-m {variant}" in _by["kimi"]["run"]
+      and "run -m {variant}" in _by["opencode"]["run"]
+      and "--model {variant}" in _by["aider"]["run"])
+
+
+# ---------------------------------------------------------------- a sandbox for the rest
+#
+# Every check below runs in a throwaway world: its own FLEET_CONFIG, FLEET_STATE and HOME, and a
+# PATH whose first directory holds fake `codex`, `opencode` and `claude` executables that write
+# down their argv and never reach a provider. The Qwen and Kimi files hold a planted fake key.
+
+PLANTED = "sk-planted-fake-key-0123456789abcdef"
+PLANTED_TOKEN = "planted-kimi-token-9876543210"
+FLEET_BIN = pathlib.Path(__file__).resolve().parent.parent / "bin" / "fleet"
+
+CODEX_JSON = """{"models": [
+ {"slug": "gpt-6-sol", "display_name": "GPT-6 Sol", "description": "the daily one",
+  "visibility": "list", "supported_in_api": true, "supported_reasoning_levels": ["low"]},
+ {"slug": "gpt-6-hidden", "display_name": "Hidden", "description": "not for you",
+  "visibility": "hide"},
+ {"slug": "gpt-6-none", "display_name": "None", "visibility": "none"},
+ {"slug": "-rf", "display_name": "an option", "visibility": "list"},
+ {"slug": "gpt-6-luna", "display_name": "GPT-6 Luna", "visibility": "list",
+  "base_instructions": "a long prompt nobody asked for"}
+]}"""
+
+QWEN_SETTINGS = """{
+  "security": {"auth": {"selectedType": "openai"}},
+  "modelProviders": {
+    "openai": [
+      {"id": "qwen3-coder-plus", "name": "Qwen3 Coder Plus",
+       "description": "coding, key %s inside", "baseUrl": "https://example.invalid/v1",
+       "envKey": "QWEN_KEY", "apiKey": "%s",
+       "generationConfig": {"timeout": 60000}},
+      {"id": "glm-5", "name": "GLM-5"}
+    ]
+  },
+  "env": {"QWEN_API_KEY": "%s"}
+}""" % (PLANTED, PLANTED, PLANTED)
+
+KIMI_CONFIG = """default_model = "kimi-code/kimi-for-coding"
+
+[providers.kimi-code]
+type = "kimi"
+base_url = "https://example.invalid/coding/v1"
+api_key = "%s"
+
+[models."kimi-code/kimi-for-coding"]
+provider = "kimi-code"
+model = "kimi-for-coding"
+display_name = "Kimi for Coding %s"
+max_context_size = 262144
+""" % (PLANTED_TOKEN, PLANTED_TOKEN)
+
+
+def _fake(path, body):
+    path.write_text("#!/bin/sh\n" + body)
+    path.chmod(0o755)
+
+
+@contextlib.contextmanager
+def world(catalog=None, state=None):
+    """(room, env) with the library, the environment and every subprocess pointed inside it."""
+    import json
+    with tempfile.TemporaryDirectory(prefix="fleet-models-world-") as raw:
+        room = pathlib.Path(raw)
+        home, bins, config, st = room / "home", room / "bin", room / "config", room / "state"
+        for folder in (home, bins, config, st):
+            folder.mkdir()
+        calls = room / "calls.txt"
+        calls.write_text("")
+        record = f'echo "$(basename "$0") $*" >> "{calls}"\n'
+        _fake(bins / "codex", record + 'if [ "$1 $2" = "debug models" ]; then\n'
+              '  [ -f "$HOME/codex-mode" ] && mode="$(cat "$HOME/codex-mode")"\n'
+              '  case "$mode" in\n'
+              '    slow) sleep 30;;\n'
+              '    garbage) echo "not json at all, and a key ' + PLANTED + '";;\n'
+              '    fail) echo "error: ' + PLANTED + '" >&2; exit 3;;\n'
+              '    *) cat "$HOME/codex-models.json";;\n'
+              '  esac\n  exit 0\nfi\nexit 9\n')
+        (home / "codex-models.json").write_text(CODEX_JSON)
+        _fake(bins / "opencode", record + 'if [ "$1" = "models" ]; then\n'
+              '  printf "openai/gpt-6-sol\\nanthropic/claude-sonnet-5\\n\\nopenai/gpt-6-sol\\n"\n'
+              '  exit 0\nfi\nexit 9\n')
+        _fake(bins / "claude", record + "exit 9\n")
+        for tool in ("tmux", "systemctl", "hq", "gh"):
+            _fake(bins / tool, "exit 0\n")
+        _fake(bins / "systemd-run", record + "exit 0\n")
+        (home / ".qwen").mkdir()
+        (home / ".qwen" / "settings.json").write_text(QWEN_SETTINGS)
+        (home / ".kimi").mkdir()
+        (home / ".kimi" / "config.toml").write_text(KIMI_CONFIG)
+        (home / ".claude").mkdir()
+        (home / ".claude" / ".credentials.json").write_text("{}")
+        (config / "policy.toml").write_text("[hq]\nenabled = false\n")
+        if catalog is not None:
+            (config / "models.toml").write_text(catalog)
+        if state is not None:
+            (st / "models-state.json").write_text(json.dumps(state))
+        env = {"HOME": str(home), "FLEET_CONFIG": str(config), "FLEET_STATE": str(st),
+               "PATH": str(bins) + ":/usr/local/bin:/usr/bin:/bin",
+               "CODEX_BIN": str(bins / "codex"), "CLAUDE_BIN": str(bins / "claude"),
+               "OLLAMA_HOST": "127.0.0.1:9", "FLEET_LHM_URL": "http://127.0.0.1:9"}
+        names = list(env) + ["FLEET_CODEX_MODEL", "CODEX_DEFAULT_MODEL", "FLEET_CODEX_BIN"]
+        kept = {name: os.environ.get(name) for name in names}
+        old = (M.CONFIG, M.STATE)
+        for name in ("FLEET_CODEX_MODEL", "CODEX_DEFAULT_MODEL", "FLEET_CODEX_BIN"):
+            os.environ.pop(name, None)
+        os.environ.update(env)
+        M.CONFIG, M.STATE = str(config / "models.toml"), str(st / "models-state.json")
+        try:
+            yield room, calls
+        finally:
+            M.CONFIG, M.STATE = old
+            for name, value in kept.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+
+def fleet(*args, timeout=60):
+    return subprocess.run([str(FLEET_BIN)] + list(args), capture_output=True, text=True,
+                          env=dict(os.environ), timeout=timeout)
+
+
+import model_discovery as D  # noqa: E402
+
+PROVIDERS = """
+[qwen]
+label  = "Qwen Code"
+engine = "generic"
+preset = "qwen"
+bin    = "qwen"
+run    = "{bin} --model {variant} -p {task}"
+variant = "qwen3-coder-plus"
+source = "added"
+
+[kimi]
+label  = "Kimi Code"
+engine = "generic"
+preset = "kimi"
+bin    = "kimi"
+run    = "{bin} -m {variant} -p {task}"
+variant = "kimi-code/kimi-for-coding"
+source = "added"
+
+[opencode]
+label  = "OpenCode"
+engine = "generic"
+preset = "opencode"
+bin    = "opencode"
+run    = "{bin} run -m {variant} {task}"
+variant = "openai/gpt-6-sol"
+source = "added"
+
+[ollama]
+label  = "Ollama local"
+engine = "generic"
+preset = "ollama"
+bin    = "ollama"
+run    = "{bin} run {variant} {task}"
+variant = "llama3.1"
+source = "added"
+
+[gemini]
+label  = "Gemini CLI"
+engine = "generic"
+preset = "gemini"
+bin    = "gemini"
+run    = "{bin} -m {variant} -p {task}"
+variant = "gemini-2.5-pro"
+source = "added"
+
+[oldqwen]
+label  = "Qwen, added before models"
+engine = "generic"
+preset = "qwen"
+bin    = "qwen"
+run    = "{bin} -p {task}"
+source = "added"
+
+[mine]
+label  = "Mine"
+engine = "generic"
+preset = "custom"
+bin    = "mine"
+run    = "{bin} --model {variant} {task}"
+variant = "house-model"
+source = "added"
+"""
+
+
+def full_catalog():
+    example = (pathlib.Path(__file__).resolve().parent.parent / "config"
+               / "models.example.toml").read_text()
+    return example + PROVIDERS
+
+
+def discover_cli(provider):
+    import json
+    done = fleet("models", "discover", provider, "--json")
+    try:
+        return json.loads(done.stdout), done
+    except ValueError:
+        return None, done
+
+
+def leaked(*texts):
+    return [t[:80] for t in texts if PLANTED in str(t) or PLANTED_TOKEN in str(t)]
+
+
+print()
+print("where a provider's model list comes from")
+
+with world(full_catalog()) as (room, calls):
+    _codex, _done = discover_cli("codex")
+    _calls = calls.read_text()
+    check("Codex is asked with `codex debug models`, the binary lanes use",
+          "codex debug models" in _calls, _calls)
+    check("and only its listed rows are kept",
+          _codex and [m["id"] for m in _codex["models"]] == ["gpt-6-sol", "gpt-6-luna"],
+          str(_codex))
+    check("the answer says it came from the account",
+          _codex and _codex["source"] == "account" and _codex["error"] == "", str(_codex))
+    check("only id, label, description, cost_note and on are kept from anything the CLI printed",
+          _codex and all(set(m) == {"id", "label", "description", "cost_note", "on"}
+                         for m in _codex["models"]),
+          str(_codex))
+    check("a label and a description come through as label and description",
+          _codex and _codex["models"][0]["label"] == "GPT-6 Sol"
+          and _codex["models"][0]["description"] == "the daily one", str(_codex))
+    check("and a description never asks: no Codex model carries a cost note",
+          _codex and all(m["cost_note"] == "" for m in _codex["models"]), str(_codex))
+    check("an id that would read as an option is dropped, not offered",
+          _codex and "-rf" not in [m["id"] for m in _codex["models"]])
+
+    _qwen, _done = discover_cli("qwen")
+    check("Qwen Code is read from ~/.qwen/settings.json modelProviders",
+          _qwen and [m["id"] for m in _qwen["models"]] == ["qwen3-coder-plus", "glm-5"]
+          and _qwen["source"] == "account", str(_qwen))
+    check("the planted key in the Qwen file is in no answer, no stdout and no stderr",
+          not leaked(json_text := __import__("json").dumps(_qwen), _done.stdout, _done.stderr),
+          str(leaked(json_text, _done.stdout, _done.stderr)))
+    check("and a key written into a description is scrubbed out of it",
+          _qwen and "[redacted]" in _qwen["models"][0]["description"], str(_qwen))
+    _human = fleet("models", "discover", "qwen")
+    check("the human listing leaks no key either",
+          not leaked(_human.stdout, _human.stderr) and "qwen3-coder-plus" in _human.stdout,
+          _human.stdout)
+
+    _kimi, _done = discover_cli("kimi")
+    check("Kimi Code is read from ~/.kimi/config.toml [models.*], keyed by the alias kimi -m takes",
+          _kimi and [m["id"] for m in _kimi["models"]] == ["kimi-code/kimi-for-coding"]
+          and _kimi["source"] == "account", str(_kimi))
+    check("the planted token in the Kimi file is in no answer, stdout or stderr",
+          not leaked(__import__("json").dumps(_kimi), _done.stdout, _done.stderr), str(_kimi))
+
+    _open, _done = discover_cli("opencode")
+    check("OpenCode is asked with `opencode models`, without --refresh",
+          "opencode models" in calls.read_text() and "--refresh" not in calls.read_text())
+    check("and each provider/model line is one model, once",
+          _open and [m["id"] for m in _open["models"]]
+          == ["openai/gpt-6-sol", "anthropic/claude-sonnet-5"], str(_open))
+
+    _claude, _done = discover_cli("claude")
+    check("Claude Code answers the docs list, and the claude binary is never run",
+          _claude and _claude["source"] == "docs" and _claude["error"] == ""
+          and "claude " not in calls.read_text()
+          and {"sonnet", "opus", "haiku", "fable", "opus[1m]"}
+          <= {m["id"] for m in _claude["models"]}, str(_claude))
+    check("the models already on are marked on",
+          _claude and {m["id"] for m in _claude["models"] if m["on"]}
+          == {"sonnet", "opus", "haiku"}, str(_claude))
+    _noted = {m["id"]: m["cost_note"] for m in (_claude or {}).get("models", []) if m["cost_note"]}
+    check("the cost note is on exactly Fable and the credit-billed [1m] ids, decided by the server",
+          set(_noted) == {"fable", "claude-opus-4-6[1m]", "claude-sonnet-4-6[1m]"}
+          and "usage credits" in _noted["fable"], str(_noted))
+    check("and the docs descriptions never carry it",
+          _claude and all("usage credits" not in m["description"] for m in _claude["models"]),
+          str(_claude))
+    _gem, _done = discover_cli("gemini")
+    check("Gemini CLI answers the docs list, holding no key and calling nothing",
+          _gem and _gem["source"] == "docs" and "gemini-2.5-pro" in
+          [m["id"] for m in _gem["models"]], str(_gem))
+    _mine, _done = discover_cli("mine")
+    check("a custom command has no list, and says so rather than answering the press with nothing",
+          _mine == {"source": "docs", "models": [], "error": D.FAILURES["no_list"]}, str(_mine))
+    check("every preset but Custom has a way to list its models: a route or a documented list "
+          "(Grok Build arrived after the lists were written and its button did nothing)",
+          all(p["id"] == "custom" or p["id"] in D.ROUTES or D.DOCS.get(p["id"])
+              for p in P.PRESETS),
+          str([p["id"] for p in P.PRESETS
+               if p["id"] != "custom" and p["id"] not in D.ROUTES and not D.DOCS.get(p["id"])]))
+    _grok = D.discover({"preset": "grok", "id": "grok"})
+    check("Grok Build answers its documented models",
+          [m["id"] for m in _grok["models"]] == ["grok-4.7", "grok-build-0.1"] and not _grok["error"],
+          str(_grok))
+    _none = fleet("models", "discover", "nosuch")
+    check("an unknown provider is a sentence and a non-zero exit",
+          _none.returncode != 0 and "no such provider" in _none.stderr, _none.stderr)
+    check("no discovery sent a prompt: the only calls were the two listing commands",
+          all(line.split()[:3] in (["codex", "debug", "models"], ["opencode", "models"])
+              for line in calls.read_text().splitlines()), calls.read_text())
+
+
+class _Tags(__import__("http.server").server.BaseHTTPRequestHandler):
+    body = b""
+    status = 200
+    seen = []
+
+    def do_GET(self):
+        _Tags.seen.append(self.path)
+        self.send_response(_Tags.status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(_Tags.body)
+
+    def do_POST(self):
+        _Tags.seen.append("POST " + self.path)
+        self.send_response(500)
+        self.end_headers()
+
+    def log_message(self, *_args):
+        pass
+
+
+@contextlib.contextmanager
+def ollama_stub(body, status=200):
+    import http.server
+    import threading
+    _Tags.body, _Tags.status, _Tags.seen = body, status, []
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Tags)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+with world(full_catalog()) as (room, calls):
+    with ollama_stub(b'{"models": [{"name": "llama3.1:latest", "size": 1, "details": {}},'
+                     b' {"name": "qwen2.5-coder:7b", "digest": "abc"}]}') as where:
+        os.environ["OLLAMA_HOST"] = where
+        _oll, _done = discover_cli("ollama")
+        _seen = list(_Tags.seen)
+    check("Ollama is read from GET /api/tags on this machine",
+          _seen == ["/api/tags"], str(_seen))
+    check("and every pulled model is offered, name as id",
+          _oll and [m["id"] for m in _oll["models"]] == ["llama3.1:latest", "qwen2.5-coder:7b"]
+          and _oll["source"] == "account", str(_oll))
+    with ollama_stub(b"<html>not json</html>") as where:
+        os.environ["OLLAMA_HOST"] = where
+        _oll, _done = discover_cli("ollama")
+    check("an Ollama answer that is not JSON is its fixed sentence, with the docs list",
+          _oll and _oll["error"] == D.FAILURES["unreadable"] and _oll["source"] == "docs"
+          and _oll["models"], str(_oll))
+    os.environ["OLLAMA_HOST"] = "127.0.0.1:9"
+    _oll, _done = discover_cli("ollama")
+    check("no Ollama running is its fixed sentence",
+          _oll and _oll["error"] == D.FAILURES["unreachable"], str(_oll))
+
+with world(full_catalog()) as (room, calls):
+    (room / "home" / ".qwen" / "settings.json").write_text(__import__("json").dumps({
+        "security": {"auth": {"selectedType": "dashscope"}},
+        "modelProviders": {"dashscope": [{"id": "dashscope/qwen3-coder-plus", "name": "Plus"},
+                                      {"id": "glm-5", "name": "GLM-5"}]}}))
+    _qwen = D.discover(M.effective("qwen"))
+    check("a row whose id the scrub changed is dropped, never offered as [redacted]/...",
+          [m["id"] for m in _qwen["models"]] == ["glm-5"], str(_qwen))
+    _only = D.scrubbed({"source": "account", "error": "",
+                        "models": [{"id": "secretword/x", "label": "x", "description": ""}]},
+                       ["secretword"])
+    check("and an answer left with no row keeps no redacted id", _only["models"] == [], str(_only))
+    (room / "home" / ".qwen" / "settings.json").write_text(__import__("json").dumps({
+        "security": {"auth": {"selectedType": "dashscope"}},
+        "modelProviders": {"dashscope": [{"id": "dashscope/qwen3-coder-plus"}]}}))
+    _qwen = D.discover(M.effective("qwen"))
+    check("an account list the scrub emptied is the docs list and its sentence",
+          _qwen["source"] == "docs" and _qwen["error"] == D.FAILURES["empty"]
+          and _qwen["models"], str(_qwen)[:200])
+
+print()
+print("every failure is a fixed sentence")
+
+with world(full_catalog()) as (room, calls):
+    home = room / "home"
+    (home / "codex-mode").write_text("garbage")
+    _c, _done = discover_cli("codex")
+    check("codex output that is not JSON: its output could not be read",
+          _c and _c["error"] == "its output could not be read" and _c["source"] == "docs"
+          and [m["id"] for m in _c["models"]][:1] == ["gpt-6-sol"], str(_c))
+    check("and nothing the CLI printed reaches the answer",
+          not leaked(_done.stdout, _done.stderr) and "not json" not in _done.stdout)
+    (home / "codex-mode").write_text("fail")
+    _c, _done = discover_cli("codex")
+    check("codex exiting non-zero: the CLI exited with an error, its stderr kept out",
+          _c and _c["error"] == "the CLI exited with an error"
+          and not leaked(_done.stdout, _done.stderr), str(_c))
+    (home / "codex-models.json").write_text('{"models": [{"slug": "x", "visibility": "hide"}]}')
+    (home / "codex-mode").write_text("ok")
+    _c, _done = discover_cli("codex")
+    check("an account with nothing listed: it listed no models",
+          _c and _c["error"] == "it listed no models", str(_c))
+    os.remove(room / "bin" / "codex")
+    _c, _done = discover_cli("codex")
+    check("codex missing: the CLI is not installed",
+          _c and _c["error"] == "the CLI is not installed", str(_c))
+    os.remove(home / ".qwen" / "settings.json")
+    _q, _done = discover_cli("qwen")
+    check("no Qwen settings file: the file is missing",
+          _q and _q["error"] == "the file is missing" and _q["source"] == "docs", str(_q))
+    (home / ".kimi" / "config.toml").write_text('api_key = "%s"\n[models\nbroken' % PLANTED)
+    _k, _done = discover_cli("kimi")
+    check("a Kimi file that is not TOML: its output could not be read, no key in it",
+          _k and _k["error"] == "its output could not be read"
+          and not leaked(_done.stdout, _done.stderr), str(_k))
+    _old = D.TIMEOUT
+    D.TIMEOUT = 1
+    (home / "codex-mode").write_text("slow")
+    _fake(room / "bin" / "codex", 'sleep 5\n')
+    _t = D.discover(M.effective("codex"))
+    D.TIMEOUT = _old
+    check("a CLI that hangs: it did not answer in 15 seconds",
+          _t["error"] == D.FAILURES["timeout"] and "15 seconds" in D.FAILURES["timeout"],
+          str(_t))
+    check("every sentence a failure can say is one of the fixed set",
+          set(D.FAILURES.values()) >= {"the CLI is not installed",
+                                       "it did not answer in 15 seconds",
+                                       "its output could not be read", "the file is missing"})
+
+print()
+print("switching models on and off")
+
+with world() as (room, calls):
+    _cat = pathlib.Path(M.CONFIG)
+    _cat.write_text((pathlib.Path(__file__).resolve().parent.parent / "config"
+                     / "models.example.toml").read_text()
+                    .replace('models_on  = ["sonnet", "opus", "haiku"]',
+                             'models     = "sonnet, opus, haiku"'))
+    check("a farm catalog that still carries the retired string reads it as models_on",
+          M.effective("claude")["models_on"] == ["sonnet", "opus", "haiku"],
+          str(M.effective("claude")["models_on"]))
+    _on = fleet("models", "on", "claude", "claude-opus-5-5")
+    _toml = toml_of(M.CONFIG)
+    check("fleet models on adds an id", _on.returncode == 0
+          and _toml["claude"]["models_on"] == ["sonnet", "opus", "haiku", "claude-opus-5-5"],
+          _on.stdout + _on.stderr)
+    check("and the retired string is gone from the file, migrated once",
+          "models" not in _toml["claude"] and 'models     =' not in _cat.read_text())
+    check("every other line of the file is as it was",
+          "# The pool is SHARED" in _cat.read_text() and _toml["codex"]["label"] == "Codex")
+    _fab = fleet("models", "on", "claude", "fable")
+    check("a noted model is refused without --confirm-cost, with the note",
+          _fab.returncode != 0 and "usage credits" in _fab.stderr
+          and "fable" not in toml_of(M.CONFIG)["claude"]["models_on"], _fab.stderr)
+    _fab = fleet("models", "on", "claude", "fable", "--confirm-cost", "fable")
+    check("and switched on when the confirm names it",
+          _fab.returncode == 0 and "fable" in toml_of(M.CONFIG)["claude"]["models_on"],
+          _fab.stderr)
+    for _id in ("claude-fable-5-1[1m]", "claude-fable-5-1-20260801", "fable[1m]",
+                "claude-opus-4-6-20260101[1m]"):
+        _fab = fleet("models", "on", "claude", _id)
+        check(f"every id of a noted family asks too, not only the listed ones: {_id}",
+              _fab.returncode != 0 and "usage credits" in _fab.stderr
+              and _id not in toml_of(M.CONFIG)["claude"]["models_on"], _fab.stderr)
+    check("the note is decided by rule, and names no model that costs nothing more",
+          [bool(D.cost_note("claude", x)) for x in
+           ("claude-fable-5-1", "CLAUDE-FABLE-5-1[1M]", "claude-sonnet-4-6[1m]", "opus[1m]",
+            "claude-opus-4-6", "claude-opus-5-5[1m]", "sonnet", "fabled")]
+          == [True, True, True, False, False, False, False, False]
+          and D.cost_note("codex", "fable") == "")
+    _off = fleet("models", "off", "claude", "sonnet")
+    check("off refuses the default model",
+          _off.returncode != 0 and "stays on" in _off.stderr
+          and "sonnet" in toml_of(M.CONFIG)["claude"]["models_on"], _off.stderr)
+    _off = fleet("models", "off", "claude", "haiku")
+    check("off takes another one out",
+          _off.returncode == 0 and "haiku" not in toml_of(M.CONFIG)["claude"]["models_on"],
+          _off.stderr)
+    _bad = fleet("models", "on", "claude", "--rf")
+    check("a name the rule refuses is not written",
+          _bad.returncode != 0 and "not a model name" in _bad.stderr, _bad.stderr)
+    os.environ["FLEET_CODEX_MODEL"] = "gpt-6-luna"
+    check("the codex default is the one spawn resolves: FLEET_CODEX_MODEL",
+          M.effective("codex")["default_model"] == "gpt-6-luna")
+    os.environ.pop("FLEET_CODEX_MODEL")
+    (pathlib.Path(os.environ["FLEET_CONFIG"]) / "env").write_text('FLEET_CODEX_MODEL="gpt-6-astra"\n')
+    check("or the env file's, as bin/fleet loads it",
+          M.effective("codex")["default_model"] == "gpt-6-astra",
+          M.effective("codex")["default_model"])
+    _off = fleet("models", "off", "codex", "gpt-6-astra")
+    check("and off refuses that default too",
+          _off.returncode != 0 and "stays on" in _off.stderr, _off.stderr)
+    _on = fleet("models", "on", "codex", "gpt-6-sol")
+    check("a provider's first list starts with its default model",
+          toml_of(M.CONFIG)["codex"]["models_on"] == ["gpt-6-astra", "gpt-6-sol"],
+          str(toml_of(M.CONFIG)["codex"]))
+
+with world() as (room, calls):
+    import tomllib as _tomllib
+    _cat = pathlib.Path(M.CONFIG)
+    _example = (pathlib.Path(__file__).resolve().parent.parent / "config"
+                / "models.example.toml").read_text()
+    _multi = _example.replace('models_on  = ["sonnet", "opus", "haiku"]',
+                              'models_on = [\n  "sonnet",\n  "opus[1m]",  # the 1M one\n'
+                              '  "haiku",\n]')
+    _cat.write_text(_multi)
+    _text, _found = M._with_models_on(_multi, "claude", ["sonnet", "opus"])
+    try:
+        _parsed = _tomllib.loads(_text)
+    except _tomllib.TOMLDecodeError as exc:
+        _parsed = {"error": str(exc)}
+    check("a hand-written multi-line list holding opus[1m] is replaced whole, no orphan lines",
+          _found and _parsed.get("claude", {}).get("models_on") == ["sonnet", "opus"]
+          and '"haiku",' not in _text, str(_parsed)[:200])
+    _on = fleet("models", "on", "claude", "claude-opus-5-5")
+    _toml = toml_of(M.CONFIG)
+    check("and fleet models on over it leaves a catalog that parses, every table kept",
+          _on.returncode == 0 and _toml["claude"]["models_on"]
+          == ["sonnet", "opus[1m]", "haiku", "claude-opus-5-5"]
+          and set(_toml) == set(_tomllib.loads(_multi)), _on.stdout + _on.stderr)
+    _before = _cat.read_text()
+    _real = M._with_models_on
+    M._with_models_on = lambda text, mid, ids: (text + "\nbroken = [\n", True)
+    _m, _err = M.set_models("claude", on=["claude-sonnet-5"])
+    M._with_models_on = _real
+    check("a rewrite that would not parse is refused, and the file is left as it was",
+          _m is None and "could not be rewritten safely" in _err
+          and _cat.read_text() == _before, _err)
+
+with world() as (room, calls):
+    import threading as _threading
+    import time as _time
+    _real = M._with_models_on
+
+    def _slow(text, mid, ids):
+        _time.sleep(0.4)                       # both saves have read the file by now, unlocked
+        return _real(text, mid, ids)
+
+    M._with_models_on = _slow
+    _errs = []
+    _savers = [_threading.Thread(target=lambda x=x: _errs.append(M.set_models("claude", on=[x])[1]))
+               for x in ("claude-opus-5-5", "claude-sonnet-5")]
+    for _t in _savers:
+        _t.start()
+    for _t in _savers:
+        _t.join()
+    M._with_models_on = _real
+    _now = toml_of(M.CONFIG)["claude"]["models_on"]
+    check("two saves at the same moment both land: neither undoes the other",
+          _errs == ["", ""] and {"claude-opus-5-5", "claude-sonnet-5"} <= set(_now),
+          str(_now) + str(_errs))
+
+with world(full_catalog()) as (room, calls):
+    _no = fleet("models", "on", "oldqwen", "glm-5")
+    check("a provider whose command cannot take a model says so and writes nothing",
+          _no.returncode != 0 and "its own settings choose" in _no.stderr, _no.stderr)
+    check("GET /api/engines rows carry models_on and default_model",
+          {r["id"]: (r["models_on"], r["default_model"]) for r in SERVER.engines()}
+          .get("claude") == (["sonnet", "opus", "haiku"], "sonnet"))
+
+print()
+print("the model reaches the lane")
+
+LANE_CATALOG = """
+[fakeqwen]
+label   = "Fake Qwen"
+engine  = "generic"
+preset  = "qwen"
+bin     = "%s"
+run     = "{bin} --model {variant} -p {task}"
+variant = "qwen3-coder-plus"
+models_on = ["qwen3-coder-plus"]
+source  = "added"
+
+[fixed]
+label  = "Fixed"
+engine = "generic"
+bin    = "fixed"
+run    = "{bin} -p {task}"
+source = "added"
+"""
+
+
+def project(room):
+    repo, origin = room / "project", room / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    subprocess.run(["git", "clone", "-q", str(origin), str(repo)], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+    subprocess.run(["git", "-C", str(repo), "branch", "-M", "main"], check=True)
+    subprocess.run(["git", "-C", str(repo), "push", "-q", "-u", "origin", "main"], check=True,
+                   capture_output=True)
+    (room / "config" / "projects.toml").write_text(
+        f'[demo]\nrepo = "example/demo"\npath = "{repo}"\nbranch = "main"\n')
+
+
+with world() as (room, calls):
+    _argv = room / "argv.txt"
+    _tool = room / "bin" / "fakeqwen"
+    _fake(_tool, ': > "%s"\nfor a in "$@"; do echo "$a" >> "%s"; done\n' % (_argv, _argv))
+    pathlib.Path(M.CONFIG).write_text(
+        (pathlib.Path(__file__).resolve().parent.parent / "config" / "models.example.toml")
+        .read_text() + LANE_CATALOG % _tool)
+    (room / "state" / "models-state.json").write_text(
+        '{"fakeqwen": {"enabled": true, "health": "ok"}, "fixed": {"enabled": true, "health": "ok"}}')
+    project(room)
+    _plain = fleet("spawn", "--project", "demo", "--lane", "gp", "--engine", "fakeqwen",
+                   "--task", "t", "--force")
+    _plain_first = (_plain.stdout.splitlines() or [""])[0]
+    _spawn = fleet("spawn", "--project", "demo", "--lane", "gq", "--engine", "fakeqwen",
+                   "--model", "opus[1m]", "--task", "t", "--force")
+    _first = (_spawn.stdout.splitlines() or [""])[0]
+    check("a spawn with a model that is not on goes ahead",
+          _spawn.returncode == 0 and "\nspawned  gq-" in "\n" + _spawn.stdout,
+          _spawn.stdout + _spawn.stderr)
+    check("and warns once on stderr, keeping stdout's first line the spawn result",
+          "warning: opus[1m] is not on for fakeqwen" in _spawn.stderr
+          and "warning" not in _spawn.stdout and "warning" not in _first
+          and _first == _plain_first, _spawn.stderr)
+    _runs = list((room / "state" / "logs").glob("gq-*.run.sh"))
+    _run = _runs[0].read_text() if _runs else ""
+    check("the generic lane's run.sh carries the chosen model, shell-quoted",
+          "--model 'opus[1m]' -p" in _run, _run[-400:])
+    # The same line, run by bash in a directory where `opus[1m]` would glob to a file.
+    _here = room / "globroom"
+    _here.mkdir()
+    (_here / "opus1").write_text("")
+    (_here / "task").write_text("do it")
+    _line = launchcmd(room, "fakeqwen", str(_here / "task"))
+    _mline = subprocess.run([sys.executable, str(LIB / "models.py"), "launchcmd", "fakeqwen",
+                             str(_here / "task"), "opus[1m]"], capture_output=True, text=True,
+                            env=dict(os.environ)).stdout.strip()
+    subprocess.run(["bash", "-c", _mline], cwd=_here, env=dict(os.environ))
+    _got = _argv.read_text().split("\n") if _argv.exists() else []
+    check("run by bash beside a file named opus1, opus[1m] does not glob",
+          _got[:3] == ["--model", "opus[1m]", "-p"], str(_got))
+    check("without a --model the row's own variant fills {variant}",
+          "--model 'qwen3-coder-plus'" in _line, _line)
+    _bad = subprocess.run([sys.executable, str(LIB / "models.py"), "launchcmd", "fakeqwen",
+                           "/tmp/t", "-x"], capture_output=True, text=True, env=dict(os.environ))
+    check("launchcmd refuses a model the rule refuses", _bad.returncode != 0 and not _bad.stdout)
+
+    check("a spawn of the model that is on says nothing on stderr about it",
+          _plain.returncode == 0 and "warning" not in _plain.stderr
+          and "model=qwen3-coder-plus" in _plain.stdout, _plain.stdout + _plain.stderr)
+    _fixed = fleet("spawn", "--project", "demo", "--lane", "gf", "--engine", "fixed",
+                   "--model", "anything", "--task", "t", "--force")
+    check("a row with no {variant} refuses --model",
+          _fixed.returncode != 0 and "its own settings choose" in _fixed.stdout,
+          _fixed.stdout + _fixed.stderr)
+    _dash = fleet("spawn", "--project", "demo", "--lane", "gd", "--engine", "fakeqwen",
+                  "--model", "-rf", "--task", "t", "--force")
+    check("the model rule refuses a leading -",
+          _dash.returncode != 0 and "not a model name" in _dash.stdout, _dash.stdout)
+
+    _fable = fleet("spawn", "--project", "demo", "--lane", "cf", "--engine", "claude",
+                   "--account", "default", "--model", "fable", "--task", "t", "--force")
+    check("spawn refuses a noted model that is off, with its note",
+          _fable.returncode != 0 and "usage credits" in _fable.stdout
+          and not list((room / "state" / "logs").glob("cf-*.run.sh")),
+          _fable.stdout + _fable.stderr)
+    _fable = fleet("spawn", "--project", "demo", "--lane", "cg", "--engine", "claude",
+                   "--account", "default", "--model", "claude-fable-5-1[1m]", "--task", "t",
+                   "--force")
+    check("and refuses a full Fable id with [1m] the same way, not only with a warning",
+          _fable.returncode != 0 and "usage credits" in _fable.stdout
+          and not list((room / "state" / "logs").glob("cg-*.run.sh")),
+          _fable.stdout + _fable.stderr)
+    _one = fleet("spawn", "--project", "demo", "--lane", "c1", "--engine", "claude",
+                 "--account", "default", "--model", "opus[1m]", "--task", "t", "--force")
+    _runs = list((room / "state" / "logs").glob("c1-*.run.sh"))
+    check("claude accepts opus[1m], and its run.sh quotes it",
+          _one.returncode == 0 and _runs and '--model "opus[1m]"' in _runs[0].read_text(),
+          _one.stdout + _one.stderr)
+    _son = fleet("spawn", "--project", "demo", "--lane", "c2", "--engine", "claude",
+                 "--account", "default", "--model", "sonnet[1m]", "--task", "t", "--force")
+    check("and sonnet[1m], warning because it is not on",
+          _son.returncode == 0 and "not on for claude" in _son.stderr, _son.stderr)
+    check("no spawn ran claude or codex itself",
+          not any(line.split()[0] in ("claude", "codex")
+                  for line in calls.read_text().splitlines()), calls.read_text())
+
+print()
+print("the two routes, behind the token")
+
+with world(full_catalog()) as (room, calls):
+    import json as _json
+    import threading as _threading
+    import urllib.error as _uerr
+    import urllib.request as _ureq
+    _old_token = SERVER.TOKEN
+    SERVER.TOKEN = "test-token-not-a-secret"
+    server = SERVER.Server(("127.0.0.1", 0), SERVER.Handler)
+    _thread = _threading.Thread(target=server.serve_forever, daemon=True)
+    _thread.start()
+    _base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def post(path, body, token="test-token-not-a-secret", headers=None):
+        request = _ureq.Request(_base + path, data=_json.dumps(body).encode(), method="POST",
+                                headers=dict({"Content-Type": "application/json"},
+                                             **({"Authorization": "Bearer " + token}
+                                                if token else {}), **(headers or {})))
+        try:
+            with _ureq.urlopen(request, timeout=40) as answer:
+                return answer.status, _json.loads(answer.read())
+        except _uerr.HTTPError as err:
+            return err.code, _json.loads(err.read() or b"{}")
+
+    try:
+        _s, _p = post("/api/models/discover", {"id": "codex"}, token="")
+        check("discover without the token is refused", _s == 403, str(_s))
+        _s, _p = post("/api/models/select", {"id": "claude", "on": ["opus[1m]"]}, token="wrong")
+        check("select with a wrong token is refused", _s == 403, str(_s))
+        _s, _p = post("/api/models/select", {"id": "claude", "on": ["opus[1m]"]},
+                      headers={"Sec-Fetch-Site": "cross-site"})
+        check("a cross-site select is refused", _s == 403, str(_p))
+        check("and nothing was written", not os.path.exists(M.CONFIG)
+              or "opus[1m]" not in pathlib.Path(M.CONFIG).read_text())
+
+        _s, _p = post("/api/models/discover", {"id": "codex"})
+        check("discover runs fleet models discover and answers the account's list",
+              _s == 200 and [m["id"] for m in _p["models"]] == ["gpt-6-sol", "gpt-6-luna"]
+              and _p["source"] == "account", str(_p))
+        check("each row says whether it is on",
+              all("on" in m for m in _p["models"]), str(_p))
+        _s, _p = post("/api/models/discover", {"id": "qwen"})
+        check("the Qwen answer through the route leaks no key",
+              _s == 200 and not leaked(_json.dumps(_p)), str(_p))
+        _s, _p = post("/api/models/discover", {"id": "kimi"})
+        check("nor does the Kimi one",
+              _s == 200 and not leaked(_json.dumps(_p)), str(_p))
+        _s, _p = post("/api/models/discover", {"id": "claude"})
+        check("the route's rows are {id, label, description, cost_note, on}, the note by rule",
+              _s == 200 and all(set(m) == {"id", "label", "description", "cost_note", "on"}
+                                for m in _p["models"])
+              and {m["id"] for m in _p["models"] if m["cost_note"]}
+              == {"fable", "claude-opus-4-6[1m]", "claude-sonnet-4-6[1m]"}, str(_p)[:300])
+        _s, _p = post("/api/models/discover", {"id": "nosuch"})
+        check("an unknown provider is 404", _s == 404, str(_s))
+        SERVER.DISCOVERING.add("codex")
+        _s, _p = post("/api/models/discover", {"id": "codex"})
+        SERVER.DISCOVERING.discard("codex")
+        check("one request at a time per provider", _s == 409, str(_s))
+
+        # The server's own check must refuse before anything runs: the CLI refusing as well
+        # would otherwise hide a server that forgot to check.
+        _ran, _real_run_tool = [], SERVER.run_tool
+        SERVER.run_tool = lambda argv, **_kw: (_ran.append(argv), (1, "", "ran"))[1]
+        try:
+            _s, _p = post("/api/models/select", {"id": "claude", "on": ["fable"]})
+            _s2, _p2 = post("/api/models/select", {"id": "claude", "off": ["sonnet"]})
+        finally:
+            SERVER.run_tool = _real_run_tool
+        check("select refuses a noted model not in confirm_cost, with the note, server side",
+              _s == 400 and "usage credits" in _p["error"], str(_p))
+        check("the refusal is {error, cost_note, model}, so the page can ask and send again",
+              _s == 400 and set(_p) == {"error", "cost_note", "model"}
+              and _p["model"] == "fable" and _p["cost_note"] == D.FABLE_NOTE, str(_p))
+        check("and a refusal that is not about money is {error} alone",
+              _s2 == 400 and set(_p2) == {"error"}, str(_p2))
+        check("and the default model in off, server side too",
+              _s2 == 400 and "stays on" in _p2["error"], str(_p2))
+        check("both refused before any command ran", _ran == [], str(_ran))
+        check("and wrote nothing", "fable" not in M.effective("claude")["models_on"])
+        _s, _p = post("/api/models/select", {"id": "claude", "on": ["claude-fable-5-1[1m]"]})
+        check("select refuses a full Fable id with [1m] too, naming it",
+              _s == 400 and "usage credits" in _p["error"]
+              and _p.get("model") == "claude-fable-5-1[1m]" and _p.get("cost_note")
+              and "claude-fable-5-1[1m]" not in M.effective("claude")["models_on"], str(_p))
+        _s, _p = post("/api/models/select",
+                      {"id": "claude", "on": ["fable", "opus[1m]"], "confirm_cost": ["fable"]})
+        check("with the confirm it switches both on and answers the updated row",
+              _s == 200 and _p.get("id") == "claude"
+              and {"fable", "opus[1m]"} <= set(_p.get("models_on") or [])
+              and _p.get("default_model") == "sonnet", str(_p))
+        check("the answer is the row itself, the same shape GET /api/engines rows have",
+              _s == 200 and set(_p) == set(next(r for r in SERVER.engines()
+                                                if r["id"] == "claude")), str(sorted(_p)))
+        _s, _p = post("/api/models/select", {"id": "claude", "off": ["sonnet"]})
+        check("select refuses the default model in off", _s == 400 and "stays on" in _p["error"],
+              str(_p))
+        _s, _p = post("/api/models/select", {"id": "claude", "off": ["haiku"]})
+        check("and takes another one off",
+              _s == 200 and "haiku" not in _p.get("models_on", ["haiku"]), str(_p))
+        _s, _p = post("/api/models/select", {"id": "claude", "on": ["-rf"]})
+        check("select refuses a name the rule refuses", _s == 400, str(_p))
+        _s, _p = post("/api/models/select", {"id": "claude", "on": "opus"})
+        check("select refuses a body whose lists are not lists", _s == 400, str(_p))
+        _s, _p = post("/api/models/select", {"id": "oldqwen", "on": ["glm-5"]})
+        check("select on a provider that cannot take a model says the sentence",
+              _s == 400 and "its own settings choose" in _p["error"], str(_p))
+        check("no route ran a provider's test or sent a prompt",
+              all(line.split()[:3] in (["codex", "debug", "models"],)
+                  for line in calls.read_text().splitlines()), calls.read_text())
+    finally:
+        server.shutdown()
+        server.server_close()
+        SERVER.TOKEN = _old_token
+
+print()
 print("where this suite runs")
 
 # A suite nobody runs is a suite that goes green on a change it should have caught, so the
@@ -703,7 +1527,7 @@ print("house style")
 # first. The files this page is made of are read for one, so the next one is caught here rather
 # than in review.
 
-FILES = [LIB / "models.py", LIB / "model_presets.py",
+FILES = [LIB / "models.py", LIB / "model_presets.py", LIB / "model_discovery.py",
          pathlib.Path(__file__).resolve(),
          pathlib.Path(__file__).resolve().parent.parent / "dashboard" / "server.py",
          pathlib.Path(__file__).resolve().parent.parent / "dashboard" / "test_server.py",

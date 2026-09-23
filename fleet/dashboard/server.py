@@ -49,7 +49,10 @@ import codex_usage as CX  # noqa: E402
 import mode as MODE  # noqa: E402
 import models as MODELS  # noqa: E402
 import model_presets as MODEL_PRESETS  # noqa: E402
+import model_discovery as MODEL_DISCOVERY  # noqa: E402
 import scrub as SCRUB  # noqa: E402
+sys.path.insert(0, HERE)                    # github_access sits next to this file
+import github_access as GH  # noqa: E402
 
 STATE = os.path.expanduser(os.environ.get("FLEET_STATE", "~/.fleet"))
 CONFIG = os.path.expanduser(os.environ.get("FLEET_CONFIG", "~/.config/fleet"))
@@ -1372,6 +1375,101 @@ def remove_model_request(body):
     return 200, {"ok": True, "removed": removed}
 
 
+# ---------------------------------------------------------------- a provider's models
+#
+# Request available models and the ticks that follow (design: docs/design/models-providers.md,
+# sections 3 to 6). Discovery runs `fleet models discover` through run_tool, so it uses the
+# codex binary lanes use (bin/fleet's CODEX_BIN), which this server does not have in its own
+# environment. Neither route sends a prompt or runs a provider's test.
+
+DISCOVER_TIMEOUT = 20
+SELECT_TIMEOUT = 10
+DISCOVERING = set()
+DISCOVERING_LOCK = threading.Lock()
+
+
+def _provider(body):
+    mid = str((body or {}).get("id") or "").strip()
+    if not MODELS.ID_RE.match(mid):
+        return mid, None
+    return mid, MODELS.effective(mid)
+
+
+def _id_list(body, name):
+    value = (body or {}).get(name) or []
+    if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+        return None
+    return [x.strip() for x in value if x.strip()]
+
+
+def discover_models_request(body):
+    """POST /api/models/discover {id} -> {source, models: [{id, label, description, cost_note,
+    on}], error}. The cost note is decided here, by rule, never taken from the tool's answer."""
+    mid, row = _provider(body)
+    if not row:
+        return 404, {"error": f"no such provider: {mid[:40]}" if mid else "which provider?"}
+    with DISCOVERING_LOCK:
+        if mid in DISCOVERING:
+            return 409, {"error": f"a request for {mid}'s models is already running"}
+        DISCOVERING.add(mid)
+    try:
+        rc, out, _err = run_tool([fleet_bin(), "models", "discover", mid, "--json"],
+                                 timeout=DISCOVER_TIMEOUT)
+    finally:
+        with DISCOVERING_LOCK:
+            DISCOVERING.discard(mid)
+    answer = None
+    if rc == 0:
+        try:
+            answer = json.loads(out)
+        except ValueError:
+            answer = None
+    if not isinstance(answer, dict) or not isinstance(answer.get("models"), list):
+        # The tool's own words are never passed on: they could be anything a provider printed.
+        failed = (MODEL_DISCOVERY.FAILURES["timeout"] if rc == 124
+                  else MODEL_DISCOVERY.FAILURES["unreadable"])
+        answer = {"source": "docs", "models": MODEL_DISCOVERY.docs_list(row), "error": failed}
+    rows = [MODEL_DISCOVERY.keep(item.get("id"), item.get("label"), item.get("description"))
+            for item in answer["models"] if isinstance(item, dict)]
+    error = str(answer.get("error") or "")
+    clean = {"source": "account" if answer.get("source") == "account" else "docs",
+             "models": [item for item in rows if item],
+             "error": error if error in MODEL_DISCOVERY.FAILURES.values() else
+             (MODEL_DISCOVERY.FAILURES["unreadable"] if error else "")}
+    return 200, MODEL_DISCOVERY.annotate(MODEL_DISCOVERY.scrubbed(clean), row)
+
+
+def select_models_request(body):
+    """POST /api/models/select {id, on, off, confirm_cost} -> the updated row, as GET
+    /api/engines has it (design section 6). An unknown provider is 404, as on discover. A noted
+    model not named in confirm_cost, and the default model in off, are refused here, before any
+    command runs, and again by `fleet models on|off`."""
+    mid, row = _provider(body)
+    if not row:
+        return 404, {"error": f"no such provider: {mid[:40]}" if mid else "which provider?"}
+    on, off, confirm = (_id_list(body, "on"), _id_list(body, "off"),
+                        _id_list(body, "confirm_cost"))
+    if on is None or off is None or confirm is None:
+        return 400, {"error": "on, off and confirm_cost are lists of model names"}
+    if not on and not off:
+        return 400, {"error": "nothing to change"}
+    refusal = MODELS.select_refusal(row, on, off, confirm)
+    if refusal:
+        # {error}, or {error, cost_note, model} for a model that can cost money, so the page
+        # can ask the question and send again with it in confirm_cost.
+        return 400, refusal
+    steps = []
+    if on:
+        steps.append(["on", mid] + on + (["--confirm-cost"] + confirm if confirm else []))
+    if off:
+        steps.append(["off", mid] + off)
+    for step in steps:
+        rc, out, err = run_tool([fleet_bin(), "models"] + step, timeout=SELECT_TIMEOUT)
+        if rc != 0:
+            return 400, {"error": tool_message(rc, out, err, "fleet models " + step[0])}
+    return 200, engine_row(MODELS.effective(mid))
+
+
 # ---------------------------------------------------------------- services
 #
 # Four rows in the machine's control room: the agent runner, the verification runner, the sweep
@@ -2164,6 +2262,16 @@ def add_project(body):
             return 400, {"error": f"port_base must be between {PORT_BASE_MIN} and "
                                   f"{PORT_BASE_MAX}"}
     args += ["--port-base", str(port_base)]
+    branch = str(body.get("branch") or "").strip()
+    if branch:
+        problem = GH.branch_problem(branch)
+        if problem:
+            return 400, {"error": problem}
+        # One git call, no API call: a base branch that does not exist fails every lane.
+        if GH._ls_remote(repo, f"refs/heads/{branch}") != 0:
+            return 400, {"error": f"there is no branch {branch} in {repo}, or git on this farm "
+                                  "cannot read the repository"}
+        args += ["--branch", branch]
     code, payload = start_job("add_project", args, PROJECT_ADD_TIMEOUT,
                               label=f"Adding {name}", key=PROJECT_WRITE_KEY)
     payload.update({"name": name, "repo": repo, "port_base": port_base,
@@ -4131,7 +4239,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not readable:
                     self._send(403, json.dumps({"error": why}))
                     return
-            if path.startswith("/static/"):
+            if path.startswith("/api/github"):
+                code, payload = GH.get_route(path)
+                self._send(code, json.dumps(payload))
+            elif path.startswith("/static/"):
                 code, body, ctype = static_file(path[len("/static/"):])
                 self._send(code, body, ctype)
             elif path.startswith("/api/access"):
@@ -4181,7 +4292,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif path == "/api/projects/next-port":
                 self._send(200, json.dumps(next_port_answer()))
             elif path == "/api/projects":
-                self._send(200, json.dumps(projects()))
+                self._send(200, json.dumps(GH.decorate_projects(projects())))
             elif path == "/api/machines":
                 # From the hosting snapshot. Like every read here it runs nothing: listing
                 # droplets is a provider request, and this page redraws every few seconds.
@@ -4249,7 +4360,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if problem:
                 self._send(400, json.dumps({"error": problem}))
                 return
-            if path == "/api/projects":
+            if path.startswith("/api/github"):
+                code, payload = GH.post_route(path, body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/projects":
                 code, payload = add_project(body)
                 self._send(code, json.dumps(payload))
             elif path == "/api/projects/remove":
@@ -4308,6 +4422,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(code, json.dumps(payload))
             elif path == "/api/models/remove":
                 code, payload = remove_model_request(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/models/discover":
+                code, payload = discover_models_request(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/models/select":
+                code, payload = select_models_request(body)
                 self._send(code, json.dumps(payload))
             elif self.path.startswith("/api/models"):
                 act, mid = body.get("action", ""), body.get("id", "")
@@ -4450,4 +4570,5 @@ if __name__ == "__main__":
     start_ci_refresher()
     threading.Thread(target=_accounts_refresher, name="accounts-refresher", daemon=True).start()
     start_refresher()
+    GH.start(office=hq_office, registry=_projects_registry)
     Server((BIND, PORT), Handler).serve_forever()

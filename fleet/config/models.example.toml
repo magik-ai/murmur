@@ -22,7 +22,11 @@
 #   auth_env     (generic) env var the headless CLI reads for its subscription credential
 #   run          (generic) the exact non-interactive invocation; {task}, {bin} and {variant}
 #                are substituted
-#   variant      (optional) the model name this row runs, substituted into {variant}
+#   variant      (optional) the model this row runs when a lane names none, substituted into
+#                {variant} (a lane's `fleet spawn --model` fills it instead)
+#   models_on    the ids of this provider's models agents may use: `fleet models on|off`, or the
+#                provider's sidebar on the dashboard. (It replaces the old `models` string; a
+#                catalog that still carries one is read as the first models_on)
 #   health       a tiny non-interactive prompt used to test the model on enable
 #   tos          headless/automation ToS stance (why it's safe or risky for a farm)
 #   preset       (written by "Add a model") the preset this entry came from
@@ -45,7 +49,7 @@ color      = "#D97757"
 label      = "Claude Code"
 # The pool is SHARED with your own interactive sessions. `fleet accounts` shows the live
 # headroom; spawn with --account auto to spread lanes across the accounts you have added.
-models     = "sonnet, opus, haiku"
+models_on  = ["sonnet", "opus", "haiku"]
 engine     = "claude"
 role       = "the workhorse: most lanes, most of the time."
 quality    = "frontier"

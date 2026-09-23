@@ -1,0 +1,113 @@
+/* Projects: the GitHub strip, the import dialog and the six-column table. Every class here is
+   prefixed p- and every colour is a token from app.css. Every table cell is one line (the
+   owner's table rule): cut with an ellipsis, the full text in the cell's title. */
+
+.p-link {
+  padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--accent); font: inherit; font-size: 12px; white-space: nowrap;
+}
+.p-link:hover { text-decoration: underline; }
+.p-link[disabled] { color: var(--text-faint); cursor: not-allowed; text-decoration: none; }
+
+/* ------------------------------------------------------------ the strip */
+
+.p-strip { display: grid; gap: 8px; }
+.p-strip-line {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  min-width: 0;
+}
+.p-strip-line .pill { flex: none; }
+.p-strip-words { min-width: 0; color: var(--text); line-height: 1.45; }
+.p-strip-line.wait .p-strip-words, .p-strip-line.fail .p-strip-words { color: var(--text); }
+.p-strip-acts { display: inline-flex; gap: 10px; align-items: center; justify-self: end; }
+.p-strip-note { margin: 0; font-size: 12px; }
+
+/* ------------------------------------------------------------ the dialogs */
+
+.p-lead {
+  margin: 0; padding: 10px 12px;
+  border: 1px solid var(--tone-wait); border-radius: var(--radius);
+  background: var(--tone-wait-bg); color: var(--text); font-weight: 600;
+}
+.p-filters { flex-wrap: nowrap; }
+.p-filters select { flex: 0 1 auto; max-width: 45%; }
+.p-search { flex: 1 1 auto; min-width: 0; max-width: none; }
+input.p-search, .p-paste-row input { max-width: none; }
+
+/* Eight rows are visible and the list scrolls inside the dialog, never the page. */
+.p-repos {
+  display: grid; align-content: start;
+  max-height: calc(8 * 40px); overflow-y: auto; overflow-x: hidden;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+}
+.p-repo {
+  display: flex; align-items: center; gap: 8px;
+  height: 40px; padding: 0 10px; min-width: 0;
+  border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+.p-repo:last-child { border-bottom: 0; }
+.p-repo .pill { flex: none; }
+.p-repo-name {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);
+}
+.p-pushed { flex: none; font-size: 12px; }
+.p-repo button { flex: none; max-width: 190px; }
+.p-why { overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 24px; }
+.p-none { margin: 0; }
+
+.p-paste { display: grid; gap: 6px; }
+.p-paste-row { flex-wrap: nowrap; }
+.p-paste-row input { flex: 1 1 auto; min-width: 0; }
+.p-paste-row button { flex: none; }
+.p-paste p { margin: 0; }
+
+.p-chosen { display: flex; align-items: center; gap: 10px; margin: 0; min-width: 0; }
+.p-chosen b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p-import .m-field select, .p-import .m-field input { max-width: 100%; }
+.p-ports { margin: 0; flex-wrap: wrap; }
+
+.p-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.p-checks li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: center;
+}
+.p-checks li .cmd { grid-column: 2; }
+.p-check-words { min-width: 0; line-height: 1.45; }
+
+/* ------------------------------------------------------------ the table */
+
+.p-table { table-layout: fixed; }
+.p-col-project { width: 17%; }
+.p-col-repo { width: 27%; }
+.p-col-access { width: 12%; }
+.p-col-branch { width: 12%; }
+.p-col-lanes { width: 9%; }
+.p-col-actions { width: 23%; }
+.p-table td { max-width: none; }
+.p-inline { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.p-inline .pill, .p-inline .p-visibility, .p-inline button, .p-inline .p-open { flex: none; }
+.p-table td .pill { max-width: 100%; }
+.p-cut { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.p-open { text-decoration: none; }
+.p-empty { display: grid; gap: 10px; justify-items: start; }
+.p-empty .state-note { width: 100%; }
+
+/* On a phone the table keeps its rows one line and loses its two quiet columns, whose values
+   the Project cell's title still carries. The Repository cell keeps its Private or Public pill
+   (section 5) and cuts the name instead, and it is the link to GitHub there, so the Open on
+   GitHub button is the one control dropped. */
+@media (max-width: 640px) {
+  .p-table .p-optional { display: none; }
+  .p-col-project { width: 24%; }
+  .p-col-repo { width: 31%; }
+  .p-col-access { width: 24%; }
+  .p-col-actions { width: 21%; }
+  .p-table .p-open { display: none; }
+  .p-table td, .p-table th { padding: 0 4px; }
+  .p-strip-line { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+  .p-strip-acts { grid-column: 1 / -1; justify-self: start; flex-wrap: wrap; }
+  .p-pushed { display: none; }
+  .p-repo button { max-width: 120px; }
+  .p-filters { flex-wrap: wrap; }
+  .p-filters select { max-width: 100%; }
+}

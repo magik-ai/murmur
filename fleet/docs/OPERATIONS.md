@@ -141,6 +141,47 @@ Engines and tiers:
 - `--engine claude` (the default) dials capability by `--model opus|sonnet|haiku`.
 - `--engine codex` dials it by `--effort low|medium|high|xhigh`.
 - A model the box cannot route is refused at spawn, not minutes later inside the lane.
+- `--model` reaches every provider: Claude takes `sonnet`, `opus`, `haiku`, `fable`, `'opus[1m]'`,
+  `'sonnet[1m]'` or a full `claude-*` id; a generic provider's command fills `{variant}` with it,
+  shell-quoted (its catalog row's `variant` when there is none), and a row whose `run` has no
+  `{variant}` refuses `--model`. Every model name passes one rule: a letter or digit first, then
+  letters, digits and `. _ : / [ ] -`, at most 80 characters.
+- When the provider has a `models_on` list and the model the lane will run (after the defaults:
+  `sonnet` for Claude, `FLEET_CODEX_MODEL` for Codex, the row's `variant` otherwise) is not in it,
+  spawn prints one `warning:` line on stderr and goes ahead. A model with a cost note (Claude
+  `fable` and every `claude-fable-*` id, `claude-opus-4-6[1m]`, `claude-sonnet-4-6[1m]`, with a
+  dated snapshot too) that is not on is refused instead, with the note as the reason. The note is
+  decided by rule on the model's family, not by a list of exact ids.
+
+### A provider's models
+
+A provider is an agent CLI and the way it is paid for; `models_on` in its catalog row lists the
+models agents may use. Nothing below sends a prompt or runs the provider's test.
+
+```bash
+fleet models discover codex            # what the provider offers; --json for the page's shape
+fleet models on claude claude-opus-5-5 # switch models on (writes models_on)
+fleet models on claude fable --confirm-cost fable
+fleet models off claude haiku          # refuses the default model
+```
+
+| Provider | Where `discover` reads the list |
+|---|---|
+| Codex | `codex debug models` (the codex lanes run, `CODEX_BIN`), rows with `visibility` `list` |
+| Ollama | `GET /api/tags` on `OLLAMA_HOST` (default `127.0.0.1:11434`) |
+| Qwen Code | `~/.qwen/settings.json` `modelProviders` |
+| Kimi Code | `~/.kimi/config.toml` `[models.*]` |
+| OpenCode | `opencode models` |
+| Claude Code, Gemini CLI, Aider | the docs list in `lib/model_discovery.py` |
+| Custom | none: the name a person types |
+
+Only an id, a label and a description are kept from any source, and the answer passes
+`lib/scrub.py` with every credential-looking value of the provider's file added (the Qwen and Kimi
+files hold keys). A failure answers the docs list with one fixed sentence: the CLI is not
+installed, it did not answer in 15 seconds, its output could not be read, the file is missing, the
+CLI exited with an error, nothing answered on its port, it listed no models. A catalog that still
+carries the retired `models = "sonnet, opus"` string reads it as the first `models_on`; the first
+`fleet models on|off` rewrites it.
 
 **The dashboard** starts on the first spawn, or with `fleet dashboard start`, on port 7878. It is a
 shared, long-lived service: health strip, subscription tiles, one card per lane with status, PR
@@ -174,13 +215,14 @@ keeps the last good values when a pass fails, with `stale_since` saying when the
 | `/api/sweep` | GET | whether the sweep timer is enabled, and how long until the next pass |
 | `/api/ci` | GET | the verification queue: running, waiting and recent, with the runner's own state |
 | `/api/ci/log?id&tier` | GET | the last 256 KB of one stage's log, with `truncated` when there is more |
-| `/api/projects` | GET | the registered projects, with lanes open now and last activity |
+| `/api/projects` | GET | the registered projects, with lanes open now and last activity, and from the GitHub snapshot each repository's `visibility`, this login's `permission` (`admin`, `write`, `read`, `no_access` only after a definite 404 or 403, or `null` when not connected or not known) and `html_url` |
+| `/api/github` | GET | the farm's GitHub connection from a snapshot (it runs nothing): `login_state` (`connected`, `not_connected`, `no_gh`, `no_answer`), the login, its scopes (`null` when the token kind hides them), the missing required ones, whether git uses the login, a `GH_TOKEN`/`GITHUB_TOKEN` line in fleet's env file (`two_identities`), whether the login can write to the head office, the owners, the calls left this hour, and the copyable commands. A pass runs every five minutes and when gh's `hosts.yml` changes; under 1,000 calls left it keeps the last answer with `stale_since` |
 | `/api/fleet`, `/api/agent?slug` | GET | every lane, and one lane's whole record |
 | `/api/agent/log?slug&tail=200` | GET | that lane's log as words, at most 2000 lines |
 | `/api/accounts` | GET | each subscription's windows, with the last good numbers when a read failed |
 | `/api/accounts/login-state` | GET | per account: `logged_in`, `waiting_for_login`, `expired`, `rate_limited` or `unknown`, each with a sentence and when it was last read. `waiting_for_login` means the credentials file is ABSENT; one that is there but cannot be read is `unknown`, never an invitation to log in over it |
 | `/api/jobs`, `/api/jobs/<id>` | GET | the long actions in flight, and one action's record |
-| `/api/engines` | GET | the model catalog as the Models table reads it: one row per model with how it is paid for (`access`), one status word (`on`, `off`, `needs_key`, `not_installed`, `failing`), whether this farm added it (`source`), the model it runs (`variant`), and whether its command is on this machine. It starts nothing: running a model is what Test is for |
+| `/api/engines` | GET | the model catalog as the Models table reads it: one row per model with how it is paid for (`access`), one status word (`on`, `off`, `needs_key`, `not_installed`, `failing`), whether this farm added it (`source`), the model it runs (`variant`), the ids switched on (`models_on`), the model a bare spawn runs (`default_model`), and whether its command is on this machine. It starts nothing: running a model is what Test is for |
 | `/api/models` | GET | the catalog as the library sees it, without the machine's own facts |
 | `/api/models/presets` | GET | the services "Add a model" offers (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, Grok Build, OpenCode, Aider, Ollama local, Custom command), each with its install hint, its key variable, its variants, how it is paid for and whether running it headless is permitted. `added` is true for a service this farm already has |
 | `/api/power/preview?action=` | GET | what throttle, drain or resume will do, with the lanes a drain would stop, by name |
@@ -204,13 +246,19 @@ none is sent to them.
 | `/api/agents/kill` | `{slug, retire}` | `fleet kill [--retire] <slug>`; the answer carries the lane's restart policy and what the press did |
 | `/api/ci/enqueue` | `{project, pr}` | `fleet ci enqueue --project <name> --pr <n>`, as a job |
 | `/api/ci/cancel` | `{id}` | `fleet ci cancel -- <id>`, for a run that is running or waiting |
-| `/api/projects` | `{name, repo, port_base?}` | `fleet add-project`, as a job (it clones the repository); without a port base it takes the next free block above the highest registered one, and is refused with a sentence when there is no free block left |
+| `/api/projects` | `{name, repo, branch?, port_base?}` | `fleet add-project`, as a job (it clones the repository), with `--branch` when a branch is given (refused unless `git check-ref-format --branch` accepts it and it does not start with `-`); without a port base it takes the next free block above the highest registered one, and is refused with a sentence when there is no free block left |
 | `/api/projects/remove` | `{name}` | a guarded rewrite of `projects.toml` (there is no fleet verb): refused while the project has lanes open or while a project is being added, keeps a copy of the previous file, and names the dev server port block that is free again |
 | `/api/accounts/add`, `/api/accounts/remove` | `{name, engine}` / `{name}` | the login command and its steps; removal moves the account to `dead-account-backups` |
+| `/api/github/check` | | one GitHub pass now, in the background (`202`): `gh auth status --active -h github.com`, `gh api -i user`, and with 1,000 calls or more left the repository list (at most five pages), the head office when it is not in the list, and `repos/<r>` for each registered repository the list lacks. One at a time (`409`), and `429` with `retry_after` within 60 seconds of the last |
+| `/api/github/repos` | `{owner?, q?}` | nothing: the snapshot's repository list filtered in memory by owner and a name substring, each row with `permission` and `registered`, and `truncated` when the list was cut short |
+| `/api/github/branches` | `{repo}` | `gh api -i repos/<r>` and `gh api -i repos/<r>/branches?protected=true&per_page=100`: `{default_branch, protected}` |
+| `/api/github/access` | `{repo, branch, name}` | the import checks, one line each (`ok`, `warn`, `fail`, with a sentence and a fix): signed in; the role from `repos/<r>`; `GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code https://github.com/<r>.git HEAD`; the workflow scope; not archived; the base branch (the default one, or `git ls-remote` of `refs/heads/<branch>`); and an existing `~/work/<name>`: its `origin`, and `ssh -T git@github.com` for an SSH remote. `repo` may be `owner/name` or a `github.com` address; any other host is refused |
 | `/api/accounts/refresh` | | wakes this server's own account reader, and is refused for sixty seconds afterwards: one press is one request per account to the vendor |
 | `/api/models` | `{action, id}` | enable, disable or test one model, each a real request to the provider |
 | `/api/models/add` | `{preset, id, variant?, label?, bin?, run?, auth_env?}` | writes one entry into this farm's own `models.toml`, creating it from the shipped example on the first write, and answers the new row. It runs nothing. A body carrying a key is refused with `A key never goes through this page. Run: fleet models auth <id>`, whatever the field is called, and so is a key written into `bin` or `run`: a key belongs on a terminal's stdin, not in a browser, a proxy log or this server. A command that names the variable holding it (`--api-key $MY_API_KEY`) is what to write instead. `variant` is required by a service whose command line carries `{variant}`, and refused by one that does not |
 | `/api/models/remove` | `{id}` | deletes one entry this farm added, with its runtime state and its stored key. `404` when there is no such model, `400` when it came with fleet (a shipped model can be switched off, not removed) |
+| `/api/models/discover` | `{id}` | `fleet models discover <id> --json`, 20 second timeout, one at a time per provider (`409` while one runs). Answers `{source, models: [{id, label, description, cost_note, on}], error}`; `source` is `account` or `docs`, and `error` is one of the fixed sentences, never the tool's own text. `description` is free text from the provider or the docs and asks nothing; `cost_note` is "" unless the model can cost money the subscription does not cover (Fable, and the credit-billed `[1m]` ids), which the server decides by rule on the model's family, full and dated ids included |
+| `/api/models/select` | `{id, on, off, confirm_cost}` | `fleet models on` and `fleet models off`, then answers the updated row itself, as `/api/engines` has it; `404` for an unknown provider. Refused with `400` before anything runs: a model with a cost note that is not in `confirm_cost` answers `{error, cost_note, model}`, so the page can ask and send again with it named; the default model in `off`, or a name the model rule refuses, answers `{error}` |
 | `/api/mode` | `{mode}` | the power mode, applied at once |
 | `/api/agent/msg` | `{slug, text}` | `fleet msg`, delivered at the lane's next checkpoint |
 | `/api/mail/send` | `{to, text}` | `hq msg -- <to> <text>` as this dashboard's own name, then wakes the office reader |
