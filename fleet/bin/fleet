@@ -41,9 +41,11 @@ fi
 mkdir -p "$FLEET_STATE"/state "$FLEET_STATE"/logs "$FLEET_STATE"/worktrees "$FLEET_CONFIG"
 PY=python3
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
-CODEX_BIN="${CODEX_BIN:-/usr/bin/codex}"
+# FLEET_CODEX_BIN lets the env file point at a user-level install: a newer codex CLI is what
+# unlocks newer models, and the system one under /usr needs root to update.
+CODEX_BIN="${CODEX_BIN:-${FLEET_CODEX_BIN:-/usr/bin/codex}}"
 # Codex tiers by REASONING EFFORT on one model, where Claude tiers by model name.
-CODEX_DEFAULT_MODEL="${CODEX_DEFAULT_MODEL:-gpt-5.6-sol}"
+CODEX_DEFAULT_MODEL="${CODEX_DEFAULT_MODEL:-${FLEET_CODEX_MODEL:-gpt-5.6-sol}}"
 CODEX_DEFAULT_EFFORT="${CODEX_DEFAULT_EFFORT:-medium}"
 # Never let a stray API key divert billing off the subscription (both engines
 # run on their subscription: Claude OAuth, Codex "Logged in using ChatGPT").

@@ -161,6 +161,15 @@ case "$PATH" in /nowhere) no "env file: a non-FLEET key is ignored" "$PATH";; *)
 PATH="$saved_path"; unset FLEET_LHM_URL FLEET_FARM_ALIAS FLEET_DASH_BIND
 rm -f "$FLEET_CONFIG/env"
 
+# ---- the codex engine: FLEET_CODEX_BIN / FLEET_CODEX_MODEL (env file) pick the binary and model
+codex_lines="$(grep -E '^CODEX_(BIN|DEFAULT_MODEL)=' "$FLEET_BIN")"
+got=$(unset CODEX_BIN CODEX_DEFAULT_MODEL FLEET_CODEX_BIN FLEET_CODEX_MODEL; eval "$codex_lines"; echo "$CODEX_BIN|$CODEX_DEFAULT_MODEL")
+is "codex: nothing set keeps the system binary and the shipped model" "$got" "/usr/bin/codex|gpt-5.6-sol"
+got=$(unset CODEX_BIN CODEX_DEFAULT_MODEL; FLEET_CODEX_BIN=/opt/codex/bin/codex FLEET_CODEX_MODEL=gpt-6-sol; eval "$codex_lines"; echo "$CODEX_BIN|$CODEX_DEFAULT_MODEL")
+is "codex: the env file's FLEET_CODEX_BIN and FLEET_CODEX_MODEL are used" "$got" "/opt/codex/bin/codex|gpt-6-sol"
+got=$(CODEX_BIN=/explicit/codex; FLEET_CODEX_BIN=/opt/codex/bin/codex; eval "$codex_lines"; echo "$CODEX_BIN")
+is "codex: an explicit CODEX_BIN still wins" "$got" "/explicit/codex"
+
 echo "RESULT pass=$P fail=$F"
 
 [ "$F" = 0 ]

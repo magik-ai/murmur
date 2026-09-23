@@ -121,7 +121,8 @@ def health_check(mid):
         return "fail", "no such model", ""
     eng = m.get("engine")
     if eng == "codex":
-        binp = os.environ.get("CODEX_BIN", "/usr/bin/codex")
+        binp = (os.environ.get("CODEX_BIN") or os.environ.get("FLEET_CODEX_BIN")
+                or "/usr/bin/codex")
         if not (os.path.exists(binp) or shutil.which("codex")):
             return "fail", "codex binary not found", ""
         auth = os.path.exists(os.path.expanduser("~/.codex/auth.json"))
