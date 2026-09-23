@@ -21,7 +21,9 @@ request's query, from the query of the page that made it, or from STUB_GH:
     no_answer       gh did not answer
     fine            a fine-grained token, whose scopes cannot be read
     office_denied   the login cannot write to the head office
-    unread          signed in (gh names the login), but GitHub refused the account call: nothing read
+    office_name     the head office is configured as "agent-hq", not owner/name
+    unread          signed in (gh names the login), but GitHub refused the account call: nothing
+                    read, so no project row has a permission either
     flip            not connected for STUB_GH_FLIP_SECONDS after the first read, then connected
 
 `long=1` adds a project whose name, repository and branch are all too long for their cells.
@@ -39,7 +41,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 VARIANTS = ("connected", "missing_scope", "missing_repo", "no_scopes", "no_git", "two", "two_flag",
-            "not_connected", "no_gh", "no_answer", "fine", "office_denied", "flip", "unread")
+            "not_connected", "no_gh", "no_answer", "fine", "office_denied", "flip", "unread", "office_name")
 FLIP_SECONDS = float(os.environ.get("STUB_GH_FLIP_SECONDS", "6"))
 CHECK_COOLDOWN = 60
 ENV_FILE = "/home/farm/.config/fleet/env"
@@ -183,6 +185,9 @@ def github_payload(state, variant, farm="farm"):
     if variant == "office_denied":
         office = {"repo": "your-org/agent-hq", "writable": False,
                   "detail": "this account can only read your-org/agent-hq"}
+    if variant == "office_name":
+        office = {"repo": "agent-hq", "writable": None,
+                  "detail": "The head office is not written as owner/name."}
     if variant == "unread":
         scopes = None
         error = "GitHub refused the account call (HTTP 403); the last answer is kept."
@@ -219,7 +224,8 @@ def project_rows(state, variant, rows):
     for row in rows:
         visibility, permission = ACCESS.get(row.get("repo"), ("private", "admin"))
         row["visibility"] = visibility if signed else None
-        row["permission"] = permission if signed else None
+        # The real server has no listing before the account is read, so no permission either.
+        row["permission"] = permission if signed and variant != "unread" else None
         row["html_url"] = f"https://github.com/{row.get('repo')}"
     return rows
 
@@ -345,8 +351,8 @@ def install(module):
                 return self._json(429, {"error": "GitHub was asked less than a minute ago.",
                                         "retry_after": int(left) + 1})
             LAST_CHECK["at"] = time.time()
-            return self._json(200, {"ok": True, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
-                                                                    time.gmtime())})
+            return self._json(202, {"ok": True, "checking": True, "retry_after": CHECK_COOLDOWN,
+                                    "detail": "The farm is checking its GitHub connection now."})
         if state == "error":
             return self._json(503, {"error": "gh on this farm did not answer"})
         if path == "/api/github/repos":

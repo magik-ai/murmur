@@ -1413,6 +1413,7 @@ const context = {
   get access() { return api.access; },
   get project() { return state.project; },
   get params() { return state.params; },
+  get view() { return state.view; },
   res: (path) => api.resource(path),
   watch(path) {
     if (!extra.has(path)) {

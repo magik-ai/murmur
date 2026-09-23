@@ -184,6 +184,7 @@ def reset_module():
         GA._snapshot.clear()
         GA._snapshot.update(GA._blank())
     GA._last_check["at"] = 0.0
+    GA._running["passes"] = 0
     GA._watch.update({"mtime": None, "next_pass": 0.0})
     GA._hooks.update({"office": lambda: "", "registry": lambda: {}})
 
@@ -568,6 +569,40 @@ class Check(Base):
                     payload["_thread"].join(10)
             self.assertFalse(GA.github_answer()["checking"])
 
+    def test_a_check_refused_because_the_background_pass_runs_is_still_checking(self):
+        # A 409 almost always comes from the background pass. It used to leave "checking" clear,
+        # so the page read once and the answer waited for the next minute's read.
+        with farm():
+            GA.run_pass()
+            started, go = threading.Event(), threading.Event()
+
+            def held_pass(fresh=False):
+                started.set()
+                go.wait(5)
+
+            with mock.patch.object(GA, "_pass", side_effect=held_pass):
+                background = threading.Thread(target=GA.run_pass)
+                background.start()
+                try:
+                    self.assertTrue(started.wait(5))
+                    code, _ = GA.check_request(now=5000.0)
+                    self.assertEqual(code, 409)
+                    self.assertTrue(GA.github_answer()["checking"])
+                finally:
+                    go.set()
+                    background.join(10)
+            self.assertFalse(GA.github_answer()["checking"])
+
+    def test_the_answer_to_a_press_says_checking_not_pending(self):
+        # "pending" means no pass has ever answered; the 202 means a pass is running now.
+        with farm():
+            code, payload = GA.post_route("/api/github/check", {})
+            self.assertEqual(code, 202)
+            self.assertNotIn("pending", payload)
+            self.assertIs(payload["checking"], True)
+            with GA._pass_lock:
+                pass
+
     def test_one_at_a_time_and_a_cooldown(self):
         with farm() as box:
             code, payload = GA.check_request(now=1000.0)
@@ -757,6 +792,8 @@ class Access(Base):
 
     def test_the_failing_and_warning_lines(self):
         scenario = access_scenario("pull", archived=True, ls=())
+        # Git refusing the repository (128) is the login fault gh auth setup-git fixes.
+        scenario["ls_remote_unreadable"] = ["octo/one.git"]
         scenario["api"]["user"] = api(200, {"login": "octo"}, scopes="repo")
         with farm(scenario) as box:
             checks, answer = self.run_access(box)
@@ -778,6 +815,16 @@ class Access(Base):
             self.assertEqual(checks["workflow_scope"]["state"], "warn")
             self.assertIn("cannot be read", checks["workflow_scope"]["sentence"])
             self.assertTrue(answer["importable"])
+
+    def test_an_account_never_read_is_not_blamed_on_the_token(self):
+        # GitHub refused the account call, so the scopes are unknown for that reason alone.
+        scenario = access_scenario()
+        scenario["api"]["user"] = api(403, {"message": "API rate limit exceeded"}, remaining=0)
+        with farm(scenario) as box:
+            checks, _ = self.run_access(box)
+            self.assertEqual(checks["workflow_scope"]["state"], "warn")
+            self.assertNotIn("kind of token", checks["workflow_scope"]["sentence"])
+            self.assertIn("has not been read yet", checks["workflow_scope"]["sentence"])
 
     def test_not_signed_in_and_not_visible(self):
         scenario = access_scenario(auth={"rc": 1, "out": "You are not logged into any GitHub "
@@ -818,6 +865,42 @@ class Access(Base):
             self.assertNotIn("There is no branch", checks["base_branch"]["sentence"])
             self.assertIn("could not read octo/one", checks["base_branch"]["sentence"])
             self.assertEqual(checks["base_branch"]["fix"], "ssh -t farm gh auth setup-git")
+
+    def test_setup_git_is_offered_for_a_refused_read_only(self):
+        # `gh auth setup-git` fixes git refusing the repository (128), not a git that hung (124)
+        # or is missing (127): those say what is wrong instead.
+        cases = {124: "did not answer within", 127: "Git is not installed on this farm",
+                 1: "stopped with code 1"}
+        for code, words in cases.items():
+            with self.subTest(code=code), farm(access_scenario(ls=("HEAD",))) as box, \
+                    mock.patch.object(GA, "_ls_remote",
+                                      side_effect=lambda repo, ref, c=code: 0 if ref == "HEAD"
+                                      else c):
+                checks, _ = self.run_access(box, {"repo": "octo/one", "name": "one",
+                                                  "branch": "release/2026"})
+                line = checks["base_branch"]
+                self.assertEqual(line["state"], "fail")
+                self.assertIn(words, line["sentence"])
+                self.assertNotIn("setup-git", line["fix"])
+
+    def test_the_git_login_row_offers_setup_git_for_a_refused_read_only(self):
+        # The git_login row follows the base_branch rule: a git that hung or is missing is not
+        # a login problem, so the checklist must not give two answers for one fault.
+        cases = {124: "did not answer within", 127: "Git is not installed on this farm",
+                 1: "stopped with code 1"}
+        for code, words in cases.items():
+            with self.subTest(code=code), farm(access_scenario(ls=())) as box, \
+                    mock.patch.object(GA, "_ls_remote", side_effect=lambda repo, ref, c=code: c):
+                checks, _ = self.run_access(box, {"repo": "octo/one", "name": "one",
+                                                  "branch": "release/2026"})
+                line = checks["git_login"]
+                self.assertEqual(line["state"], "fail")
+                self.assertIn(words, line["sentence"])
+                self.assertNotIn("setup-git", line["fix"])
+        with farm(access_scenario(ls=())) as box, \
+                mock.patch.object(GA, "_ls_remote", side_effect=lambda repo, ref: 128):
+            checks, _ = self.run_access(box, {"repo": "octo/one", "name": "one"})
+            self.assertEqual(checks["git_login"]["fix"], "ssh -t farm gh auth setup-git")
 
     def folder_case(self, origin, ssh=None):
         extra = {}
@@ -969,6 +1052,58 @@ class ThroughTheServer(Base):
             self.assertNotIn("--branch", started[-1])
             self.assertEqual(len(started), 2)
             self.assertNoTokenAsked(box)
+
+
+class TheDesignRecord(Base):
+    """The design record is where a person looks up what the page may read, so the routes it
+    documents must match what the farm answers, key for key."""
+
+    DOC = HERE.parent / "docs" / "design" / "github-projects.md"
+
+    @staticmethod
+    def top_keys(shape):
+        # `{a, b: {c, d}, e}` -> {a, b, e}: only the outer level, nested objects stay whole.
+        keys, depth, word = set(), 0, ""
+        for char in shape.strip()[1:-1] + ",":
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+            elif char == "," and depth == 0:
+                keys.add(word.split(":")[0].strip())
+                word = ""
+                continue
+            if depth == 0:
+                word += char
+        return keys
+
+    def route_row(self, route):
+        for line in self.DOC.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"| `{route}"):
+                return line
+        self.fail(f"{route} is not in the routes table of {self.DOC.name}")
+
+    def test_the_documented_github_answer_has_every_key_it_sends(self):
+        row = self.route_row("GET /api/github`")
+        shape = row.split("| `", 2)[2].rsplit("` |", 1)[0]
+        with farm():
+            GA.run_pass()
+            sent = set(GA.github_answer())
+        self.assertEqual(self.top_keys(shape), sent)
+        text = self.DOC.read_text(encoding="utf-8")
+        for key in ("checking", "account_read"):
+            self.assertRegex(text, rf"\n`{key}` is ", f"{key} is listed but never explained")
+
+    def test_the_documented_check_answer_is_the_202_it_sends(self):
+        row = self.route_row("POST /api/github/check`")
+        self.assertIn("`202 {ok, checking: true, retry_after, detail}`", row)
+        self.assertIn("409", row)
+        with farm():
+            code, payload = GA.check_request(now=1000.0)
+            payload.pop("_thread").join(10)
+        self.assertEqual(code, 202)
+        self.assertEqual(set(payload), {"ok", "checking", "retry_after", "detail"})
+        self.assertIs(payload["checking"], True)
 
 
 class HouseStyle(unittest.TestCase):

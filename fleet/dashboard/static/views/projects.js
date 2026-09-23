@@ -30,6 +30,13 @@ const QUIET_READ_MS = 60000;
 const CONNECT_POLL_MS = 3000;
 /* The server's own cooldown on POST /api/github/check, used until it names one. */
 const CHECK_QUIET_MS = 60000;
+/* A pass can make twenty or more GitHub calls of up to 20 seconds each, so no wait is long
+   enough to cap it: the page reads until "checking" clears or the reader leaves the Machine tab.
+   The first reads are quick because most passes answer in seconds; later ones come at a pace
+   close to the page's own three second tick, so a long pass adds nothing a person would notice. */
+const CHECK_READ_FAST_MS = 1000;
+const CHECK_READ_SLOW_MS = 5000;
+const CHECK_FAST_READS = 10;
 const SEARCH_DEBOUNCE_MS = 300;
 /* The access checks cost GitHub calls, so Check again rests this long after an answer. */
 const CHECK_AGAIN_REST_MS = 10000;
@@ -232,7 +239,13 @@ function pushedAgo(value) {
   return "pushed just now";
 }
 
-function roleFor(permission) {
+function roleFor(permission, data) {
+  /* A signed-in farm whose account GitHub has not answered about yet is not "not connected":
+     the strip says Connected, so the cell must not contradict it. */
+  if (permission == null && connected(data) && !accountRead(data)) {
+    return ["pause", "Not known", "This account has not been read yet, so its access to this "
+      + "repository is not known yet."];
+  }
   if (permission == null) return ["pause", "Not known", "GitHub is not connected on this farm, so "
     + "this account's access cannot be read."];
   return ROLE[permission] || ["pause", fmt.titleCase(permission), `GitHub says: ${permission}.`];
@@ -257,8 +270,10 @@ async function recheck(context) {
   gh.checkError = "";
   context.paint();
   let running = false;
+  let answeredAt = 0;
   try {
     await apiPost("/api/github/check", {});
+    answeredAt = Date.now();
     gh.checkQuietUntil = Date.now() + CHECK_QUIET_MS;
     running = true;
     toast("GitHub was asked again.");
@@ -269,18 +284,24 @@ async function recheck(context) {
     }
     /* A 409 means a check is already running: its answer is worth waiting for too. */
     running = Boolean(error && error.status === 409);
+    answeredAt = Date.now();
     if (!running) gh.checkError = serverReason(error) || "GitHub was not asked again.";
   } finally {
     /* The farm answers the press at once and checks in the background, with "checking" set
        until that pass answers. The page waits a moment (a read already in flight may carry the
        answer from before the press), then reads until "checking" clears, so the new answer shows
-       in seconds rather than at the next minute's read. The strip stays drawn all along. */
+       in seconds rather than at the next minute's read. The strip stays drawn all along. Only a
+       read that started after the farm answered the press counts: one still in flight from
+       before carries "checking" clear with the old answer, and would end the wait early. */
     if (running) {
-      for (let tries = 0; tries < 25; tries += 1) {
-        await new Promise((resolve) => setTimeout(resolve, tries ? 1000 : 800));
+      for (let tries = 0; ; tries += 1) {
+        const step = !tries ? 800 : tries < CHECK_FAST_READS ? CHECK_READ_FAST_MS : CHECK_READ_SLOW_MS;
+        await new Promise((resolve) => setTimeout(resolve, step));
+        if (context.view !== "machine") break;
         await context.refresh("/api/github");
-        const now = context.res("/api/github").data;
-        if (!now || !now.checking) break;
+        const entry = context.res("/api/github");
+        if (entry.inflight || !(entry.lastTry > answeredAt)) continue;
+        if (entry.state === "error" || !entry.data || !entry.data.checking) break;
       }
     } else {
       await context.refresh("/api/github");
@@ -339,6 +360,12 @@ function officeLine(data) {
   if (office.writable) {
     return stripLine(["done", "Head office"], `This login can write to the head office ${office.repo}.`,
       office.detail || "", "office");
+  }
+  if (!REPO_RE.test(String(office.repo))) {
+    /* A misconfiguration never clears by itself, so it is not drawn as a wait. */
+    return stripLine(["fail", "Head office"], `The head office "${office.repo}" is not written as owner/name, `
+      + "so this login's access to it cannot be checked. Set it as owner/name in hq's config.", office.detail || "",
+    "office");
   }
   if (office.writable === null || office.writable === undefined) {
     return stripLine(["pause", "Not checked"], `Whether this login can write to the head office ${office.repo} `
@@ -1291,7 +1318,7 @@ function removeConfirm(context, rows, name) {
 }
 
 function projectRow(context, row) {
-  const [meaning, word, tip] = roleFor(row.permission);
+  const [meaning, word, tip] = roleFor(row.permission, snapshot(context).data);
   const href = repoHref(row);
   const title = [`${row.name}`, `Ports: ${ports(row)}`, row.path ? `Folder: ${row.path}` : "",
     `Base branch: ${row.base_branch || "none"}`, `Lanes open: ${fmt.num(row.lanes_open, "0")}`]

@@ -243,6 +243,7 @@ _lock = threading.Lock()
 _pass_lock = threading.Lock()
 _hooks = {"office": lambda: "", "registry": lambda: {}}
 _last_check = {"at": 0.0}
+_running = {"passes": 0}
 _watch = {"mtime": None, "next_pass": 0.0}
 
 
@@ -344,8 +345,21 @@ def run_pass(fresh=False):
     left) the paged repository list, the head office when it is not in the list, and one
     `repos/<r>` for each registered repository the list did not have and has no definite answer
     for from the last KNOWN_SECONDS. `fresh` asks those again whatever their age."""
-    with _pass_lock:
-        _pass(fresh)
+    # Counted before the lock is taken, so a Re-check refused with 409 because this pass holds it
+    # always finds "checking" set, and the page waits for this pass's answer too.
+    _busy(1)
+    try:
+        with _pass_lock:
+            _pass(fresh)
+    finally:
+        _busy(-1)
+
+
+def _busy(step):
+    """Count a pass that runs or waits to run; "checking" is true while any does."""
+    with _lock:
+        _running["passes"] = max(0, _running["passes"] + step)
+        _snapshot["checking"] = _running["passes"] > 0
 
 
 def _pass(fresh=False):
@@ -566,15 +580,16 @@ def check_request(now=None):
         return 429, {"error": f"The GitHub connection was checked {int(since)} seconds ago. "
                               "Every agent on this farm shares one GitHub allowance, so it can "
                               f"be checked again in {wait} seconds.", "retry_after": wait}
+    # The page reads "checking" until this pass has answered, so a Re-check shows its own answer
+    # within seconds instead of at the next minute's read. It is not "pending": that one means no
+    # pass has ever answered, and the page draws a loading skeleton for it. Counted before the
+    # lock is tried, like run_pass, so a 409 is only ever answered while "checking" is set.
+    _busy(1)
     if not _pass_lock.acquire(blocking=False):
+        _busy(-1)
         return 409, {"error": "The GitHub connection is being checked right now; the answer "
                               "arrives in a few seconds.", "retry_after": 5}
     _last_check["at"] = now
-    # The page reads "checking" until this pass has answered, so a Re-check shows its own answer
-    # within seconds instead of at the next minute's read. It is not "pending": that one means no
-    # pass has ever answered, and the page draws a loading skeleton for it.
-    with _lock:
-        _snapshot["checking"] = True
 
     def work():
         try:
@@ -582,13 +597,13 @@ def check_request(now=None):
         except Exception:
             pass
         finally:
-            with _lock:
-                _snapshot["checking"] = False
+            # Released before it is uncounted, so no 409 is answered while "checking" is clear.
             _pass_lock.release()
+            _busy(-1)
 
     thread = threading.Thread(target=work, name="github-check", daemon=True)
     thread.start()
-    return 202, {"ok": True, "pending": True, "retry_after": CHECK_COOLDOWN,
+    return 202, {"ok": True, "checking": True, "retry_after": CHECK_COOLDOWN,
                  "detail": "The farm is checking its GitHub connection now.",
                  "_thread": thread}
 
@@ -738,9 +753,21 @@ def access_request(body):
 
     # `ls-remote` of a private repository needs a login, so reaching one is the proof. A public
     # one answers anybody, so there only gh's credential helper says the first push will work.
-    if _ls_remote(repo, "HEAD") != 0:
+    reached = _ls_remote(repo, "HEAD")
+    if reached == 124:
+        checks.append(_check("git_login", "fail", f"Git on this farm did not answer within "
+                                                  f"{GIT_TIMEOUT} seconds, so its login could "
+                                                  "not be checked. Check again in a moment."))
+    elif reached == 127:
+        checks.append(_check("git_login", "fail", "Git is not installed on this farm. Install "
+                                                  "git on the farm."))
+    elif reached == 128:
+        # Only git refusing the repository is a login problem that gh auth setup-git can fix.
         checks.append(_check("git_login", "fail", "Git on this farm cannot read the repository "
                                                   "with your login.", cmds["setup_git"]))
+    elif reached != 0:
+        checks.append(_check("git_login", "fail", f"Git on this farm could not read {repo} (it "
+                                                  f"stopped with code {reached})."))
     elif (info or {}).get("private") or snap["git_uses_login"] is True:
         checks.append(_check("git_login", "ok", "Git on this farm reaches the repository with "
                                                 "your login."))
@@ -751,7 +778,12 @@ def access_request(body):
                              cmds["setup_git"]))
 
     scopes = snap["scopes"]
-    if scopes is None:
+    if scopes is None and not snap.get("account_read"):
+        # No scopes because GitHub never answered about the account, not because of the token.
+        checks.append(_check("workflow_scope", "warn", "The account has not been read yet, so "
+                                                       "its scopes are not known; the first push "
+                                                       "that changes a CI file is the proof."))
+    elif scopes is None:
         checks.append(_check("workflow_scope", "warn", "The scopes cannot be read for this kind "
                                                        "of token; the first push that changes a "
                                                        "CI file is the proof."))
@@ -784,10 +816,24 @@ def access_request(body):
             # git ls-remote --exit-code answers 2 only when it read the repository and found no
             # such ref; anything else means it could not read the repository at all.
             checks.append(_check("base_branch", "fail", f"There is no branch {wanted} in {repo}."))
-        else:
+        elif found == 124:
+            checks.append(_check("base_branch", "fail",
+                                 f"Git on this farm did not answer within {GIT_TIMEOUT} seconds, "
+                                 f"so the branch {wanted} could not be checked. Check again in a "
+                                 "moment."))
+        elif found == 127:
+            checks.append(_check("base_branch", "fail",
+                                 f"Git is not installed on this farm, so the branch {wanted} "
+                                 "could not be checked. Install git on the farm."))
+        elif found == 128:
+            # 128 is git refusing the repository, which a login git does not use explains.
             checks.append(_check("base_branch", "fail",
                                  f"Git on this farm could not read {repo}, so the branch {wanted} "
-                                 "could not be checked.", commands()["setup_git"]))
+                                 "could not be checked.", cmds["setup_git"]))
+        else:
+            checks.append(_check("base_branch", "fail",
+                                 f"Git on this farm could not read {repo} (it stopped with code "
+                                 f"{found}), so the branch {wanted} could not be checked."))
 
     checks.append(_folder_check(repo, name, login))
     return 200, {"repo": repo, "branch": wanted, "name": name, "checks": checks,

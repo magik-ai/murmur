@@ -118,9 +118,13 @@ Read, from a snapshot a background thread keeps (no GET runs a tool):
 
 | Route | Answer |
 |---|---|
-| `GET /api/github` | `{at, stale_since, error, pending, login_state, login, scopes, missing_scopes, git_uses_login, two_identities, office: {repo, writable, detail}, owners, rate_remaining, commands: {login, refresh_scopes, setup_git, switch}}` |
+| `GET /api/github` | `{at, stale_since, error, pending, checking, login_state, login, account_read, scopes, missing_scopes, git_uses_login, two_identities, office: {repo, writable, detail}, owners, rate_remaining, commands: {login, refresh_scopes, setup_git, switch}}` |
 
-`login_state` is `connected`, `not_connected`, `no_gh` or `no_answer`. `missing_scopes` lists
+`login_state` is `connected`, `not_connected`, `no_gh` or `no_answer`. `pending` is true only
+until the first pass has answered.
+`checking` is true while any pass runs or waits to run: a page that pressed Re-check reads until it clears.
+`account_read` is false until GitHub has answered about the signed-in account: what it may do is not known yet.
+`missing_scopes` lists
 only the required scopes (`repo`, `workflow`) the token lacks. `owners` comes from the
 repository list, so there is no separate organizations call.
 
@@ -150,7 +154,7 @@ Write, behind the token and the cross-site refusal:
 
 | Route | Does |
 |---|---|
-| `POST /api/github/check` | one pass now; one at a time, and within 60 seconds of the last it answers 429 with `retry_after`, like the accounts refresh |
+| `POST /api/github/check` | one pass now, in the background: `202 {ok, checking: true, retry_after, detail}`; one at a time (409 while a pass runs), and within 60 seconds of the last it answers 429 with `retry_after`, like the accounts refresh |
 | `POST /api/github/repos {owner?, q?}` | the repositories from the snapshot's list, filtered in memory (owner login, case-insensitive name substring): `{repos: [{full_name, owner, name, private, archived, fork, default_branch, permission, pushed_at, description, registered}], truncated}` |
 | `POST /api/github/branches {repo}` | `{default_branch, protected: [name...]}` from `repos/<r>` and `repos/<r>/branches?protected=true` |
 | `POST /api/github/access {repo, branch, name}` | `{checks: [{id, state: ok|warn|fail, sentence, fix}]}` |

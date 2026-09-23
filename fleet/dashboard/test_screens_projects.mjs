@@ -86,6 +86,8 @@ const STRIPS = [
   ["ready", "no_answer", /did not answer/],
   ["ready", "fine", /scopes cannot be read/],
   ["ready", "office_denied", /cannot write to the head office/],
+  ["ready", "office_name", /is not written as owner\/name/],
+  ["ready", "unread", /What the agents may do is not known yet/],
   ["quiet", "connected", /Last read at/],
   ["empty", "connected", /Import your first repository/],
   ["empty", "not_connected", /Connect GitHub first/],

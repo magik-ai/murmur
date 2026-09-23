@@ -86,6 +86,10 @@ const context = {
   get params() {
     return state.params;
   },
+  /* The tab on screen, so work a view started on its own clock can stop once the reader leaves. */
+  get view() {
+    return state.view;
+  },
   res: (path) => api.resource(path),
   watch(path) {
     if (!state.extra.has(path)) {

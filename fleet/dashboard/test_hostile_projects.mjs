@@ -105,9 +105,11 @@ async function sentSince(from) {
   return (await sent()).slice(from).map((row) => [row.path, row.body]);
 }
 
-async function open({ state = "ready", gh = "", long = false, size = { width: 1440, height: 1000 }, overrides = {} } = {}) {
+async function open({ state = "ready", gh = "", long = false, size = { width: 1440, height: 1000 }, overrides = {}, clock = false } = {}) {
   const context = await browser.newContext({ viewport: size });
   const page = await context.newPage();
+  /* A simulated clock, for waits that run for minutes on the page and must not in the test. */
+  if (clock) await page.clock.install();
   const thrown = [];
   const requests = [];
   page.on("pageerror", (error) => thrown.push(error.message));
@@ -182,6 +184,225 @@ async function openImport(page) {
   await context.close();
 }
 
+/* A 409 means a pass is already running (almost always the five-minute one): the page waits
+   for that pass's answer the same way, instead of reading once and leaving the answer to the next
+   minute's read. The farm now sets "checking" for every pass, so the page sees it on a 409 too. */
+{
+  let phase = "before";
+  let reads = 0;
+  const { page, context, thrown } = await open({ gh: "no_git", overrides: {
+    "/api/github/check": (handler) => handler.fulfill({ status: 409, contentType: "application/json",
+      body: JSON.stringify({ error: "The GitHub connection is being checked right now; the answer arrives in a few seconds.", retry_after: 5 }) }),
+    "/api/github": async (handler) => {
+      if (handler.request().method() !== "GET") return handler.continue();
+      const response = await handler.fetch();
+      const json = await response.json();
+      if (phase === "checking") {
+        reads += 1;
+        json.checking = reads < 3;
+        if (reads >= 3) json.git_uses_login = true;
+      }
+      return handler.fulfill({ response, json });
+    },
+  } });
+  phase = "checking";
+  const started = Date.now();
+  await page.click("#view [data-github-check]");
+  let gone = false;
+  for (let i = 0; i < 24 && !gone; i += 1) {
+    await page.waitForTimeout(500);
+    gone = !/Git on this farm does not use this login/.test(await sectionText(page));
+  }
+  const took = Date.now() - started;
+  check("recheck 409: the answer of the pass already running shows within seconds", gone && took < 9000,
+    `${took} ms, ${reads} reads`);
+  check("recheck 409: nothing threw", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* A pass can outlast 25 seconds (several GitHub calls of up to 20 seconds each), so the page
+   must keep reading while "checking" is set instead of giving up after a count of reads and
+   leaving the old answer until the next minute's read. */
+{
+  let phase = "before";
+  let reads = 0;
+  let pressedAt = 0;
+  const { page, context, thrown } = await open({ gh: "no_git", overrides: {
+    "/api/github/check": (handler) => {
+      pressedAt = Date.now();
+      return handler.fulfill({ status: 409, contentType: "application/json",
+        body: JSON.stringify({ error: "The GitHub connection is being checked right now.", retry_after: 5 }) });
+    },
+    "/api/github": async (handler) => {
+      if (handler.request().method() !== "GET") return handler.continue();
+      const response = await handler.fetch();
+      const json = await response.json();
+      if (phase === "checking") {
+        reads += 1;
+        json.checking = Date.now() - pressedAt < 27000;
+        if (!json.checking) json.git_uses_login = true;
+      }
+      return handler.fulfill({ response, json });
+    },
+  } });
+  phase = "checking";
+  await page.click("#view [data-github-check]");
+  let gone = false;
+  let took = 0;
+  for (let i = 0; i < 80 && !gone; i += 1) {
+    await page.waitForTimeout(500);
+    gone = !/Git on this farm does not use this login/.test(await sectionText(page));
+    took = Date.now() - pressedAt;
+  }
+  check("recheck long pass: the answer shows within seconds of a 27 second pass ending",
+    gone && took > 27000 && took < 33000, `${took} ms, ${reads} reads`);
+  check("recheck long pass: later reads slow down, not one a second for the whole pass",
+    reads > 10 && reads < 22, `${reads} reads`);
+  check("recheck long pass: nothing threw", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* A pass may outlast any fixed wait (twenty missing-repository lookups of up to 20 seconds each),
+   so the page reads for as long as the farm says "checking", then stops. The clock is simulated:
+   a pass of 400 seconds runs in a few seconds, past the five minute cap the page once had. */
+{
+  const GET = "/api/github";
+  let phase = "before";
+  let checking = true;
+  let simulated = 0;
+  const reads = [];
+  const { page, context, thrown } = await open({ gh: "no_git", clock: true, overrides: {
+    "/api/github/check": (handler) => handler.fulfill({ status: 409, contentType: "application/json",
+      body: JSON.stringify({ error: "The GitHub connection is being checked right now.", retry_after: 5 }) }),
+    [GET]: async (handler) => {
+      if (handler.request().method() !== "GET") return handler.continue();
+      const response = await handler.fetch();
+      const json = await response.json();
+      if (phase === "checking") {
+        reads.push(simulated);
+        json.checking = checking;
+        if (!checking) json.git_uses_login = true;
+      }
+      return handler.fulfill({ response, json });
+    },
+  } });
+  /* One simulated second at a time, with a real pause so each read can land before the next. */
+  const advance = async (ms) => {
+    for (let done = 0; done < ms; done += 1000) {
+      await page.clock.runFor(1000);
+      simulated += 1000;
+      await sleep(40);
+    }
+  };
+  const stillOld = async () => /Git on this farm does not use this login/.test(await sectionText(page));
+  phase = "checking";
+  await page.click("#view [data-github-check]");
+  await sleep(200);
+  await advance(400000);
+  const late = reads.filter((at) => at > 305000).length;
+  check("recheck past five minutes: the page still reads while the farm says checking",
+    late >= 10, `${late} reads between 305 and 400 simulated seconds, ${reads.length} in all`);
+  check("recheck past five minutes: the old answer stays while the pass runs", await stillOld());
+  checking = false;
+  const flipped = simulated;
+  let gone = false;
+  while (!gone && simulated - flipped < 8000) {
+    await advance(1000);
+    gone = !(await stillOld());
+  }
+  check("recheck past five minutes: the answer shows within seconds of a 400 second pass ending",
+    gone, `${simulated - flipped} simulated ms after the pass ended`);
+  const settled = reads.length;
+  await advance(30000);
+  check("recheck past five minutes: the reads stop once a read says checking is false",
+    reads.length === settled, `${reads.length - settled} reads in the next 30 simulated seconds`);
+  check("recheck past five minutes: nothing threw", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* The reads serve the strip on the Machine tab only: a reader who leaves it stops them, even
+   while the farm still says "checking". */
+{
+  let simulated = 0;
+  const reads = [];
+  const { page, context, thrown } = await open({ gh: "no_git", clock: true, overrides: {
+    "/api/github/check": (handler) => handler.fulfill({ status: 409, contentType: "application/json",
+      body: JSON.stringify({ error: "The GitHub connection is being checked right now.", retry_after: 5 }) }),
+    "/api/github": async (handler) => {
+      if (handler.request().method() !== "GET") return handler.continue();
+      const response = await handler.fetch();
+      const json = await response.json();
+      reads.push(simulated);
+      json.checking = true;
+      return handler.fulfill({ response, json });
+    },
+  } });
+  const advance = async (ms) => {
+    for (let done = 0; done < ms; done += 1000) {
+      await page.clock.runFor(1000);
+      simulated += 1000;
+      await sleep(40);
+    }
+  };
+  await page.click("#view [data-github-check]");
+  await sleep(200);
+  await advance(20000);
+  const before = reads.length;
+  await page.evaluate(() => { location.hash = "#/queue"; });
+  await sleep(200);
+  const left = simulated;
+  await advance(120000);
+  const after = reads.filter((at) => at > left + 1000).length;
+  check("recheck leave: the page read while the reader stayed on the Machine tab", before >= 5, `${before} reads`);
+  check("recheck leave: no read of the GitHub snapshot after the reader left the Machine tab",
+    after === 0, `${after} reads in 120 simulated seconds after leaving`);
+  check("recheck leave: nothing threw", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* A read already in flight when the farm answers the press was taken before it: its "checking"
+   is clear and its answer is the old one. The page must not take it as the end of the check. */
+{
+  let phase = "before";
+  let reads = 0;
+  const { page, context, thrown } = await open({ gh: "no_git", overrides: {
+    "/api/github/check": (handler) => handler.fulfill({ status: 202, contentType: "application/json",
+      body: JSON.stringify({ ok: true, checking: true, retry_after: 60 }) }),
+    "/api/github": async (handler) => {
+      if (handler.request().method() !== "GET") return handler.continue();
+      const response = await handler.fetch();
+      const json = await response.json();
+      if (phase === "slow") {
+        /* The read from before the press: held until well after the press, then the old answer. */
+        phase = "checking";
+        await sleep(1800);
+        return handler.fulfill({ response, json });
+      }
+      if (phase === "checking") {
+        reads += 1;
+        json.checking = reads < 2;
+        if (reads >= 2) json.git_uses_login = true;
+      }
+      return handler.fulfill({ response, json });
+    },
+  } });
+  phase = "slow";
+  await page.evaluate(() => import("/static/core/api.js").then((api) => { api.refresh("/api/github"); }));
+  await page.waitForTimeout(100);
+  const started = Date.now();
+  await page.click("#view [data-github-check]");
+  let gone = false;
+  for (let i = 0; i < 24 && !gone; i += 1) {
+    await page.waitForTimeout(500);
+    gone = !/Git on this farm does not use this login/.test(await sectionText(page));
+  }
+  const took = Date.now() - started;
+  check("recheck in flight: a read from before the press does not end the wait", gone && took < 9000,
+    `${took} ms, ${reads} reads after the press`);
+  check("recheck in flight: nothing threw", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
 /* ------------------------------------------------ a page that may not write, and one that may */
 
 {
@@ -241,6 +462,7 @@ const STRIP = [
   ["office_denied", /cannot write to the head office your-org\/agent-hq: this account can only read/, /Signed in/],
   ["unread", /Signed in as @octo-farm\. What the agents may do is not known yet/,
     /Whether this login can write to the head office your-org\/agent-hq is not known yet/],
+  ["office_name", /The head office "agent-hq" is not written as owner\/name/, /Set it as owner\/name/],
 ];
 
 for (const [gh, first, second] of STRIP) {
@@ -256,6 +478,16 @@ for (const [gh, first, second] of STRIP) {
       !/@null|@undefined/.test(body) && !/Agents can copy/.test(body) && !/cannot write to the head office/.test(body)
       && !/this kind of token/.test(body),
       body.slice(0, 300));
+    /* The strip says Connected, so no role cell may say GitHub is not connected. */
+    const tips = await page.evaluate(() => [...document.querySelectorAll("#view [data-col='Your access']")]
+      .map((node) => node.title));
+    check("strip unread: every role cell says the account has not been read yet, never not connected",
+      tips.length > 0 && tips.every((tip) => /has not been read yet/.test(tip) && !/not connected/.test(tip)),
+      JSON.stringify(tips));
+  }
+  if (gh === "office_name") {
+    check("strip office_name: a head office not written as owner/name is never drawn as a wait",
+      !/is not known yet/.test(body) && !(await page.$("[data-strip='office'].pause")), body.slice(0, 400));
   }
   if (gh === "missing_repo" || gh === "no_scopes") {
     check(`strip ${gh}: the headline never claims the agents can copy and push`,

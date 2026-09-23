@@ -58,6 +58,9 @@ ok("the page carries the chrome the views expect", () => {
     assert.ok(new RegExp(`\\["${choice}"`).test(shell), `the theme control cannot reach ${choice}`);
   }
   assert.ok(html.includes("murmur"), "the fallback product name is murmur");
+  // A view's own clock (the Re-check reads) stops when the reader leaves its tab, so the
+  // context tells a view which tab is on screen.
+  assert.match(shell, /get view\(\) \{\s*return state\.view;/, "the context names the tab on screen");
 });
 
 /* ------------------------------------------------------------- the files */
