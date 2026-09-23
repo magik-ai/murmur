@@ -491,3 +491,9 @@ keys removed, a fleet-owned machines key (8); a per-farm tag, Adopt instead of F
 through `exec` before `prompt` (11); the account check comes before the account default, and
 the stale text is gone (12).
 
+**Contract amendment after the lane reviews (2026-09-23).** The machine rows of
+`GET /api/machines` also carry `provider_id`; the provider rows of `GET /api/hosts` also carry
+`cli`, `color`, `engines` and `docs`; every entry of a provider's `sizes` carries `default`,
+true on exactly one entry (the preset's default size). The core lane emits them, the server
+passes them through, the page relies on them.
+
