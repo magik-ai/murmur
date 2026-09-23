@@ -41,7 +41,7 @@ print("presets")
 
 _ids = [p["id"] for p in P.PRESETS]
 check("every service the dialog offers has a preset",
-      _ids == ["claude", "codex", "gemini", "qwen", "kimi", "opencode", "aider", "ollama",
+      _ids == ["claude", "codex", "gemini", "qwen", "kimi", "grok", "opencode", "aider", "ollama",
                "custom"], str(_ids))
 
 _fields = ("id", "label", "color", "kind", "engine", "bin", "install_hint", "pull_hint",
@@ -75,6 +75,12 @@ check("Kimi Code names the key plan as the permitted path, not the subscription"
       "forbid non-interactive use" in _by["kimi"]["tos"]
       and "api key" in _by["kimi"]["access"].lower()
       and _by["kimi"]["auth_env"] == "KIMI_API_KEY")
+check("Grok Build is xAI's own CLI, headless on the API key, with the model on the command line",
+      _by["grok"]["install_hint"] == "curl -fsSL https://x.ai/cli/install.sh | bash"
+      and _by["grok"]["run"] == ("{bin} --no-auto-update --always-approve -p {task} -m {variant} "
+                                 "--output-format streaming-json")
+      and _by["grok"]["auth_env"] == "XAI_API_KEY"
+      and _by["grok"]["variants"])
 check("OpenCode runs `opencode run` and installs from its own script",
       _by["opencode"]["run"] == "{bin} run {task}"
       and _by["opencode"]["install_hint"] == "curl -fsSL https://opencode.ai/install | bash"
@@ -554,6 +560,26 @@ with farm() as room:
     _health, _detail, _limits = M.health_check("echoback")
 check("a test request carries the catalog's prompt, not the state's word",
       _health == "ok", f"{_health}: {_detail}")
+
+with farm() as room:
+    _bin = room / "bin"
+    _bin.mkdir()
+    _grok = _bin / "grokfail"
+    # What Grok Build prints for a key or model it cannot use: its own name, "grok models",
+    # carries the letters OK, and a Test that matched letters passed it.
+    _grok.write_text("#!/bin/sh\n"
+                     "echo '{\"type\":\"error\",\"message\":\"Could not set model grok-4.7: "
+                     "unknown model id. Run grok models to see available models.\"}'\n"
+                     "exit 1\n")
+    _grok.chmod(0o755)
+    pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
+    pathlib.Path(M.CONFIG).write_text(
+        '[grokfail]\nlabel = "Grok"\nengine = "generic"\nbin = "%s"\n'
+        'run = "{bin} -p {task}"\nhealth = "Reply with exactly: OK"\nsource = "added"\n'
+        % _grok)
+    _health, _detail, _limits = M.health_check("grokfail")
+check("a failing CLI whose error mentions grok or tokens does not pass the Test",
+      _health == "fail", f"{_health}: {_detail}")
 
 print()
 print("a key never goes through this page")

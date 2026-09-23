@@ -133,6 +133,29 @@ PRESETS = [
         "docs": "https://platform.moonshot.ai/docs",
     },
     {
+        "id": "grok",
+        "label": "Grok Build",
+        "color": "#8A8F98",
+        "kind": "key",
+        "engine": "generic",
+        "bin": "grok",
+        "install_hint": "curl -fsSL https://x.ai/cli/install.sh | bash",
+        "pull_hint": "",
+        "auth_env": "XAI_API_KEY",
+        "run": "{bin} --no-auto-update --always-approve -p {task} -m {variant} "
+               "--output-format streaming-json",
+        "health": HEALTH,
+        "tos": "xAI's own CLI with a documented headless mode (-p, --no-auto-update for "
+               "scripts). Headless it asks before every edit and command and nobody answers, so "
+               "the lane runs with --always-approve, as xAI's own automation examples do; its "
+               "output is one event per line (streaming-json), which the farm reads as it comes. "
+               "A farm wants the API key: the plan sign-in needs `grok login --device-auth` once "
+               "by hand. A community grok-cli also installs a `grok` binary: this preset is xAI's",
+        "access": "an API key in XAI_API_KEY, billed per token",
+        "variants": ["grok-4.7", "grok-build-0.1"],
+        "docs": "https://docs.x.ai/build/cli/headless-scripting",
+    },
+    {
         "id": "opencode",
         "label": "OpenCode",
         "color": "#4C8DF6",

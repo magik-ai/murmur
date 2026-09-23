@@ -1725,7 +1725,7 @@ class ModelPresetsRouteTest(unittest.TestCase):
             status, rows = fetch_json(base, "/api/models/presets")
         self.assertEqual(status, 200)
         self.assertEqual([row["id"] for row in rows],
-                         ["claude", "codex", "gemini", "qwen", "kimi", "opencode", "aider",
+                         ["claude", "codex", "gemini", "qwen", "kimi", "grok", "opencode", "aider",
                           "ollama", "custom"])
         for row in rows:
             for key in ("label", "color", "kind", "access", "tos", "install_hint", "variants",

@@ -182,7 +182,7 @@ keeps the last good values when a pass fails, with `stale_since` saying when the
 | `/api/jobs`, `/api/jobs/<id>` | GET | the long actions in flight, and one action's record |
 | `/api/engines` | GET | the model catalog as the Models table reads it: one row per model with how it is paid for (`access`), one status word (`on`, `off`, `needs_key`, `not_installed`, `failing`), whether this farm added it (`source`), the model it runs (`variant`), and whether its command is on this machine. It starts nothing: running a model is what Test is for |
 | `/api/models` | GET | the catalog as the library sees it, without the machine's own facts |
-| `/api/models/presets` | GET | the services "Add a model" offers (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, OpenCode, Aider, Ollama local, Custom command), each with its install hint, its key variable, its variants, how it is paid for and whether running it headless is permitted. `added` is true for a service this farm already has |
+| `/api/models/presets` | GET | the services "Add a model" offers (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, Grok Build, OpenCode, Aider, Ollama local, Custom command), each with its install hint, its key variable, its variants, how it is paid for and whether running it headless is permitted. `added` is true for a service this farm already has |
 | `/api/power/preview?action=` | GET | what throttle, drain or resume will do, with the lanes a drain would stop, by name |
 | `/api/mail/boxes` | GET | the head office's mailboxes, with a count for the last day |
 | `/api/mail/thread?box&since` | GET | one mailbox's messages, newest last |

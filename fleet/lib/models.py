@@ -157,7 +157,10 @@ def health_check(mid):
             r = subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True,
                                timeout=90, env=env, cwd=room)
         out = (r.stdout or "") + " " + (r.stderr or "")
-        if "OK" in (r.stdout or "").upper():
+        # OK as a word, not as letters: "grok", "tokens" and "Run 'grok models'" in a failing
+        # CLI's own error all contain them, and a Test that cannot fail routes lanes to a
+        # model whose key is wrong.
+        if re.search(r"\bOK\b", r.stdout or "", re.IGNORECASE):
             limits = _sniff_limits(out)
             return "ok", "test request succeeded", limits
         low = out.lower()

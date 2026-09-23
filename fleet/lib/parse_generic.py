@@ -170,7 +170,11 @@ for line in sys.stdin:
         o = json.loads(line)
         _saw_event = True
         if isinstance(o, dict):
-            for k in ("text", "message", "content", "delta", "command", "output"):
+            # A closing bookkeeping event carries no words: keep the last thing the agent said.
+            if o.get("type") == "end":
+                continue
+            # Grok Build's streaming-json puts an event's text under "data".
+            for k in ("text", "message", "content", "delta", "command", "output", "data"):
                 v = o.get(k)
                 if isinstance(v, str) and v.strip():
                     act = v.strip()

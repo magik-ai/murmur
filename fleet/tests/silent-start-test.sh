@@ -38,6 +38,22 @@ case "$out" in
   *) no "parse_codex.py: unexpected" "$out";;
 esac
 
+echo "=== a generic engine that streams one event per line, its text under data ==="
+# Grok Build's streaming-json. Its plain json is ONE pretty-printed object over many lines, which
+# no single line parses, so every Grok lane read as "never started": the preset streams instead.
+GROK_EVENTS='{"type":"text","data":"Reading the repository"}
+{"type":"text","data":"Opened the pull request"}
+{"type":"end","stopReason":"end_turn","usage":{"input_tokens":1200,"output_tokens":80}}
+'
+out=$(run_parser parse_generic.py worked-grok "$GROK_EVENTS")
+case "$out" in
+  ended*|pr_open*) ok "parse_generic.py: a streaming lane settles to $(echo "$out" | cut -d' ' -f1)";;
+  *) no "parse_generic.py: a streaming lane must not be failed" "$out";;
+esac
+act=$(python3 -c "import json;print(json.load(open('$B/state/worked-grok.json')).get('last_activity'))")
+[ "$act" = "Opened the pull request" ] && ok "parse_generic.py: the card shows the event's text, not its JSON" \
+  || no "parse_generic.py: last activity should be the text under data" "$act"
+
 echo
 echo "RESULT pass=$P fail=$F"
 rm -rf "$B"
