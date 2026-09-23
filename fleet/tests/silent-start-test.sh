@@ -54,6 +54,54 @@ act=$(python3 -c "import json;print(json.load(open('$B/state/worked-grok.json'))
 [ "$act" = "Opened the pull request" ] && ok "parse_generic.py: the card shows the event's text, not its JSON" \
   || no "parse_generic.py: last activity should be the text under data" "$act"
 
+echo "=== bookkeeping after the words: the card keeps the words ==="
+USAGE_EVENTS='{"type":"text","data":"Opened the pull request"}
+{"type":"usage","messageId":"resp_1","usage":{"input_tokens":1200,"output_tokens":80}}
+{"type":"end","stopReason":"end_turn"}
+'
+run_parser parse_generic.py grok-usage "$USAGE_EVENTS" >/dev/null
+act=$(python3 -c "import json;print(json.load(open('$B/state/grok-usage.json')).get('last_activity'))")
+[ "$act" = "Opened the pull request" ] && ok "parse_generic.py: a usage line does not replace the agent's words" \
+  || no "parse_generic.py: last activity should stay on the words" "$act"
+
+echo "=== a stream-json CLI that nests its words in a message ==="
+NESTED='{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the tests"}]}}
+'
+run_parser parse_generic.py qwen-nested "$NESTED" >/dev/null
+act=$(python3 -c "import json;print(json.load(open('$B/state/qwen-nested.json')).get('last_activity'))")
+[ "$act" = "Reading the tests" ] && ok "parse_generic.py: words nested in a message reach the card" \
+  || no "parse_generic.py: nested words should reach the card" "$act"
+
+echo "=== an engine that answers only with an error did not start ==="
+ERR_ONLY='{"type":"error","message":"Could not set model grok-4.7: unknown model id"}
+'
+out=$(run_parser parse_generic.py grok-error "$ERR_ONLY")
+case "$out" in
+  failed*"could not start"*) ok "parse_generic.py: an error-only launch is failed and says why";;
+  *) no "parse_generic.py: an error-only launch must be failed" "$out";;
+esac
+
+echo "=== an error event, then a pull request: the lane delivered ==="
+mkdir -p "$B/fakebin"
+cat > "$B/fakebin/gh" <<'GH'
+#!/bin/sh
+echo '[{"url":"https://github.com/o/r/pull/7"}]'
+GH
+chmod +x "$B/fakebin/gh"
+cat > "$B/state/err-then-pr.json" <<JSON
+{"slug":"err-then-pr","project":"p","lane":"err-then-pr","engine":"generic","repo":"o/r",
+ "worktree":"$B","branch":"fleet/err-then-pr","status":"starting","started_at":1}
+JSON
+printf '%s' '{"type":"error","message":"429, retrying in 2s"}
+{"type":"tool_call","name":"bash","input":{"cmd":"gh pr create"}}
+{"type":"end"}
+' | PATH="$B/fakebin:$PATH" python3 "$(dirname $0)/../lib/parse_generic.py" err-then-pr >/dev/null 2>&1
+out=$(python3 -c "import json;d=json.load(open('$B/state/err-then-pr.json'));print(d.get('status'),'|',d.get('pr_url'))")
+case "$out" in
+  "pr_open | https://github.com/o/r/pull/7") ok "parse_generic.py: an error event does not bury the pull request the lane opened";;
+  *) no "parse_generic.py: a lane with a pull request must be pr_open" "$out";;
+esac
+
 echo
 echo "RESULT pass=$P fail=$F"
 rm -rf "$B"

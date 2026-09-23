@@ -491,6 +491,25 @@ class DashboardServerTest(unittest.TestCase):
                     self.assertIsNone(dashboard.ci_queue()["daemon_alive"])
 
 
+class StreamTextTest(unittest.TestCase):
+    """What a lane's log shows for one event of its stream."""
+
+    def test_a_generic_engine_shows_its_words_not_its_event_type(self):
+        # Grok Build's streaming-json keeps the words under "data"; the log used to print
+        # "[text]" for every one of them.
+        self.assertEqual(dashboard._stream_text({"type": "text", "data": "Opened the pull request"}),
+                         "Opened the pull request")
+
+    def test_an_error_event_shows_its_sentence(self):
+        self.assertEqual(dashboard._stream_text({"type": "error", "message": "unknown model id"}),
+                         "error: unknown model id")
+
+    def test_a_claude_event_reads_as_before(self):
+        event = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Reading"}]}}
+        self.assertEqual(dashboard._stream_text(event), "Reading")
+        self.assertEqual(dashboard._stream_text({"type": "result", "result": "Done"}), "Done")
+
+
 class PageBuildTest(unittest.TestCase):
     """The build number a tab compares with the one it was loaded from.
 

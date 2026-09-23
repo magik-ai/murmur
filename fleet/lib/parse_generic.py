@@ -155,11 +155,27 @@ def find_pr(state):
         return False, None
 
 
+def words_of(event):
+    """The agent's own words in one JSON event, or None when it carries none. Flat keys first
+    (Grok Build keeps its text under "data"), then a message's content blocks, the shape Qwen
+    Code and other stream-json CLIs share with Claude Code."""
+    for k in ("text", "message", "content", "delta", "command", "output", "data", "result"):
+        v = event.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    parts = [b.get("text", "").strip() for b in message.get("content") or []
+             if isinstance(b, dict) and b.get("type") == "text" and (b.get("text") or "").strip()]
+    return " ".join(parts) or None
+
+
 s = load()
 s["status"] = "running"
 save(s)
 
 _saw_event = False
+_saw_words = False
+_last_error = ""
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -170,17 +186,22 @@ for line in sys.stdin:
         o = json.loads(line)
         _saw_event = True
         if isinstance(o, dict):
-            # A closing bookkeeping event carries no words: keep the last thing the agent said.
-            if o.get("type") == "end":
+            if o.get("type") == "error":
+                said = o.get("message") or o.get("error") or line
+                if isinstance(said, dict):
+                    said = said.get("message") or json.dumps(said)
+                _last_error = str(said).strip()
+            # Only an event that carries words moves the card. Bookkeeping events (Grok's usage
+            # and end lines, a tool list) would otherwise leave the card on raw JSON.
+            act = words_of(o)
+            if act is None:
                 continue
-            # Grok Build's streaming-json puts an event's text under "data".
-            for k in ("text", "message", "content", "delta", "command", "output", "data"):
-                v = o.get(k)
-                if isinstance(v, str) and v.strip():
-                    act = v.strip()
-                    break
+            if o.get("type") != "error":
+                _saw_words = True
+        else:
+            _saw_words = True
     except Exception:
-        pass
+        _saw_words = True
     s["last_activity"] = act[:120]
     save(s)
 
@@ -193,9 +214,20 @@ if not _saw_event and s.get("status") in ("starting", "running"):
                         or "the engine exited before its first turn - the lane never started")
     save(s)
 elif s.get("status") in ("starting", "running"):
+    # The pull request is looked up first: a lane that opened one delivered, whatever else its
+    # stream said (a retried rate limit is an error event too).
     pr_known, pr = find_pr(s)
     s["pr_url"] = pr
-    s["status"] = "pr_open" if pr else "ended"
+    if pr:
+        s["status"] = "pr_open"
+    elif _last_error and not _saw_words:
+        # The engine answered, but only to say it could not start: a bad key, an unknown model,
+        # a sign-in it does not have. That is a failed launch, not a lane that ended quietly.
+        s["status"] = "failed"
+        s["result_text"] = (s.get("result_text")
+                            or ("the engine could not start: " + _last_error)[:240])
+    else:
+        s["status"] = "ended"
     if not pr_known:
         s["pr_lookup"] = "unknown"
 save(s)

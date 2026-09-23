@@ -2525,6 +2525,17 @@ def _stream_text(event):
     if kind == "result":
         text = (event.get("result") or "").strip()
         return text or "run finished"
+    if kind == "error":
+        said = event.get("message") or event.get("error") or ""
+        if isinstance(said, dict):
+            said = said.get("message") or ""
+        if isinstance(said, str) and said.strip():
+            return "error: " + said.strip()
+    # A generic engine's own words (Grok Build's streaming-json keeps them under "data").
+    for key in ("data", "text"):
+        value = event.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     inner = event.get("event") if isinstance(event.get("event"), dict) else {}
     if inner.get("type") == "content_block_start":
         block = inner.get("content_block") or {}
