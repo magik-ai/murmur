@@ -116,3 +116,21 @@ export function titleCase(value) {
   const text = String(value ?? "").replace(/[_-]+/g, " ").trim();
   return text ? text[0].toUpperCase() + text.slice(1) : "";
 }
+
+/* Whether an account has room, in the same words on every tab. Out of room means a window every
+   model shares (the session or the week) is used up, or the vendor says the limit is reached. A
+   window scoped to one model (Fable) at 100 percent leaves every other model running, so it is
+   named on its own: "Fable used up", never "Out of room" (owner, 2026-09-23: the Machine tab
+   said logged in while the Board said out of room, for an account that only had Fable spent). */
+export function room(account) {
+  const one = account || {};
+  const full = (value) => value != null && Number(value) >= 100;
+  if (one.limit_reached || full(one.session) || full(one.weekly)) {
+    return { meaning: "fail", word: "Out of room" };
+  }
+  const spent = (Array.isArray(one.scoped) ? one.scoped : [])
+    .filter((window) => full(window.percent)).map((window) => window.label || "a model");
+  if (spent.length) return { meaning: "wait", word: `${spent.join(", ")} used up` };
+  return null;
+}
+

@@ -21,7 +21,7 @@ const machineSoon = {
   needs: [],
   render: () => emptyState({
     title: "The machine controls are coming from the machine lane",
-    body: "Power, services, accounts, engines, projects, health and settings live here. "
+    body: "Power, services, accounts, models and projects live here. "
       + "Until that file is installed, use the command line for them.",
     command: "fleet status",
   }),

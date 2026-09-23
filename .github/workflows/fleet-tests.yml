@@ -3,9 +3,9 @@ name: fleet tests
 on:
   push:
     branches: [main]
-    paths: ["fleet/**", ".github/workflows/fleet-tests.yml"]
+    paths: ["fleet/**", "farm/**", ".github/workflows/fleet-tests.yml"]
   pull_request:
-    paths: ["fleet/**", ".github/workflows/fleet-tests.yml"]
+    paths: ["fleet/**", "farm/**", ".github/workflows/fleet-tests.yml"]
 
 jobs:
   policy:

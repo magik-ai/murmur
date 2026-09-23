@@ -20,6 +20,8 @@
 #   --yes            no questions, take every default (a single machine, dashboard on loopback)
 #   --org NAME       GitHub owner (user or org) that holds the murmur repository; default magik-ai
 #   --no-tailscale   never offer to install Tailscale
+#   --remote         this box is driven from your laptop: the dashboard stays on loopback, no
+#                    Tailscale is offered, and the last line is the ssh tunnel that reaches it
 #   -h, --help       this text
 #
 # Windows: install WSL2 with Ubuntu first (wsl --install), then run this inside it.
@@ -29,12 +31,14 @@ set -euo pipefail
 ORG="magik-ai"
 YES=0
 OFFER_TAILSCALE=1
+REMOTE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1;;
     --org) ORG="$2"; shift;;
     --no-tailscale) OFFER_TAILSCALE=0;;
-    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    --remote) REMOTE=1; OFFER_TAILSCALE=0;;
+    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) echo "unknown flag: $1 (see --help)" >&2; exit 2;;
   esac
   shift
@@ -44,17 +48,49 @@ say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
 die()  { printf '\nstop: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+# A terminal a person can answer on. /dev/tty exists on every box; it opens only when this run
+# has a controlling terminal (a person at ssh -t, or at curl | bash), never in a headless run.
+have_tty() { (: </dev/tty) 2>/dev/null; }
 
 # Questions read from the terminal even when the script itself arrives on stdin (curl | bash).
 ask() { # ask VAR "prompt" "default"
   local var="$1" prompt="$2" default="$3" answer=""
-  if [ "$YES" = 1 ] || [ ! -e /dev/tty ]; then
+  if [ "$YES" = 1 ] || ! have_tty; then
     printf -v "$var" '%s' "$default"; note "$prompt: $default (default)"; return
   fi
   printf '  %s [%s]: ' "$prompt" "$default" > /dev/tty
   IFS= read -r answer < /dev/tty || answer=""
   printf -v "$var" '%s' "${answer:-$default}"
 }
+
+# A no-sudo user (the `farm` user a droplet's cloud-init makes) must not discover halfway
+# through step 1 that apt needs a password it will never be given. This runs before anything on
+# this box changes: it names every package that is missing and the command an administrator
+# runs, and stops.
+preflight() {
+  have dpkg || return 0            # not a Debian family box; step 1 says that in its own words
+  local pkg missing_now=() apt_now=()
+  for pkg in git tmux python3 curl ca-certificates; do
+    dpkg -s "$pkg" >/dev/null 2>&1 || { missing_now+=("$pkg"); apt_now+=("$pkg"); }
+  done
+  have gh || missing_now+=("gh")
+  if [ ${#missing_now[@]} -eq 0 ]; then return 0; fi
+  if [ "$(id -u)" = 0 ]; then return 0; fi
+  if sudo -n true >/dev/null 2>&1; then return 0; fi
+  # An administrator with a password (the usual Ubuntu user) fails `sudo -n true` too, and step 1
+  # simply asks them for it on the terminal. Stop only when nobody could answer that prompt.
+  if have_tty && id -nG 2>/dev/null | grep -qEw 'sudo|admin|wheel'; then
+    return 0
+  fi
+  local gh_note=""
+  case " ${missing_now[*]} " in *" gh "*)
+    gh_note=" (gh comes from GitHub's own apt repository: https://github.com/cli/cli/blob/trunk/docs/install_linux.md)";;
+  esac
+  local apt_line="sudo apt-get update && sudo apt-get install -y ${apt_now[*]}"
+  [ ${#apt_now[@]} -gt 0 ] || apt_line="the command for gh below"
+  die "this box is missing ${missing_now[*]} and this user cannot install anything (not root, no passwordless sudo, and not a member of sudo, admin or wheel at a terminal that can type the password), so nothing was changed: an administrator runs: $apt_line$gh_note"
+}
+preflight
 
 # ---------------------------------------------------------------------------------------------
 say "1/5  System"
@@ -119,7 +155,7 @@ have claude && note "claude $(claude --version 2>/dev/null | head -1)"
 # ---------------------------------------------------------------------------------------------
 say "3/5  The fleet and the head office CLI"
 if ! gh auth status >/dev/null 2>&1; then
-  if [ "$YES" = 1 ] || [ ! -e /dev/tty ]; then
+  if [ "$YES" = 1 ] || ! have_tty; then
     die "gh is not logged in. Run: gh auth login   (choose HTTPS, let it configure git), then rerun this script"
   fi
   note "GitHub login: choose GitHub.com, HTTPS, and let it set up git credentials"
@@ -144,7 +180,12 @@ HQ_SRC="$HOME/work/murmur/hq"
 [ -f "$FLEET_SRC/install.sh" ] && [ -f "$HQ_SRC/bin/hq" ] || die "the murmur clone has no fleet/ or hq/ directory; is $ORG/murmur the right repository?"
 
 single="yes"
-ask single "Is this the only machine, with you working on it directly? (yes = dashboard stays local)" "yes"
+if [ "$REMOTE" = 1 ]; then
+  single="no"
+  note "remote install: this box is driven from your laptop, so the dashboard stays where it is (loopback) and Tailscale is not offered"
+else
+  ask single "Is this the only machine, with you working on it directly? (yes = dashboard stays local)" "yes"
+fi
 if [ "$single" = "yes" ] || [ "$single" = "y" ]; then
   (cd "$FLEET_SRC" && ./install.sh --local >/tmp/murmur-fleet-install.log 2>&1) || { tail -20 /tmp/murmur-fleet-install.log; die "fleet install failed (log above)"; }
 else
@@ -236,3 +277,16 @@ cat <<EOF
   Upgrade:    git -C ~/work/murmur pull    (both tools run from that clone)
   Read next:  ~/work/murmur/docs/12-the-machine.md
 EOF
+
+if [ "$REMOTE" = 1 ]; then
+  # The address the person actually reached this box at, which is what their tunnel needs.
+  tunnel_host=$(printf '%s' "${SSH_CONNECTION:-}" | awk '{print $3}')
+  [ -n "$tunnel_host" ] || tunnel_host=$(hostname -I 2>/dev/null | awk '{print $1}')
+  [ -n "$tunnel_host" ] || tunnel_host="$farm_alias"
+  cat <<EOF
+
+  The dashboard listens on loopback only. From your laptop:
+       ssh -N -L 7878:127.0.0.1:7878 $USER@$tunnel_host
+     then open http://127.0.0.1:7878 and paste what  fleet dashboard token  prints here.
+EOF
+fi

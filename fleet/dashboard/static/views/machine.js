@@ -10,6 +10,10 @@ import {
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
 import { apiPost, access, list, serverReason } from "../core/api.js";
+/* Hosting is a section of this tab and a file of its own: it shares the helpers below and
+   nothing else. The two files import each other, which ES modules allow because neither calls
+   the other while it is being evaluated. */
+import { hostingSection } from "./hosting.js";
 
 /* The four power settings, in plain words, with what each does to the machine's share. */
 const POWER = [
@@ -89,7 +93,7 @@ function labelFor(id) {
   return found ? found[1] : id || "unknown";
 }
 
-function sectionHead(title, note, ...extra) {
+export function sectionHead(title, note, ...extra) {
   return h("div", { class: "section-head" },
     h("h2", null, title),
     note ? h("span", { class: "muted" }, note) : null,
@@ -525,7 +529,7 @@ async function startAdd(context) {
   }
 }
 
-async function copyCommand(command) {
+export async function copyCommand(command) {
   try {
     await navigator.clipboard.writeText(String(command || ""));
     toast("Copied. Paste it in a terminal on your own machine.");
@@ -707,7 +711,9 @@ function accountsSection(context) {
             h("th", null, "Last read"),
             h("th", null, ""))),
           h("tbody", null, list(data.accounts).map((account) => h("tr", { key: account.name },
-            h("td", null, account.label || account.name),
+            h("td", { title: `${account.email || account.label || account.name}, folder ${account.name}` },
+              h("span", { class: "m-account" }, account.label || account.name,
+                fmt.room(account) ? pill(fmt.room(account).meaning, fmt.room(account).word, "") : null)),
             h("td", null, account.engine || "unknown"),
             h("td", null, loginCell(states, account.name)),
             h("td", { class: "m-windows" }, windowBars(account)),
@@ -1103,7 +1109,7 @@ function choosePreset(context, preset) {
   context.paint();
 }
 
-function stepHead(number, title, note) {
+export function stepHead(number, title, note) {
   return h("div", { class: "m-dialog-step", key: `head${number}` },
     h("div", { class: "m-step-no" }, String(number)),
     h("div", null,
@@ -1111,7 +1117,7 @@ function stepHead(number, title, note) {
       note ? h("p", { class: "muted" }, note) : null));
 }
 
-function commandRow(command, mark, key) {
+export function commandRow(command, mark, key) {
   return h("div", { class: "m-cmd-row", key: key || `cmd:${mark}` },
     h("code", { class: "cmd", [`data-${mark}`]: "" }, command),
     h("button", {
@@ -1254,7 +1260,7 @@ function nameStep(context, preset) {
 /* Step three: how this one gets its credential. Three services, three different answers, and
    in none of them does a key pass through this page. */
 /* The farm's own ssh name, from the server; "farm" only on a server too old to send one. */
-function farmAlias(context) {
+export function farmAlias(context) {
   const config = context.res("/api/config").data || {};
   return String(config.farm_alias || "").trim() || "farm";
 }
@@ -1813,45 +1819,6 @@ function healthSection(context) {
     })));
 }
 
-/* ------------------------------------------------------------------ settings */
-
-function settingRow(label, value, file) {
-  return [
-    h("dt", { key: `dt:${label}` }, label),
-    h("dd", { key: `dd:${label}` },
-      h("div", null, value),
-      file ? h("div", { class: "muted mono" }, file) : null),
-  ];
-}
-
-function settingsSection(context) {
-  const config = context.config || {};
-  const settings = config.settings || {};
-  const sweep = context.watch("/api/sweep").data || {};
-  const token = settings.token || {};
-  const known = (name, fallback) => (settings[name] && settings[name].value) || fallback;
-  const file = (name) => (settings[name] && settings[name].file) || "not reported by this server";
-  return h("section", { class: "section", key: "settings" },
-    sectionHead("Settings", "Read here, written where they live. This page never writes them."),
-    card({ class: "card-pad", key: "settings" },
-      h("dl", { class: "kv m-settings" },
-        settingRow("Product name", known("product_name", config.title || "murmur"), file("product_name")),
-        settingRow("Mail identity", known("mail_identity", config.hq_agent || "dashboard"), file("mail_identity")),
-        settingRow("Bind", known("bind", access.loopback ? "127.0.0.1" : "not reported"), file("bind")),
-        settingRow("Port", known("port", "not reported"), file("port")),
-        settingRow("Write token", token.present === false
-          ? "Absent, so this page can only read."
-          : token.present === true ? "Present. Its value is never shown here."
-            : access.writable ? "This page holds one." : "This page holds none.",
-        token.file || "~/.fleet/dash-token"),
-        settingRow("Sweep", known("sweep_interval", sweep.enabled === false
-          ? "Off on this machine" : "On"), file("sweep_interval")),
-        settingRow("Respawn limits", known("respawn_limits", "not reported"), file("respawn_limits"))),
-      h("p", { class: "muted", key: "tokencmd" }, "To mint a token and pick it up:"),
-      h("code", { class: "cmd", key: "cmd1" }, "fleet dashboard token"),
-      h("code", { class: "cmd", key: "cmd2" }, "fleet dashboard restart")));
-}
-
 /* --------------------------------------------------------------------- the view */
 
 export default {
@@ -1860,6 +1827,7 @@ export default {
   needs: [
     "/api/mode", "/api/services", "/api/accounts", "/api/accounts/login-state",
     "/api/engines", "/api/projects", "/api/projects/next-port", "/api/health", "/api/metrics",
+    "/api/hosts", "/api/machines",
   ],
   badge(context) {
     /* The count points at the Health section, so it is drawn only when that section is. */
@@ -1871,13 +1839,13 @@ export default {
     return [
       powerSection(context),
       servicesSection(context),
+      hostingSection(context),
       accountsSection(context),
       modelsSection(context),
       projectsSection(context),
       /* Off unless the farm sets FLEET_DASH_HEALTH=on: its tiles read hardware sensors most
          machines do not have. */
       context.features.health_panel ? healthSection(context) : null,
-      settingsSection(context),
     ];
   },
 };

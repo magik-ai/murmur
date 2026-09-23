@@ -863,6 +863,9 @@ for (const [hash, name] of [["#/mail", "mail"], ["#/queue", "queue"], ["#/machin
             stale_error: "This account has no login on the farm yet." },
           { name: "farm-two", label: "farm two", engine: "claude", read_at: Date.now() / 1000 - 900,
             session: 100, weekly: 71, scoped: [], limit_reached: true },
+          { name: "farm-three", label: "farm three", email: "farm.three@example.com", engine: "claude",
+            read_at: Date.now() / 1000 - 60, session: 2, weekly: 88,
+            scoped: [{ label: "Fable", percent: 100, active: true, resets: "2026-09-26T14:00:00Z" }] },
         ],
         errors: {},
       }),
@@ -877,6 +880,18 @@ for (const [hash, name] of [["#/mail", "mail"], ["#/queue", "queue"], ["#/machin
     /No window has reported a number yet/.test(body), body.replace(/\s+/g, " ").slice(0, 160));
   check("a subscription with nothing left is red and says so",
     red && red.out && /Out of room/.test(red.text), JSON.stringify(red));
+  const fable = await page.evaluate(() => {
+    const card = document.querySelector('[data-account="farm-three"]');
+    return card ? { out: card.classList.contains("out"), text: card.innerText.replace(/\s+/g, " "),
+      bars: card.querySelectorAll(".limit").length, title: card.getAttribute("title") || "" } : null;
+  });
+  check("an account with only Fable spent is not out of room, and says what is spent",
+    fable && !fable.out && /Fable used up/.test(fable.text) && !/Out of room/.test(fable.text),
+    JSON.stringify(fable));
+  check("the card shows every window, the Fable one included",
+    fable && fable.bars === 3 && /Fable/.test(fable.text), JSON.stringify(fable));
+  check("the card says whose login it is",
+    fable && /farm\.three@example\.com/.test(fable.title), JSON.stringify(fable));
   check("no card prints an exception or a path",
     !/Error:|Errno|\/private\/|\/home\//.test(body), body.slice(0, 200));
   check("a subscription card with nothing to report breaks nothing", thrown.length === 0, thrown[0]);

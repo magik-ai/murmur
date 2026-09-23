@@ -285,7 +285,7 @@ _rollback_spawn() { # called only by cmd_spawn's EXIT trap
 
 cmd_spawn() {
   local project="" lane="" model="" issue="" task="" brieffile="" force=0 by="" icon="" color="" engine="claude" effort="" paper=0
-  local restart="" donewhen="" issues="" after="" account="" account_dir=""
+  local restart="" donewhen="" issues="" after="" account="" account_dir="" runner="" runner_timeout=""
   while [ $# -gt 0 ]; do case "$1" in
     --project) project="$2"; shift 2;; --lane) lane="$2"; shift 2;;
     --engine) engine="$2"; shift 2;;
@@ -299,8 +299,10 @@ cmd_spawn() {
     --issues) issues="$2"; shift 2;;
     --after) after="$2"; shift 2;;         # gate: defer until <lane>[:cond] delivers
     --account) account="$2"; shift 2;;     # claude subscription account (name or `auto`)
+    --runner) runner="$2"; shift 2;;       # run this lane in a provider sandbox, not here
+    --runner-timeout) runner_timeout="$2"; shift 2;;  # that sandbox lane's wall clock (8h)
     --force) force=1; shift;; *) echo "unknown $1"; return 1;; esac; done
-  [ -n "$project" ] && [ -n "$lane" ] || { echo "usage: fleet spawn --project X --lane L [--engine claude|codex] [--model M] [--effort low|medium|high|xhigh] [--paper] [--restart until-pr|until-merged|until-file:<p>] [--done-when <contract>] [--issues a,b,c] [--after <lane>[:pr-merged|pr-open]] (--issue N | --task '..' | --brief-file f)"; return 1; }
+  [ -n "$project" ] && [ -n "$lane" ] || { echo "usage: fleet spawn --project X --lane L [--engine claude|codex] [--model M] [--effort low|medium|high|xhigh] [--paper] [--restart until-pr|until-merged|until-file:<p>] [--done-when <contract>] [--issues a,b,c] [--after <lane>[:pr-merged|pr-open]] [--runner railway|vercel|do-agents [--runner-timeout 8h]] (--issue N | --task '..' | --brief-file f)"; return 1; }
   # A policy file that does not parse must not read as "no policy". Every gate below would then
   # take its own default in silence: no head office, the fallback commit identity, and limits
   # that are not the ones the operator wrote. Refuse the spawn, in one line, before anything is
@@ -318,6 +320,48 @@ cmd_spawn() {
          echo "  (see the catalog: fleet models)"; return 1
        fi ;;
   esac
+  # A runner lane spends the subscription its stored CLAUDE_CODE_OAUTH_TOKEN belongs to, and
+  # the Accounts windows on this farm cannot see that usage. So every runner check happens
+  # BEFORE the account default is resolved, and the account resolution is then skipped.
+  local runner_clone="" runner_output="" runner_timeout_s="${FLEET_RUNNER_TIMEOUT_S:-28800}"
+  if [ -n "$runner_timeout" ] && [ -z "$runner" ]; then
+    echo "REFUSING to spawn: --runner-timeout is the wall clock of a sandbox lane, and this lane has no --runner."
+    return 1
+  fi
+  if [ -n "$runner_timeout" ]; then
+    # 90s, 45m, 8h, 1d or a bare number of seconds. The unit keeps the wall clock per lane:
+    # a hung agent holds its sandbox (and its bill) until this runs out.
+    if [[ "$runner_timeout" =~ ^([0-9]{1,6})([smhd]?)$ ]] && (( 10#${BASH_REMATCH[1]} > 0 )); then
+      local _amount=$(( 10#${BASH_REMATCH[1]} ))
+      case "${BASH_REMATCH[2]}" in
+        h) runner_timeout_s=$(( _amount * 3600 ));;
+        m) runner_timeout_s=$(( _amount * 60 ));;
+        d) runner_timeout_s=$(( _amount * 86400 ));;
+        *) runner_timeout_s=$_amount;;
+      esac
+    else
+      echo "REFUSING to spawn: --runner-timeout '$runner_timeout' is not a duration (like 90m, 8h or 1d)."
+      return 1
+    fi
+  fi
+  if [ -n "$runner" ]; then
+    if [ "$engine" != "claude" ]; then
+      echo "REFUSING to spawn: only the claude engine runs in a remote sandbox, and this lane asks for '$engine' (codex needs its login file copied into the sandbox, which is a follow-up)."
+      return 1
+    fi
+    if [ -n "$account" ]; then
+      echo "REFUSING to spawn: a runner lane spends the subscription its stored CLAUDE_CODE_OAUTH_TOKEN belongs to, so --account cannot pick one; drop --account."
+      return 1
+    fi
+    if ! systemctl --user is-enabled fleet-sweep.timer >/dev/null 2>&1; then
+      echo "REFUSING to spawn: the sweep timer is off, so nothing would reap the sandbox if this lane died hard (turn it on: fleet autosweep on)."
+      return 1
+    fi
+    local _runner_answer
+    _runner_answer="$("$PY" "$FLEET_HOME/lib/runners/cli.py" preflight "$runner")" || return 1
+    IFS=$'\t' read -r runner_clone runner_output <<< "$_runner_answer"
+  fi
+
   # Claude tiers by MODEL (opus/sonnet/haiku). Codex tiers by REASONING EFFORT on one model.
   if [ "$engine" = "claude" ]; then
     [ -z "$model" ] && model="sonnet"
@@ -332,8 +376,10 @@ cmd_spawn() {
     # default account, the pool shared with the owner's own sessions, and died on its first
     # step once that account hit its weekly limit. A name pins that account.
     # Resolution fails loudly when the account has no credentials or nothing has headroom.
-    [ -z "$account" ] && account="auto"
-    account_dir="$("$PY" "$FLEET_HOME/lib/claude_accounts.py" dir "$account")" || return 1
+    if [ -z "$runner" ]; then
+      [ -z "$account" ] && account="auto"
+      account_dir="$("$PY" "$FLEET_HOME/lib/claude_accounts.py" dir "$account")" || return 1
+    fi
   elif [ "$engine" = "codex" ]; then
     [ -n "$account" ] && { echo "--account is a claude-engine dial"; return 1; }
     [ -z "$model" ] && model="$CODEX_DEFAULT_MODEL"
@@ -514,12 +560,23 @@ HOOK_HQ
     fi
   fi
 
-  # system framing from template
+  # system framing from template. A runner lane's brief names the SANDBOX's clone, not this
+  # farm's worktree, and the template's push and pull request lines are replaced by its runner
+  # paragraph: the sandbox commits, the farm pushes and opens the pull request.
+  local brief_tree="$wt"
+  [ -n "$runner_clone" ] && brief_tree="$runner_clone"
   local sys; sys="$(sed \
     -e "s#{{PROJECT}}#$project#g" -e "s#{{LANE}}#$lane#g" -e "s#{{AGENT_ID}}#$slug#g" -e "s#{{MSG_INBOX}}#$FLEET_STATE/msg/$slug.md#g" \
-    -e "s#{{WORKTREE}}#$wt#g" -e "s#{{BRANCH}}#$branch#g" -e "s#{{BASE}}#$branch_base#g" \
+    -e "s#{{WORKTREE}}#$brief_tree#g" -e "s#{{BRANCH}}#$branch#g" -e "s#{{BASE}}#$branch_base#g" \
     -e "s#{{VITE}}#$vite#g" -e "s#{{UVICORN}}#$uvicorn#g" -e "s#{{E2E}}#$e2e#g" \
-    "$FLEET_HOME/lib/brief_template.md")"
+    "$FLEET_HOME/lib/brief_template.md" | awk -v runner="$runner" '
+      /<!--runner-swap-start-->/ { mode = "farm"; next }
+      /<!--runner-only-->/       { mode = "runner"; next }
+      /<!--runner-swap-end-->/   { mode = ""; next }
+      mode == ""                          { print; next }
+      mode == "farm"   && runner == ""    { print; next }
+      mode == "runner" && runner != ""    { print }
+    ')"
   if [ "${FLEET_SPAWN_NO_PR:-0}" = "1" ]; then
     sys="$sys
 
@@ -555,7 +612,7 @@ the group and opens its single integration PR."
   spawn_by="$by" spawn_icon="$icon" spawn_color="$color" spawn_restart="$restart" \
   spawn_donewhen="$donewhen" spawn_issues="$issues" spawn_brief_path="$brief_path" \
   spawn_fleet_home="$FLEET_HOME" \
-  spawn_vite="$vite" spawn_uvicorn="$uvicorn" spawn_e2e="$e2e" \
+  spawn_vite="$vite" spawn_uvicorn="$uvicorn" spawn_e2e="$e2e" spawn_runner="$runner" \
   "$PY" - "$slug" <<'PY'
 import json, os, time
 import sys
@@ -576,6 +633,10 @@ s = {"slug": sys.argv[1], "project": get("project"), "lane": get("lane"),
      "status": "starting", "started_at": int(time.time()), "task": task_summary,
      "restart": get("restart"), "done_when": get("donewhen"), "issues": get("issues"),
      "brief_path": brief_path, "respawn_count": 0}
+if get("runner"):
+    # A runner lane's record says so, because kill, the reaper and the page all behave
+    # differently for a lane whose agent is not on this farm.
+    s["runner"] = get("runner")
 if os.environ.get("FLEET_GROUP_NAME"):
     s["group"] = os.environ["FLEET_GROUP_NAME"]
     s["group_lane"] = os.environ.get("FLEET_GROUP_LANE")
@@ -625,9 +686,12 @@ PY
   # the state record and the unit already exist - so the lane looks like it ran and did nothing.
   # Spill the full text into fleet-owned state, outside the worktree, and hand the engine a
   # pointer instead. `git clean` and `fleet salvage` can never delete or commit this file.
+  # A runner lane never puts the prompt on an argv: it travels inside the bootstrap, on the
+  # sandbox's stdin. Spilling it to a farm path the sandbox cannot read would hand the remote
+  # agent a pointer to nothing, so the spill is for local lanes only.
   local task_bytes arg_limit=120000
   task_bytes=$(wc -c < "$log.task")
-  if [ "$task_bytes" -gt "$arg_limit" ]; then
+  if [ -z "$runner" ] && [ "$task_bytes" -gt "$arg_limit" ]; then
     mkdir -p "$FLEET_STATE/briefs"
     spill_path="$FLEET_STATE/briefs/$slug.prompt.md"
     FLEET_ROLLBACK_SPILL_PATH="$spill_path"
@@ -646,7 +710,31 @@ PY
   [ "$paper" = "1" ] && paper_cfg="-c mcp_servers.paper.url='http://127.0.0.1:29979/mcp'"
 
   # per-agent launcher: fixes PATH, pins the engine binary, streams -> raw log -> state parser
-  if [ "$engine" = "codex" ]; then
+  if [ -n "$runner" ]; then
+    # The lane's agent runs in a provider sandbox; run_remote.py's stdout IS the agent's
+    # output, already scrubbed, so the same tee and parser read it.
+    local runner_parser="parse_stream.py"
+    [ "$runner_output" = "text" ] && runner_parser="parse_generic.py"
+    local repo_slug; repo_slug="$(_proj "$project" repo)"
+    cat > "$log.run.sh" <<RUN
+#!/usr/bin/env bash
+export PATH="\$HOME/.local/bin:\$PATH"
+export FLEET_STATE="$FLEET_STATE"
+export FLEET_CONFIG="$FLEET_CONFIG"
+unset ANTHROPIC_API_KEY
+cd "$wt" || exit 1
+# tee and the parser must keep draining until run_remote.py closes its stdout: stopping a
+# runner lane IS its bring-home, and a parser killed at the first TERM would lose the last
+# minutes of it. run_remote.py installs its own handler, so the signal still reaches it.
+trap '' TERM
+"$PY" "$FLEET_HOME/lib/runners/run_remote.py" "$runner" \\
+  --slug "$slug" --worktree "$wt" --repo "$repo_slug" --branch "$branch" \\
+  --model "$model" --brief "$log.task" --sys "$log.sys" \\
+  --identity-name "$author_fmt" --identity-email "$email_fmt" \\
+  --base-branch "$branch_base" --timeout-s "$runner_timeout_s" \\
+  2>>"$log.err" | tee "$log.jsonl" | "$PY" "$FLEET_HOME/lib/$runner_parser" "$slug"
+RUN
+  elif [ "$engine" = "codex" ]; then
     cat > "$log.run.sh" <<RUN
 #!/usr/bin/env bash
 export PATH="\$HOME/.local/bin:\$PATH"
@@ -712,9 +800,13 @@ RUN
   # its CPU LIVE for gaming WITHOUT root. tmux can't be used here: it double-forks and
   # escapes the cgroup. CollectMode reaps the unit whether it finishes or fails.
   export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  # A runner lane's stop has work to do (bring the work home, open the pull request, delete
+  # the sandbox), so systemd waits two minutes before it reaches for SIGKILL.
+  local runner_property=""
+  [ -n "$runner" ] && runner_property="--property=TimeoutStopSec=120"
   systemd-run --user --slice=fleet.slice --unit="fleet-$slug" \
     --setenv="FLEET_STATE=$FLEET_STATE" --setenv="FLEET_CONFIG=$FLEET_CONFIG" \
-    --property=CollectMode=inactive-or-failed \
+    --property=CollectMode=inactive-or-failed $runner_property \
     -- bash "$log.run.sh" >/dev/null 2>&1
   # A freshly-created slice starts uncapped — reassert the current power mode so an agent
   # spawned mid-game is throttled at once, not only at the dashboard's next tick.
@@ -722,7 +814,7 @@ RUN
 
   trap - EXIT
   echo "spawned  $slug"
-  echo "  project=$project lane=$lane engine=$engine model=$model${effort:+ effort=$effort} branch=$branch"
+  echo "  project=$project lane=$lane engine=$engine model=$model${effort:+ effort=$effort}${runner:+ runner=$runner} branch=$branch"
   echo "  ports  vite=$vite uvicorn=$uvicorn e2e=$e2e"
   echo "  unit   fleet-$slug   |  log $log.jsonl"
 }
@@ -937,6 +1029,23 @@ cmd_game_mode() { # on|off|status — free the machine for gaming by SAVING + ST
   esac
 }
 
+_mark_killed() { # <slug>: status=killed, written through a temporary file and os.replace
+  "$PY" - "$1" <<'MARK'
+import json, os, sys
+fp = os.path.join(os.environ["FLEET_STATE"], "state", sys.argv[1] + ".json")
+try:
+    with open(fp) as handle:
+        record = json.load(handle)
+except Exception:
+    raise SystemExit(0)
+record["status"] = "killed"
+temporary = fp + ".tmp"
+with open(temporary, "w") as handle:
+    json.dump(record, handle)
+os.replace(temporary, fp)
+MARK
+}
+
 cmd_kill() {
   # `--retire` = kill AND retire the LANE, so the daemon never respawns it. A plain kill only stops
   # the unit and marks the record killed; a lane with an unmet restart policy is then resurrected on
@@ -950,7 +1059,29 @@ cmd_kill() {
   esac; done
   [ -n "$slug" ] || { echo "usage: fleet kill [--retire] <slug>"; return 1; }
   _audit kill "$slug"
-  _stop_agent "$slug"
+  # A runner lane's stop is its bring-home: the record is marked killed BEFORE the unit is
+  # stopped, so the dashboard's kill (which waits 60 seconds) never reads a stop that is still
+  # deleting a sandbox as a failure, and the stop itself does not block on it.
+  # A local lane keeps its old order: stop first, then mark, so nothing the dying unit writes
+  # can land after the mark. Either way the record is marked exactly once.
+  local runner_lane
+  runner_lane=$("$PY" - "$slug" <<'RUNNERMARK'
+import json, os, sys
+fp = os.path.join(os.environ["FLEET_STATE"], "state", sys.argv[1] + ".json")
+try:
+    with open(fp) as handle:
+        print(json.load(handle).get("runner") or "")
+except Exception:
+    pass
+RUNNERMARK
+)
+  if [ -n "$runner_lane" ]; then
+    _mark_killed "$slug"
+    systemctl --user stop --no-block "fleet-$slug" 2>/dev/null || true
+  else
+    _stop_agent "$slug"
+    _mark_killed "$slug"
+  fi
   local siblings
   siblings=$("$PY" - "$slug" "$retire" <<'PY'
 import glob, json, os, sys
@@ -959,9 +1090,8 @@ slug, retire = sys.argv[1], sys.argv[2] == "1"
 fp = os.path.join(STATE, "state", slug + ".json")
 project = lane = ""
 try:
-    rec = json.load(open(fp)); rec["status"] = "killed"
+    rec = json.load(open(fp))
     project, lane = rec.get("project", ""), rec.get("lane", "")
-    json.dump(rec, open(fp, "w"))
 except Exception:
     pass
 if retire and lane:
@@ -1776,6 +1906,14 @@ for record_path, record in records:
 print(f"  ({removed} worktree(s) removed, {reaped} card(s) reaped, {kept} kept)")
 PY
   done
+  # A sandbox whose lane died hard is still billing, and only the janitor passes often enough
+  # to notice. --dry-run stays a dry run all the way down.
+  echo "── runners"
+  local reap_dry=""
+  [ "$dry" = "1" ] && reap_dry="--dry-run"
+  # The reaper asks systemctl --user whether each lane is alive; without a login session (a
+  # timer, an ssh command) that needs the runtime dir, exactly as spawn sets it.
+  XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" "$PY" "$FLEET_HOME/lib/runners/cli.py" reap $reap_dry || true
 }
 
 cmd_autosweep() { # on [minutes] | off | status — periodic `fleet sweep` via a systemd --user timer

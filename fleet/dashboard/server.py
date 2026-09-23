@@ -27,6 +27,7 @@ import shutil
 import os
 import re
 import secrets
+import signal
 import socket
 import socketserver
 import struct
@@ -48,6 +49,7 @@ import codex_usage as CX  # noqa: E402
 import mode as MODE  # noqa: E402
 import models as MODELS  # noqa: E402
 import model_presets as MODEL_PRESETS  # noqa: E402
+import scrub as SCRUB  # noqa: E402
 
 STATE = os.path.expanduser(os.environ.get("FLEET_STATE", "~/.fleet"))
 CONFIG = os.path.expanduser(os.environ.get("FLEET_CONFIG", "~/.config/fleet"))
@@ -122,11 +124,20 @@ DEFAULT_HQ_AGENT = "dashboard"
 # A tool that does not answer must not hold a page open. Three seconds is longer than any of
 # these take when the machine is well, and short enough that a hung one reads as a failed check.
 TOOL_TIMEOUT = 3
+# How long a killed tool's pipes are read before this page stops waiting for them.
+KILL_WAIT = 5
 
 
-def run_tool(args, timeout=TOOL_TIMEOUT, env=None):
+def run_tool(args, timeout=TOOL_TIMEOUT, env=None, grace=0):
     """(returncode, stdout, stderr) from a command line tool. Never raises: a missing binary, a
-    hung one and a failing one are all answers this page has to draw, not crashes."""
+    hung one and a failing one are all answers this page has to draw, not crashes.
+
+    `grace` is for a tool that holds something paid while it runs. Past the timeout it gets
+    SIGTERM, to its whole process group, and `grace` seconds to tidy up before the SIGKILL that
+    a plain timeout sends at once: a killed `fleet runner test` could not delete its sandbox.
+    """
+    if grace > 0:
+        return _run_tool_gracefully(args, timeout, env, grace)
     try:
         done = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=env)
         return done.returncode, done.stdout or "", done.stderr or ""
@@ -136,6 +147,51 @@ def run_tool(args, timeout=TOOL_TIMEOUT, env=None):
         return 124, "", f"{args[0]} did not answer within {timeout}s"
     except OSError as exc:
         return 1, "", str(exc)
+
+
+def _run_tool_gracefully(args, timeout, env, grace):
+    try:
+        child = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, env=env, start_new_session=True)
+    except FileNotFoundError:
+        return 127, "", f"{args[0]} is not installed"
+    except OSError as exc:
+        return 1, "", str(exc)
+    try:
+        out, err = child.communicate(timeout=timeout)
+        return child.returncode, out or "", err or ""
+    except subprocess.TimeoutExpired:
+        pass
+    stopped = False
+    for signum, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, KILL_WAIT)):
+        try:
+            os.killpg(child.pid, signum)
+        except OSError:
+            pass
+        try:
+            child.communicate(timeout=wait)
+            stopped = stopped or signum == signal.SIGTERM
+            break
+        except subprocess.TimeoutExpired:
+            # Exited on the SIGTERM, only its pipes are still open: it did stop when asked.
+            stopped = stopped or (signum == signal.SIGTERM and child.poll() is not None)
+            continue
+    else:
+        # The group is dead and the pipes are still open: something that left the group (a
+        # `setsid`, a daemon) holds them, and reading on would wait for it forever while this job
+        # keeps its key. Stop reading and collect the child itself.
+        for stream in (child.stdout, child.stderr):
+            try:
+                stream.close()
+            except OSError:
+                pass
+        try:
+            child.wait(timeout=KILL_WAIT)
+        except subprocess.TimeoutExpired:
+            pass
+    # A page has to tell "timed out and tidied up" from "timed out and was killed mid-way".
+    how = "and stopped when asked" if stopped else f"and was killed after a {grace}s grace"
+    return 124, "", f"{args[0]} did not answer within {timeout}s {how}"
 
 
 def tool_message(rc, out, err, what):
@@ -255,6 +311,9 @@ def config_payload():
             "health_panel": free["health_panel"],
         },
         "hq_agent": dash_hq_agent(),
+        # Whether this farm has any hosting to draw at all, from the hosting snapshot and never
+        # from a tool: this route is open and is asked on every page load.
+        "hosting": hosting_counts(),
         # The name a person types after `ssh -t` to reach this farm, for every command the page
         # hands them to run elsewhere. Never a secret: it is the alias in their own ssh config.
         "farm_alias": CA.FARM_ALIAS,
@@ -428,7 +487,7 @@ def _accounts_refresher():
             for name in CA.account_dirs():
                 if name in summaries:
                     s = summaries[name]
-                    rows.append({"name": name, "label": CA.display(name),
+                    rows.append({"name": name, "label": CA.display(name), "email": CA.account_email(name),
                                  "engine": CLAUDE_ENGINE,
                                  "session": s["session"], "weekly": s["weekly"],
                                  "session_resets": s.get("session_resets"),
@@ -453,7 +512,7 @@ def _accounts_refresher():
                         row["stale_error"] = err
                     rows.append(row)
                 else:
-                    rows.append({"name": name, "label": CA.display(name),
+                    rows.append({"name": name, "label": CA.display(name), "email": CA.account_email(name),
                                  "engine": CLAUDE_ENGINE,
                                  "session": None, "weekly": None,
                                  "session_resets": None, "weekly_resets": None,
@@ -565,7 +624,7 @@ def _claude_login_row(name, config_dir, row, now):
     else:
         state = "logged_in"
         sentence = "Logged in. Lanes can be spawned on this account."
-    return {"name": name, "label": CA.display(name), "engine": "claude", "state": state,
+    return {"name": name, "label": CA.display(name), "email": CA.account_email(name), "engine": "claude", "state": state,
             "sentence": sentence, "expires_at": _iso(expiry) if expiry else None}
 
 
@@ -1768,9 +1827,26 @@ def _new_job_id(action):
     return f"{action}-{int(time.time())}-{secrets.token_hex(3)}"
 
 
+def _job_secrets():
+    """Every secret this farm stores, for the scrub below. A directory that cannot be read is an
+    empty list and not an exception: the token shapes in scrub.py still catch what looks like a
+    token, and a job must end even when the secrets directory is missing."""
+    try:
+        return SCRUB.stored_secrets(STATE)
+    except Exception:
+        return []
+
+
 def _finish_job(record, rc, out, err):
     """The record as it ends, written whole. Returned as well, so a synchronous write can hand
-    its own outcome straight back to the page."""
+    its own outcome straight back to the page.
+
+    The scrub is here, at the top, rather than at each caller: a provider CLI that prints a
+    token into its own error message would otherwise leave it in this file, in the `error`
+    sentence `tool_message` builds from it, and in every later GET /api/jobs/<id>.
+    """
+    known = _job_secrets()
+    out, err = SCRUB.scrub(out, known), SCRUB.scrub(err, known)
     finished = dict(record, state="done" if rc == 0 else "failed", ended_at=_now_iso(),
                     exit_code=rc, output=_job_output(out, err))
     if rc != 0:
@@ -1783,9 +1859,18 @@ def _finish_job(record, rc, out, err):
     return finished
 
 
-def _run_job(record, args, timeout):
-    rc, out, err = run_tool(args, timeout=timeout)
-    _finish_job(record, rc, out, err)
+def _run_job(record, args, timeout, after=None, grace=0):
+    try:
+        rc, out, err = run_tool(args, timeout=timeout, grace=grace)
+        _finish_job(record, rc, out, err)
+    finally:
+        # Whatever the tool did, the caller's own tidying runs: a temporary file to delete, a
+        # snapshot to wake. An exception here must not cost the job its record.
+        if after is not None:
+            try:
+                after()
+            except Exception:
+                pass
 
 
 def claim_job(action, args=None, label=None, key=None, command=None):
@@ -1823,17 +1908,22 @@ def claim_job(action, args=None, label=None, key=None, command=None):
     return 202, record
 
 
-def start_job(action, args, timeout, label=None, key=None):
+def start_job(action, args, timeout, label=None, key=None, after=None, grace=0):
     """(status, payload) for a write that runs on a thread.
 
     202 and the record when it started, 409 and the record of the one already holding this
     resource: pressing Drain twice must not drain twice, and pressing Resume during a drain must
     not undo it halfway.
+
+    `after` runs on that thread once the job has ended, however it ended. A caller that started
+    the job with a temporary file, or that wants a snapshot refreshed the moment the work is
+    done, hangs it here rather than polling the record. `grace` is run_tool's.
     """
     code, payload = claim_job(action, args, label=label, key=key)
     if code != 202:
         return code, payload
     threading.Thread(target=_run_job, args=(payload, list(args), timeout),
+                     kwargs={"after": after, "grace": grace},
                      name="job-" + payload["id"], daemon=True).start()
     return 202, {"job": payload}
 
@@ -1848,6 +1938,10 @@ def run_job_now(action, args, timeout, label=None, key=None):
     if code != 202:
         return code, payload, None, "", ""
     rc, out, err = run_tool(args, timeout=timeout)
+    # Scrubbed here too, and not only inside _finish_job: `out` and `err` go back to the caller,
+    # which answers the page with them synchronously.
+    known = _job_secrets()
+    out, err = SCRUB.scrub(out, known), SCRUB.scrub(err, known)
     return 200, {"job": _finish_job(payload, rc, out, err)}, rc, out, err
 
 
@@ -2655,6 +2749,531 @@ def ci_cancel(body):
     if rc != 0:
         return 400, {"error": tool_message(rc, out, err, "fleet ci cancel"), "id": run_id}
     return 200, {"ok": True, "id": run_id, "detail": (out or "").strip()[:200]}
+
+
+# ---------------------------------------------------------------- hosting: machines and runners
+#
+# A farm can own other machines, and can borrow a provider's sandbox to run one lane in. Two
+# tools say where that stands: `fleet machines list --json` reconciles this farm's registry with
+# the provider and advances each row one step, and `fleet hosts list --json` says which provider
+# CLIs are installed, logged in and holding their secrets.
+#
+# Both reach the network, so neither may ever run on a request. They are read by a thread of
+# their own on the 45 second cadence, exactly as the machine strip is, and the two answers are
+# kept apart, each with its own `at`, `stale_since` and `error`: a provider whose login expired
+# must not cost the page its machine table, and a provider that is merely slow must never be
+# drawn as logged out.
+#
+# This server never imports the hosting library and never runs a provider CLI. Its whole contract
+# is the JSON those two commands print.
+
+HOSTING_REFRESH_SECONDS = 45
+# The listings ask a provider, so they get far longer than a local tool does. Nothing waits for
+# them: they run on the refresher's thread and publish into a snapshot.
+HOSTING_LIST_TIMEOUT = 60
+
+# What each write is allowed to take. `create` only asks the provider for the droplet and
+# returns; everything that happens after that is made by the refresher's `list`, one step per
+# pass, so a create that took two minutes is a failure and not a page holding its breath.
+HOSTING_PLAN_TIMEOUT = 60          # it reads the provider's live size list for the price
+HOSTING_CREATE_TIMEOUT = 120
+HOSTING_ADD_TIMEOUT = 60           # register a machine of your own, and check it over SSH
+HOSTING_CHECK_TIMEOUT = 120        # SSH, cloud-init status, then `fleet capacity`
+HOSTING_DESTROY_TIMEOUT = 120
+HOSTING_REGISTRY_TIMEOUT = 60      # adopt and forget: the registry, and one read of the provider
+HOSTING_HOSTS_CHECK_TIMEOUT = 60
+HOSTING_TEST_TIMEOUT = 600         # it creates a sandbox, runs two commands inside it, deletes it
+# Past that timeout the test is sent SIGTERM and given this long to delete its sandbox before it
+# is killed. The reaper, not this, is what owns a sandbox that outlives both: `fleet runner test`
+# writes its runner handle before it asks the provider for anything (OPERATIONS.md, Hosting).
+HOSTING_TEST_GRACE = 60
+
+# Every value below becomes part of an argv, so each is checked against a pattern first and a
+# body that does not match never reaches a command line at all.
+# A machine name is also a host name and a registry table name: lower case, no dots, 2 to 40.
+MACHINE_NAME = re.compile(r"[a-z][a-z0-9-]{1,39}")
+# A provider's size slug and region slug: 2 to 32 of lower case, digits and hyphens. The CLI
+# checks them against the preset; this only keeps a shell-shaped or path-shaped string out of
+# the argument list. A hyphen may not come first, which the bare character class would have
+# allowed: `--force` is two to thirty-two of those characters, and a value that reads as an
+# option is the one thing a validated field must never become.
+SIZE_OR_REGION = re.compile(r"[a-z0-9][a-z0-9-]{1,31}")
+# A confirmed monthly price: plain digits, and cents if any. No sign, exponent, underscore or
+# `inf`, each of which float() accepts and none of which the CLI's own comparison expects.
+CONFIRM_USD = re.compile(r"[0-9]{1,5}(?:\.[0-9]{1,4})?")
+# user@host, each side starting with a letter or a digit for the same reason: `-lroot@10.0.0.4`
+# would otherwise reach `--target` reading as an ssh option.
+SSH_TARGET = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9.-]*")
+# One line of an OpenSSH public key: the type, the base64 body, and the optional comment. Not a
+# secret, which is why it may be typed into the page at all, but still checked to the character.
+SSH_PUBLIC = re.compile(r"(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) "
+                        r"[A-Za-z0-9+/=]+(?: [^\n]{0,100})?")
+
+# The provider ids of the design record, with the job each one can do. The catalog itself is
+# `fleet/lib/host_presets.py`, which this server does not import: the CLI owns it, and a
+# dashboard that carried its own copy would drift from it. This map is only the guard that keeps
+# an unknown word out of an argv, and a provider the snapshot reports is accepted as well, so a
+# preset added to the library needs no change here.
+# Confirmed against `fleet/lib/host_presets.py` on the hosting-core branch (2026-09-23): the same
+# five ids with the same jobs. HostingProvidersTest compares the two once that file is in the
+# tree, so a renamed id fails a test instead of refusing a real provider until the first listing.
+HOSTING_PROVIDERS = {"ssh": "machine", "do-droplet": "machine",
+                     "do-agents": "runner", "railway": "runner", "vercel": "runner"}
+
+HOSTING_KEY_REFUSAL = ("A token never goes through this page. Run the login command in a "
+                       "terminal on this farm.")
+PUBKEY_REQUIRED = "Your SSH public key is how your laptop reaches the machine."
+
+_hosting_machines_snapshot = _blank_snapshot(this={}, total_monthly_usd=0, machines=[])
+_hosting_hosts_snapshot = _blank_snapshot(providers=[])
+# Set by a write whose job has just ended, so the next pass happens in a moment rather than at
+# the end of the current sleep: a row that went `creating` must not sit there for 45 seconds.
+_hosting_wake = threading.Event()
+
+
+def _hosting_list(snapshot, args, what, keys):
+    """One listing into its snapshot. A failed run keeps the last good answer, says when it was
+    true and carries one sentence: an empty table and an unreachable provider look identical
+    once the rows are gone, and only one of them is worth acting on."""
+    rc, out, err = run_tool([fleet_bin()] + list(args), timeout=HOSTING_LIST_TIMEOUT)
+    known = _job_secrets()
+    out, err = SCRUB.scrub(out, known), SCRUB.scrub(err, known)
+    if rc != 0:
+        with _snapshot_lock:
+            _snapshot_failed(snapshot, tool_message(rc, out, err, what))
+        return
+    try:
+        payload = json.loads(out or "")
+    except (json.JSONDecodeError, UnicodeError):
+        with _snapshot_lock:
+            _snapshot_failed(snapshot, f"{what} did not answer with JSON")
+        return
+    if not isinstance(payload, dict):
+        with _snapshot_lock:
+            _snapshot_failed(snapshot, f"{what} did not answer with a JSON object")
+        return
+    with _snapshot_lock:
+        _snapshot_succeeded(snapshot, {key: payload.get(key, blank)
+                                       for key, blank in keys.items()})
+
+
+def hosting_refresh():
+    """One pass over both listings. They are separate calls into separate snapshots, so one
+    failing tool leaves the other table alone."""
+    _hosting_list(_hosting_machines_snapshot, ["machines", "list", "--json"],
+                  "fleet machines list",
+                  {"this": {}, "total_monthly_usd": 0, "machines": []})
+    _hosting_list(_hosting_hosts_snapshot, ["hosts", "list", "--json"], "fleet hosts list",
+                  {"providers": []})
+
+
+def _hosting_refresher(interval=HOSTING_REFRESH_SECONDS, stop=None):
+    """`stop` exists for the suite: a refresher left running past the test that started it goes
+    on spawning tools into every test that follows."""
+    while stop is None or not stop.is_set():
+        _hosting_wake.clear()
+        try:
+            hosting_refresh()
+        except Exception:
+            pass
+        _hosting_wake.wait(interval)
+
+
+def start_hosting_refresher():
+    thread = threading.Thread(target=_hosting_refresher, name="hosting-refresher", daemon=True)
+    thread.start()
+    return thread
+
+
+def hosting_machines():
+    """GET /api/machines. From memory, always: this route runs nothing."""
+    snapshot = _copy_snapshot(_hosting_machines_snapshot)
+    machines = snapshot.get("machines")
+    this = snapshot.get("this")
+    return _envelope(snapshot, {
+        "this": this if isinstance(this, dict) else {},
+        "total_monthly_usd": snapshot.get("total_monthly_usd") or 0,
+        "machines": machines if isinstance(machines, list) else []})
+
+
+def hosting_hosts():
+    """GET /api/hosts. From memory, always: this route runs nothing."""
+    snapshot = _copy_snapshot(_hosting_hosts_snapshot)
+    providers = snapshot.get("providers")
+    return _envelope(snapshot, {"providers": providers if isinstance(providers, list) else []})
+
+
+def _secrets_stored(row):
+    """Every secret a runner lists is stored. Logged in is not connected: a lane cannot be
+    spawned on a runner without its two secrets, and a row that lists none cannot show it has
+    them."""
+    listed = row.get("secrets")
+    return (isinstance(listed, list) and bool(listed)
+            and all(isinstance(each, dict) and each.get("stored") is True for each in listed))
+
+
+def hosting_counts():
+    """The two numbers /api/config carries, so the page knows whether this farm has any hosting
+    at all before it draws the section. Read from the snapshot, never from a tool."""
+    machines = _copy_snapshot(_hosting_machines_snapshot).get("machines")
+    providers = _copy_snapshot(_hosting_hosts_snapshot).get("providers")
+    connected = [row for row in (providers if isinstance(providers, list) else [])
+                 if isinstance(row, dict) and row.get("job") == "runner"
+                 and row.get("login_state") == "logged_in" and _secrets_stored(row)]
+    return {"machines": len(machines) if isinstance(machines, list) else 0,
+            "runners_connected": len(connected)}
+
+
+# ---- the writes
+#
+# Each one is a `fleet` command, run as a job keyed by the resource it touches: `machine:<name>`,
+# so a second machine can be added while the first one boots, and `host:<provider>`. Every field
+# is validated before a word of it is put in a list, the list is never a shell string, and when
+# the job ends the snapshot is asked to look again.
+
+
+def hosting_key_refusal(body):
+    """The sentence for a body carrying something that looks like a credential, or "".
+
+    The models routes' classifier, unchanged, which is also why the public key field is called
+    `ssh_public`: a field named `pubkey` carries the word "key" and is refused here, as it
+    should be. The refusal repeats neither the field nor its value; a sentence that echoed
+    either would put the thing straight back into a log, a proxy and this page's own history.
+    """
+    return HOSTING_KEY_REFUSAL if key_field(body) else ""
+
+
+def _known_providers():
+    """id -> job, the design record's list plus whatever this farm's own CLI reported."""
+    known = dict(HOSTING_PROVIDERS)
+    providers = _copy_snapshot(_hosting_hosts_snapshot).get("providers")
+    for row in providers if isinstance(providers, list) else []:
+        if isinstance(row, dict) and row.get("id"):
+            known.setdefault(str(row["id"]), str(row.get("job") or ""))
+    return known
+
+
+def _echo(value):
+    """What a person typed, fit to be quoted back in a refusal. The key classifier reads field
+    names only, so a token pasted into the wrong box reaches these sentences; it is scrubbed
+    before it is cut, so a cut can never leave a token too short for the scrub to recognise."""
+    return SCRUB.scrub(str(value), _job_secrets())[:40]
+
+
+def _provider_field(body, want_job=""):
+    """(the provider id, a sentence). `want_job` keeps a runner out of the machine routes."""
+    provider = str((body or {}).get("provider") or "").strip()
+    known = _known_providers()
+    if provider not in known:
+        return "", (f"'{_echo(provider)}' is not a hosting provider this farm knows"
+                    if provider else "which hosting provider?")
+    job = known[provider]
+    # An empty job is a mismatch, not a pass: a listed row that names no job is a provider this
+    # farm cannot say is a machine or a runner, so it reaches neither kind of route.
+    if want_job and job != want_job:
+        if job not in ("machine", "runner"):
+            return "", f"{provider} does not say whether it is a machine or a runner provider"
+        other = "a machine" if job == "machine" else "a runner"
+        return "", f"{provider} is {other} provider, and this asks for a {want_job}"
+    return provider, ""
+
+
+def _name_field(body):
+    name = str((body or {}).get("name") or "").strip()
+    if not MACHINE_NAME.fullmatch(name):
+        return "", ("a machine name is 2 to 40 characters: lower case letters, digits and "
+                    "hyphens, starting with a letter")
+    return name, ""
+
+
+def _slug_field(body, field, what):
+    value = str((body or {}).get(field) or "").strip()
+    if not SIZE_OR_REGION.fullmatch(value):
+        return "", f"'{_echo(value)}' is not a {what} this farm can pass on"
+    return value, ""
+
+
+def _confirm_usd(value):
+    """The price the person typed back, as the CLI wants to read it. The CLI is what refuses a
+    price that no longer matches the live one; this only keeps the field a number."""
+    text = "" if isinstance(value, bool) or value is None else str(value).strip()
+    if not CONFIRM_USD.fullmatch(text) or not 0 < float(text) < 100000:
+        return "", "a price is a number of dollars a month, for example 48"
+    if len(text) > 1 and text[0] == "0" and text[1].isdigit():
+        # The CLI compares the string, so 048 would be refused there with no reason given.
+        plain = text.lstrip("0")
+        return "", f"write the price without leading zeros, as {'0' * plain.startswith('.')}{plain}"
+    # The string as the person sent it, never reformatted: the CLI compares it with the live
+    # price, and `%g` would have turned a correct 12345.67 into a refused 12345.7.
+    return text, ""
+
+
+def _remove_quietly(path):
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _pubkey_file(value, required):
+    """(a 0600 file holding the person's public key, a sentence).
+
+    Not a credential, so the page may take it; still theirs, so it is never left in a world
+    readable file, is passed as `--pubkey-file` and not on the command line, and is deleted the
+    moment the job that used it ends.
+    """
+    text = str((value if value is not None else "") or "").strip()
+    if not text:
+        return "", (PUBKEY_REQUIRED if required else "")
+    if not SSH_PUBLIC.fullmatch(text):
+        return "", ("that does not read as one line of an SSH public key (ssh-ed25519, ssh-rsa "
+                    "or ecdsa-sha2-nistp256/384/521, then the key body)")
+    handle, path = tempfile.mkstemp(prefix="fleet-pubkey-", suffix=".pub")
+    try:
+        os.fchmod(handle, 0o600)
+        with os.fdopen(handle, "w") as opened:
+            opened.write(text + "\n")
+    except OSError as exc:
+        _remove_quietly(path)
+        return "", f"this farm could not write the key to a file ({exc.__class__.__name__})"
+    return path, ""
+
+
+def _hosting_job(action, args, timeout, label, key, cleanup="", grace=0):
+    """One hosting write as a job. However it ends, the temporary file it was handed is gone and
+    the snapshot has been asked to look again."""
+    def after():
+        _remove_quietly(cleanup)
+        _hosting_wake.set()
+
+    code, payload = start_job(action, args, timeout, label=label, key=key, after=after,
+                              grace=grace)
+    if code != 202:
+        # Nothing started, so nothing will clean up after it.
+        _remove_quietly(cleanup)
+    return code, payload
+
+
+def machines_plan(body):
+    """POST /api/machines/plan {provider, name, size, region, ssh_public?} -> the plan's JSON,
+    unwrapped.
+
+    A POST because it runs a tool that asks the provider for today's price: a read-only page
+    never needs a plan, and a GET that reached a provider would be a GET that costs a request
+    per tick.
+    """
+    body = body or {}
+    refusal = hosting_key_refusal(body)
+    if refusal:
+        return 400, {"error": refusal}
+    provider, problem = _provider_field(body, want_job="machine")
+    if problem:
+        return 400, {"error": problem}
+    name, problem = _name_field(body)
+    if problem:
+        return 400, {"error": problem}
+    size, problem = _slug_field(body, "size", "size")
+    if problem:
+        return 400, {"error": problem}
+    region, problem = _slug_field(body, "region", "region")
+    if problem:
+        return 400, {"error": problem}
+    pubkey, problem = _pubkey_file(body.get("ssh_public"), required=False)
+    if problem:
+        return 400, {"error": problem}
+    args = [fleet_bin(), "machines", "plan", "--provider", provider, "--name", name,
+            "--size", size, "--region", region]
+    if pubkey:
+        args += ["--pubkey-file", pubkey]
+    args.append("--json")
+    try:
+        code, payload, rc, out, err = run_job_now(
+            "machines_plan", args, HOSTING_PLAN_TIMEOUT, label=f"Planning machine {name}",
+            key="machine:" + name)
+    finally:
+        _remove_quietly(pubkey)
+    _hosting_wake.set()
+    if code != 200:
+        return code, payload
+    job = payload.get("job")
+    if rc != 0:
+        return 400, {"error": tool_message(rc, out, err, "fleet machines plan"), "job": job}
+    try:
+        plan = json.loads(out or "")
+    except (json.JSONDecodeError, UnicodeError):
+        plan = None
+    if not isinstance(plan, dict):
+        return 400, {"error": "fleet machines plan did not answer with JSON", "job": job}
+    # The CLI's JSON as it printed it, with nothing wrapped around it: design section 7 says
+    # this route "returns its JSON", and the page reads the plan's fields at the top level. The
+    # job record is still on disk for a page that was reloaded, under GET /api/jobs.
+    return 200, plan
+
+
+def machines_create(body):
+    """POST /api/machines. A droplet is bought; a machine of your own is only registered."""
+    body = body or {}
+    refusal = hosting_key_refusal(body)
+    if refusal:
+        return 400, {"error": refusal}
+    provider, problem = _provider_field(body, want_job="machine")
+    if problem:
+        return 400, {"error": problem}
+    name, problem = _name_field(body)
+    if problem:
+        return 400, {"error": problem}
+    if provider == "ssh":
+        return _machines_add_own(body, name)
+    return _machines_create_droplet(body, provider, name)
+
+
+def _machines_create_droplet(body, provider, name):
+    size, problem = _slug_field(body, "size", "size")
+    if problem:
+        return 400, {"error": problem}
+    region, problem = _slug_field(body, "region", "region")
+    if problem:
+        return 400, {"error": problem}
+    price, problem = _confirm_usd(body.get("confirm_usd"))
+    if problem:
+        return 400, {"error": problem}
+    # Required from the page, and only from the page: the finish command and the tunnel are both
+    # run from the person's laptop, and without their key neither can log in.
+    pubkey, problem = _pubkey_file(body.get("ssh_public"), required=True)
+    if problem:
+        return 400, {"error": problem}
+    args = [fleet_bin(), "machines", "create", "--provider", provider, "--name", name,
+            "--size", size, "--region", region, "--pubkey-file", pubkey,
+            "--confirm-usd", price]
+    code, payload = _hosting_job("machines_create", args, HOSTING_CREATE_TIMEOUT,
+                                 f"Creating machine {name}", "machine:" + name, cleanup=pubkey)
+    if code == 202:
+        payload.update({"name": name, "provider": provider})
+    return code, payload
+
+
+def _machines_add_own(body, name):
+    target = str(body.get("target") or "").strip()
+    if not SSH_TARGET.fullmatch(target):
+        return 400, {"error": "a machine of your own is named user@host, for example "
+                              "farm@10.0.0.4"}
+    args = [fleet_bin(), "machines", "add", "--name", name, "--target", target]
+    raw = body.get("port")
+    if raw not in (None, ""):
+        try:
+            port = int(str(raw).strip())
+        except (TypeError, ValueError):
+            port = 0
+        if not 0 < port < 65536:
+            return 400, {"error": "a port is a whole number from 1 to 65535"}
+        args += ["--port", str(port)]
+    code, payload = _hosting_job("machines_add", args, HOSTING_ADD_TIMEOUT,
+                                 f"Adding machine {name}", "machine:" + name)
+    if code == 202:
+        payload.update({"name": name, "provider": "ssh"})
+    return code, payload
+
+
+def _machines_verb(body, verb, action, label, timeout, extra=()):
+    """The four writes that are one verb and one machine name."""
+    body = body or {}
+    refusal = hosting_key_refusal(body)
+    if refusal:
+        return 400, {"error": refusal}
+    name, problem = _name_field(body)
+    if problem:
+        return 400, {"error": problem}
+    # No `--` separator: fleet's own case loops read a bare one as an unknown flag, and the name
+    # pattern above has already refused anything that could read as an option.
+    args = [fleet_bin(), "machines", verb, name] + list(extra)
+    code, payload = _hosting_job(action, args, timeout, f"{label} {name}", "machine:" + name)
+    if code == 202:
+        payload["name"] = name
+    return code, payload
+
+
+def machines_check(body):
+    """POST /api/machines/check {name}."""
+    return _machines_verb(body, "check", "machines_check", "Checking machine",
+                          HOSTING_CHECK_TIMEOUT)
+
+
+def machines_destroy(body):
+    """POST /api/machines/destroy {name, confirm}. The confirmation is the name itself, typed
+    back: every state of a droplet but `destroyed` costs money, and destroying is the only
+    thing that stops it, so it is also the only thing that cannot be undone."""
+    body = body or {}
+    # The classifier first, as on every other hosting route: a body carrying a token is refused
+    # for that, whatever else is wrong with it.
+    refusal = hosting_key_refusal(body)
+    if refusal:
+        return 400, {"error": refusal}
+    name = str(body.get("name") or "").strip()
+    if str(body.get("confirm") or "").strip() != name or not name:
+        return 400, {"error": "type the machine's name to confirm: this deletes its disk"}
+    return _machines_verb(body, "destroy", "machines_destroy", "Destroying machine",
+                          HOSTING_DESTROY_TIMEOUT, extra=["--confirm", name])
+
+
+def machines_adopt(body):
+    """POST /api/machines/adopt {name}: a droplet this farm made and lost gets its row back."""
+    return _machines_verb(body, "adopt", "machines_adopt", "Adopting machine",
+                          HOSTING_REGISTRY_TIMEOUT)
+
+
+def machines_forget(body):
+    """POST /api/machines/forget {name}: the row goes, the machine is not touched."""
+    return _machines_verb(body, "forget", "machines_forget", "Forgetting machine",
+                          HOSTING_REGISTRY_TIMEOUT)
+
+
+def hosts_check(body):
+    """POST /api/hosts/check {provider}: is its CLI installed, and is this farm logged in."""
+    body = body or {}
+    refusal = hosting_key_refusal(body)
+    if refusal:
+        return 400, {"error": refusal}
+    provider, problem = _provider_field(body)
+    if problem:
+        return 400, {"error": problem}
+    args = [fleet_bin(), "hosts", "check", provider]
+    code, payload = _hosting_job("hosts_check", args, HOSTING_HOSTS_CHECK_TIMEOUT,
+                                 f"Checking the {provider} login", "host:" + provider)
+    if code == 202:
+        payload["provider"] = provider
+    return code, payload
+
+
+def hosts_test(body):
+    """POST /api/hosts/test {provider, project, confirm: true}.
+
+    It creates the smallest sandbox the provider sells, runs two commands in it and deletes it,
+    so it spends a few cents of the person's money. That is what `confirm` is for: a body
+    without it never reaches the CLI.
+    """
+    body = body or {}
+    refusal = hosting_key_refusal(body)
+    if refusal:
+        return 400, {"error": refusal}
+    provider, problem = _provider_field(body, want_job="runner")
+    if problem:
+        return 400, {"error": problem}
+    project = str(body.get("project") or "").strip()
+    if not PROJECT_NAME.fullmatch(project) or project not in _projects_registry():
+        return 400, {"error": f"'{_echo(project)}' is not a project registered on this farm",
+                     "projects": sorted(_projects_registry())}
+    if body.get("confirm") is not True:
+        return 400, {"error": "a test creates a sandbox and spends a few cents, so it has to "
+                              "be confirmed"}
+    args = [fleet_bin(), "runner", "test", provider, "--project", project]
+    code, payload = _hosting_job("hosts_test", args, HOSTING_TEST_TIMEOUT,
+                                 f"Testing the {provider} runner", "host:" + provider,
+                                 grace=HOSTING_TEST_GRACE)
+    if code == 202:
+        payload.update({"provider": provider, "project": project})
+    return code, payload
 
 
 # ---------------------------------------------------------------- the head office's mail
@@ -3554,6 +4173,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, json.dumps(next_port_answer()))
             elif path == "/api/projects":
                 self._send(200, json.dumps(projects()))
+            elif path == "/api/machines":
+                # From the hosting snapshot. Like every read here it runs nothing: listing
+                # droplets is a provider request, and this page redraws every few seconds.
+                self._send(200, json.dumps(hosting_machines()))
+            elif path == "/api/hosts":
+                self._send(200, json.dumps(hosting_hosts()))
             elif path == "/api/mail/boxes":
                 self._send(200, json.dumps(mail_boxes()))
             elif path == "/api/mail/thread":
@@ -3638,6 +4263,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(code, json.dumps(payload))
             elif path == "/api/power":
                 code, payload = power_action(body)
+                self._send(code, json.dumps(payload))
+            # Hosting. Every one of these is an exact path, and /api/machines/plan is written
+            # out above /api/machines for a reader, not for the match: none of them is a prefix
+            # of another.
+            elif path == "/api/machines/plan":
+                code, payload = machines_plan(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/machines/check":
+                code, payload = machines_check(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/machines/destroy":
+                code, payload = machines_destroy(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/machines/adopt":
+                code, payload = machines_adopt(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/machines/forget":
+                code, payload = machines_forget(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/machines":
+                code, payload = machines_create(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/hosts/check":
+                code, payload = hosts_check(body)
+                self._send(code, json.dumps(payload))
+            elif path == "/api/hosts/test":
+                code, payload = hosts_test(body)
                 self._send(code, json.dumps(payload))
             elif path == "/api/agents/kill":
                 code, payload = agent_kill(body)
@@ -3780,6 +4432,7 @@ if __name__ == "__main__":
         print("  READ-ONLY: no write token could be stored; set FLEET_DASH_TOKEN", flush=True)
     machine_refresh()          # prime it: the first page must not open on an empty strip
     start_machine_refresher()
+    start_hosting_refresher()
     threading.Thread(target=_mode_loop, daemon=True).start()
     threading.Thread(target=_ci_loop, daemon=True).start()
     # The queue's own observations. This thread was written and then never started, so the

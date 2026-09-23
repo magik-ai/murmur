@@ -156,12 +156,12 @@ either way, or the page could never be opened to hand over the token in the firs
 
 **Read, from the snapshot.** Not one of these runs a tool, reaches the network or writes to disk.
 Background threads read the machine instead: one every 45 seconds for the health table, the
-services, the mailboxes, the office timeline and the session list; one every 15 seconds for the
-verification queue's observations; one every 5 seconds for the live machine numbers; one every 10
-minutes for the subscription accounts. A page redraws every few seconds, so a tool call on a read
-path is a few thousand calls an hour against the budget every agent on this machine shares. An
-answer says `pending` until the first pass, and keeps the last good values when a pass fails, with
-`stale_since` saying when they were still true.
+services, the mailboxes, the office timeline and the session list; one every 45 seconds for the
+two hosting listings; one every 15 seconds for the verification queue's observations; one every 5
+seconds for the live machine numbers; one every 10 minutes for the subscription accounts. A page
+redraws every few seconds, so a tool call on a read path is a few thousand calls an hour against
+the budget every agent on this machine shares. An answer says `pending` until the first pass, and
+keeps the last good values when a pass fails, with `stale_since` saying when they were still true.
 
 | Route | Method | Answers |
 |---|---|---|
@@ -188,6 +188,8 @@ answer says `pending` until the first pass, and keeps the last good values when 
 | `/api/mail/thread?box&since` | GET | one mailbox's messages, newest last |
 | `/api/mail/feed?hours=24` | GET | the whole office as one timeline, newest first, built here |
 | `/api/mail/who` | GET | the live sessions, from `hq who` |
+| `/api/machines` | GET | this farm, the machines it owns and what they cost a month, each with one `state` (`creating`, `preparing`, `needs-login`, `ready`, `unreachable`, `failed`, `destroyed`, `unrecorded`), the command that finishes a new one and the command that tunnels to its dashboard, and the provider's own `provider_id`. From `fleet machines list --json`, read on a thread and never on the request |
+| `/api/hosts` | GET | one row per hosting provider: which job it does (`machine` or `runner`), whether its CLI is installed, `login_state` (`logged_in`, `logged_out`, `not_installed`, `no_answer`, so a slow provider is never drawn as logged out), which of its secrets are stored, the last Test, its `cli`, `color`, `engines` and `docs`, and its terms, pricing, sizes (each with `default`, true on exactly one) and regions. From `fleet hosts list --json`, passed through untouched |
 
 **Write.** Every one of these needs the token, names its own timeout in the code, passes argv as a
 list (never a shell string), and answers with one sentence a person can act on rather than with a
@@ -212,6 +214,15 @@ none is sent to them.
 | `/api/mode` | `{mode}` | the power mode, applied at once |
 | `/api/agent/msg` | `{slug, text}` | `fleet msg`, delivered at the lane's next checkpoint |
 | `/api/mail/send` | `{to, text}` | `hq msg -- <to> <text>` as this dashboard's own name, then wakes the office reader |
+| `/api/machines/plan` | `{provider, name, size, region, ssh_public?}` | `fleet machines plan --provider P --name N --size S --region R [--pubkey-file F] --json`, synchronously, answering with its JSON as it printed it, unwrapped (design section 7), and its job record is under `/api/jobs`. A POST because it runs a tool that asks the provider for today's price; a read-only page never needs a plan. It buys nothing |
+| `/api/machines` | `{provider: "do-droplet", name, size, region, ssh_public, confirm_usd}` | `fleet machines create ... --pubkey-file F --confirm-usd N`, as a job. It asks the provider for the droplet and returns; the progress from `creating` to `needs-login` is made by the refresher's `list`. Without `ssh_public` it is refused with `Your SSH public key is how your laptop reaches the machine.`, because the finish command and the tunnel are both run from the person's laptop |
+| `/api/machines` | `{provider: "ssh", name, target, port?}` | `fleet machines add --name N --target user@host [--port P]`, as a job. Nothing is bought: the machine is registered and checked |
+| `/api/machines/check` | `{name}` | `fleet machines check N`, as a job |
+| `/api/machines/destroy` | `{name, confirm}` | `fleet machines destroy N --confirm N`, as a job. `400` unless the confirmation repeats the machine's name: the disk goes with it, and this is the only thing that stops the billing |
+| `/api/machines/adopt` | `{name}` | `fleet machines adopt N`, for a droplet this farm made and lost: the row is written back from the provider's own facts |
+| `/api/machines/forget` | `{name}` | `fleet machines forget N`: the row goes, the machine is not touched |
+| `/api/hosts/check` | `{provider}` | `fleet hosts check <provider>`, as a job |
+| `/api/hosts/test` | `{provider, project, confirm: true}` | `fleet runner test <provider> --project P`, as a job. It creates the smallest sandbox the provider sells, runs two commands in it and deletes it, so it spends a few cents: `400` without `confirm: true` |
 
 ### Long actions are jobs
 
@@ -230,6 +241,24 @@ flight. A job ends `done` or `failed`, with the exit code, the tail of what the 
 a failure, one sentence naming it. A job whose dashboard is gone reads as `failed` rather than as
 running for ever, and a finished record is forgotten after a day, by the 45 second refresher and
 not only by the next job to start.
+
+Hosting jobs take a key of their own: `machine:<name>` for everything about one machine, so a
+second machine can be ordered while the first one is still booting, and `host:<provider>` for a
+provider's check and test. When one of them ends, the hosting snapshot is asked to look again at
+once, rather than at the end of its 45 second sleep. A token never goes through any of these
+routes: a body with a field whose name carries key, secret, token, credential or password is
+refused with `A token never goes through this page. Run the login command in a terminal on this
+farm.`, and the refusal repeats neither the value nor the field's name. A person's SSH public key
+is not a credential and may be typed in, under the field name `ssh_public`; it is written to a
+0600 temporary file, passed as `--pubkey-file`, and deleted the moment the job ends.
+
+A runner test holds a paid sandbox while it runs. Past its 600 second timeout it is sent SIGTERM,
+to its whole process group, and given 60 seconds to delete the sandbox before it is killed; the
+grace only helps a `fleet runner test` that turns SIGTERM into its own delete. The grace is not
+what owns a leak. The contract is that `fleet runner test` writes its handle,
+`$FLEET_STATE/runners/<slug>.json`, before it asks the provider for anything, exactly as a runner
+lane does (design section 5), so a test that is killed anyway leaves a sandbox `fleet runner reap`
+finds and deletes on the next sweep.
 
 The refusal is about the RESOURCE, not the verb. A job holds a `key`, and starting anything that
 holds the same key is refused with `409` and the record of the one in flight, because pressing

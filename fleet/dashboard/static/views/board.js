@@ -191,13 +191,11 @@ function severity(percent) {
   return "";
 }
 
-function outOfRoom(account) {
-  if (account.limit_reached) return true;
-  return windows(account).some((row) => row.percent != null && row.percent >= 100);
-}
-
+/* Every window the account has, the model-scoped ones included: the card used to cut at two
+   and hide the one window that was actually spent. */
 function accountCard(account, context) {
-  const rows = windows(account).slice(0, 2);
+  const rows = windows(account);
+  const state = fmt.room(account);
   const soonest = windows(account)
     .map((row) => row.resets)
     .filter((value) => value != null)
@@ -205,16 +203,17 @@ function accountCard(account, context) {
   return h("button", {
     key: account.name,
     type: "button",
-    class: `card card-pad account-chip${outOfRoom(account) ? " out" : ""}`,
+    class: `card card-pad account-chip${state && state.meaning === "fail" ? " out" : ""}`,
     "data-account": account.name,
-    title: "Open this subscription on the Machine tab",
+    title: `${account.email || account.label || account.name}, folder ${account.name}. `
+      + "Open this subscription on the Machine tab",
     onclick: () => context.go("machine", { section: "accounts", account: account.name }),
   },
     h("div", { class: "label" },
       h("b", null, account.label || account.name),
       account.engine ? h("span", { class: "tag" }, account.engine) : null,
       h("div", { class: "spacer" }),
-      outOfRoom(account) ? pill("fail", "Out of room", "") : null),
+      state ? pill(state.meaning, state.word, "") : null),
     rows.length
       ? h("div", { class: "limits" }, rows.map((row) => h("div", { class: "limit", key: row.name },
         h("span", { class: "lname" }, row.name),

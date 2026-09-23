@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""A fake railway CLI, for the login check only.
+
+  FAKE_LOG=<path>              every call appended as one JSON line {argv, stdin}
+  FAKE_RAILWAY_LOGGED_IN=1     `railway whoami --json` answers with an account
+  FAKE_RAILWAY_SLEEP=20        answer slowly, so a caller's timeout can fire
+  FAKE_RAILWAY_LEAK=<text>     print this on stderr, so a test can prove the scrub catches it
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fakelib import die, flag, out, record, slow  # noqa: E402
+
+
+def main():
+    argv = record()
+    slow("RAILWAY")
+    args = argv[1:]
+
+    if args[:1] == ["whoami"]:
+        if not flag("FAKE_RAILWAY_LOGGED_IN"):
+            leak = flag("FAKE_RAILWAY_LEAK")
+            die("Unauthorized. Please login with `railway login`"
+                + (f" (token {leak} was refused)" if leak else ""))
+        account = {"name": flag("FAKE_RAILWAY_NAME", "Fake Owner"),
+                   "email": flag("FAKE_RAILWAY_EMAIL", "owner@example.com"),
+                   "workspaces": [{"id": "ws-1", "name": "Personal"}]}
+        out(json.dumps(account) if "--json" in args else f"Logged in as {account['email']}")
+        return 0
+
+    die(f"Unknown command: {' '.join(args)}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

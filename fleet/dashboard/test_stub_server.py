@@ -40,7 +40,7 @@ STATES = ("ready", "empty", "error", "loading", "quiet")
 # Routes served from a background snapshot. In the loading state they answer at once and say
 # the first pass has not happened, which is a different thing from a slow request.
 SNAPSHOT_ROUTES = ("/api/config", "/api/health", "/api/mail/", "/api/services",
-                   "/api/accounts/login-state")
+                   "/api/accounts/login-state", "/api/hosts", "/api/machines")
 
 
 def ago(seconds):
@@ -631,7 +631,8 @@ LOG_LINES = [f"[{time.strftime('%H:%M:%S', time.localtime(ago(1200 - index * 6))
 # `removed` holds the ids a person has taken out of the catalog in this run, fixture rows
 # included: a farm can remove anything it added, and two of the five fixtures are rows this farm
 # added. Without it the first Remove anyone tried by hand answered "no such model".
-SENT = {"messages": [], "mail": [], "projects": [], "models": [], "removed": []}
+SENT = {"messages": [], "mail": [], "projects": [], "models": [], "removed": [],
+        "machines": []}
 
 
 def models_now():
@@ -783,15 +784,304 @@ def power_preview(action):
     return payload
 
 
-SETTINGS = {
-    "product_name": {"value": "murmur", "file": "FLEET_DASH_TITLE in ~/.fleet/dashboard.env"},
-    "mail_identity": {"value": "dashboard", "file": "FLEET_DASH_HQ_AGENT in ~/.fleet/dashboard.env"},
-    "bind": {"value": "127.0.0.1", "file": "FLEET_DASH_BIND in ~/.fleet/dashboard.env"},
-    "port": {"value": "7878", "file": "FLEET_DASH_PORT in ~/.fleet/dashboard.env"},
-    "token": {"present": True, "file": "~/.fleet/dash-token"},
-    "sweep_interval": {"value": "every 10 minutes", "file": "fleet-sweep.timer"},
-    "respawn_limits": {"value": "6 passes a lane, 40 a day", "file": "~/.fleet/policy.toml"},
+# ------------------------------------------------------------------- hosting
+
+# The providers as fleet/lib/host_presets.py serves them (design section 2), with the facts of
+# the research pass of 2026-09-23: sizes, prices, stages and what each one is honest about.
+# Nothing in this file talks to a provider, and no secret value is ever held here.
+HOST_PRESETS = [
+    {"id": "ssh", "label": "Your own machine", "color": "#7A8699", "job": "machine", "cli": "ssh",
+     "stage": "ga", "install": "", "login": "", "docs": "https://man.openbsd.org/ssh",
+     "engines": ["claude", "codex"],
+     "terms": "Any Linux box you already reach over SSH: a spare PC, WSL2, a company VM.",
+     "pricing": "Whatever you already pay for it.", "secrets": [], "sizes": [], "regions": []},
+    {"id": "do-droplet", "label": "DigitalOcean Droplet", "color": "#0069FF", "job": "machine",
+     "cli": "doctl", "stage": "ga", "install": "sudo snap install doctl",
+     "login": "doctl auth init --context murmur",
+     "docs": "https://docs.digitalocean.com/reference/doctl/", "engines": ["claude", "codex"],
+     "terms": "A droplet is billed per second until it is destroyed. Powering it off does not "
+              "stop the bill.",
+     "pricing": "From $24 a month, list price on 2026-09-23.",
+     "secrets": [],
+     "sizes": [
+         {"slug": "s-2vcpu-4gb", "label": "Small", "vcpu": 2, "ram_gb": 4, "disk_gb": 80,
+          "monthly_usd": 24, "default": False},
+         {"slug": "s-4vcpu-8gb", "label": "Standard", "vcpu": 4, "ram_gb": 8, "disk_gb": 160,
+          "monthly_usd": 48, "default": True},
+         {"slug": "s-8vcpu-16gb", "label": "Large", "vcpu": 8, "ram_gb": 16, "disk_gb": 320,
+          "monthly_usd": 96, "default": False},
+     ],
+     "regions": [{"slug": "fra1", "label": "Frankfurt"}, {"slug": "ams3", "label": "Amsterdam"},
+                 {"slug": "nyc3", "label": "New York"}]},
+    {"id": "do-agents", "label": "DigitalOcean Managed Agents", "color": "#0069FF",
+     "job": "runner", "cli": "doctl", "stage": "preview", "install": "sudo snap install doctl",
+     "login": "doctl auth init --context murmur",
+     "docs": "https://docs.digitalocean.com/products/managed-agents/", "engines": ["claude"],
+     "terms": "Region RIC1 only, and a prepaid balance: a session pauses at zero. A session "
+              "pauses after 15 idle minutes.",
+     "pricing": "About $0.25 an hour for 4 vCPU and 8 GB, billed by DigitalOcean.",
+     "secrets": ["CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN"], "sizes": [], "regions": ["ric1"]},
+    {"id": "railway", "label": "Railway sandboxes", "color": "#8A63D2", "job": "runner",
+     "cli": "railway", "stage": "early access", "install": "npm install -g @railway/cli",
+     "login": "railway login --browserless", "docs": "https://docs.railway.com/cli/sandbox",
+     "engines": ["claude"],
+     "terms": "A sandbox stops itself after 30 idle minutes, which is Railway's own backstop.",
+     "pricing": "$50 per vCPU-month and $50 per GB-month, while it runs.",
+     "secrets": ["CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN"], "sizes": [], "regions": []},
+    {"id": "vercel", "label": "Vercel Sandbox", "color": "#000000", "job": "runner",
+     "cli": "sandbox", "stage": "ga", "install": "npm install -g sandbox", "login": "sandbox login",
+     "docs": "https://vercel.com/docs/sandbox/cli-reference", "engines": ["claude"],
+     "terms": "Up to 24 hours a session on Pro, 45 minutes on Hobby. UNVERIFIED: live streaming "
+              "out of exec is not documented.",
+     "pricing": "About $0.13 an hour of active CPU, plus memory.",
+     "secrets": ["CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN"], "sizes": [], "regions": []},
+]
+
+# What this farm knows about each provider. `secrets` maps a stored name to the account label
+# it was stored with; a name that is not in it is not stored. The four login states are spread
+# across the states of this stub, because a page that only ever sees "logged in" draws the
+# other three by guesswork.
+HOST_FARM = {
+    "ssh": {"cli_installed": True, "login_state": "logged_in", "account": "this farm's own key",
+            "detail": "", "checked_at": ago(120), "secrets": {}, "tested": None},
+    "do-droplet": {"cli_installed": True, "login_state": "logged_in",
+                   "account": "owner@example.invalid", "detail": "", "checked_at": ago(90),
+                   "secrets": {}, "tested": None},
+    "do-agents": {"cli_installed": False, "login_state": "not_installed", "account": "",
+                  "detail": "this doctl build has no harness-runtime commands",
+                  "checked_at": ago(220), "secrets": {}, "tested": None},
+    "railway": {"cli_installed": True, "login_state": "logged_in", "account": "murmur-workspace",
+                "detail": "", "checked_at": ago(70),
+                "secrets": {"CLAUDE_CODE_OAUTH_TOKEN": "work subscription", "GITHUB_TOKEN": ""},
+                "tested": {"ok": True, "at": ago(5400), "seconds": 54,
+                           "detail": "a sandbox started, claude answered and it was deleted"}},
+    "vercel": {"cli_installed": True, "login_state": "logged_out", "account": "",
+               "detail": "sandbox list came back with no session", "checked_at": ago(140),
+               "secrets": {"GITHUB_TOKEN": ""},
+               "tested": {"ok": False, "at": ago(9000), "seconds": 12,
+                          "detail": "the sandbox was created and exec never streamed"}},
 }
+
+FRESH_FARM = {"cli_installed": False, "login_state": "not_installed", "account": "",
+              "detail": "", "checked_at": None, "secrets": {}, "tested": None}
+
+# A Test asked for through the page. It is answered the way a job is: not before its seconds
+# are up, so the page can be watched flipping the pill by itself.
+TESTS = {}
+
+
+def host_rows(state):
+    """The providers, in the shape of design section 7 as amended (cli, color, engines and docs
+    on every row; default on every size): one preset plus this farm's reading, and no field
+    the contract does not name, so a page that leans on one is caught here."""
+    rows = []
+    for preset in HOST_PRESETS:
+        farm = dict(FRESH_FARM if state == "empty" else HOST_FARM[preset["id"]])
+        stored = dict(farm["secrets"])
+        tested = farm["tested"]
+        asked = TESTS.get(preset["id"])
+        if asked and time.time() - asked["at"] >= JOB_SECONDS:
+            tested = {"ok": True, "at": asked["at"] + JOB_SECONDS, "seconds": 57,
+                      "detail": f"a sandbox ran claude --version and git ls-remote for "
+                                f"{asked['project']}, then was deleted"}
+        rows.append({
+            "id": preset["id"], "label": preset["label"], "color": preset["color"],
+            "job": preset["job"], "stage": preset["stage"], "cli": preset["cli"],
+            "docs": preset["docs"], "engines": list(preset["engines"]),
+            "cli_installed": farm["cli_installed"], "login_state": farm["login_state"],
+            "account": farm["account"], "detail": farm["detail"],
+            "checked_at": farm["checked_at"],
+            "secrets": [{"name": name, "stored": name in stored,
+                         "account": stored.get(name, "")} for name in preset["secrets"]],
+            "tested": tested,
+            "login": preset["login"], "install": preset["install"], "terms": preset["terms"],
+            "pricing": preset["pricing"], "sizes": preset["sizes"], "regions": preset["regions"],
+        })
+    return rows
+
+
+THIS_FARM = {"name": "quartz", "address": "127.0.0.1"}
+
+FINISH_TEMPLATE = ("ssh -t farm@{address} 'gh auth login && gh repo clone magik-ai/murmur "
+                   "~/work/murmur -- -q && bash ~/work/murmur/farm/install.sh --remote'")
+TUNNEL_TEMPLATE = "ssh -N -L 7878:127.0.0.1:7878 farm@{address}"
+
+# One machine per state, because each one offers a different set of actions and a different
+# sentence about money, and a table with only ready rows in it proves none of them.
+MACHINES = [
+    {"name": "athens", "provider": "do-droplet", "user": "farm", "address": "203.0.113.10",
+     "size": "s-4vcpu-8gb", "monthly_usd": 48, "region": "fra1", "state": "ready",
+     "detail": "fleet capacity answered", "checked_at": ago(180), "provider_id": 4001,
+     "finish_command": "", "tunnel_command": TUNNEL_TEMPLATE.format(address="203.0.113.10")},
+    {"name": "brussels", "provider": "do-droplet", "user": "farm", "address": "203.0.113.11",
+     "size": "s-2vcpu-4gb", "monthly_usd": 24, "region": "ams3", "state": "needs-login",
+     "detail": "first boot finished, your two logins are left", "checked_at": ago(300),
+     "provider_id": 4002, "finish_command": FINISH_TEMPLATE.format(address="203.0.113.11"),
+     "tunnel_command": ""},
+    {"name": "cairo", "provider": "do-droplet", "user": "farm", "address": "",
+     "size": "s-8vcpu-16gb", "monthly_usd": 96, "region": "nyc3", "state": "creating",
+     "detail": "the provider is building it", "checked_at": ago(20), "provider_id": None,
+     "finish_command": "", "tunnel_command": ""},
+    {"name": "delhi", "provider": "do-droplet", "user": "farm", "address": "203.0.113.13",
+     "size": "s-4vcpu-8gb", "monthly_usd": 48, "region": "fra1", "state": "preparing",
+     "detail": "cloud-init is installing packages", "checked_at": ago(45), "provider_id": 4004,
+     "finish_command": "", "tunnel_command": ""},
+    {"name": "edinburgh", "provider": "do-droplet", "user": "farm", "address": "203.0.113.14",
+     "size": "s-2vcpu-4gb", "monthly_usd": 24, "region": "ams3", "state": "unreachable",
+     "detail": "ssh timed out after 5 seconds", "checked_at": ago(900), "provider_id": 4005,
+     "finish_command": "", "tunnel_command": ""},
+    {"name": "faro", "provider": "do-droplet", "user": "farm", "address": "",
+     "size": "s-4vcpu-8gb", "monthly_usd": 48, "region": "fra1", "state": "failed",
+     "detail": "doctl refused: this account has no payment method on file",
+     "checked_at": ago(1200), "provider_id": None, "finish_command": "", "tunnel_command": ""},
+    {"name": "genoa", "provider": "do-droplet", "user": "farm", "address": "",
+     "size": "s-4vcpu-8gb", "monthly_usd": 48, "region": "nyc3", "state": "destroyed",
+     "detail": "destroyed on 2026-09-20; nothing is billed for it",
+     "checked_at": ago(36000), "provider_id": 4007, "finish_command": "", "tunnel_command": ""},
+    {"name": "haifa", "provider": "do-droplet", "user": "farm", "address": "203.0.113.17",
+     "size": "s-2vcpu-4gb", "monthly_usd": 24, "region": "fra1", "state": "unrecorded",
+     "detail": "tagged murmur-by-quartz at the provider and not in this registry",
+     "checked_at": ago(120), "provider_id": 4008, "finish_command": "", "tunnel_command": ""},
+    {"name": "ithaca", "provider": "ssh", "user": "dev", "address": "192.168.1.40",
+     "size": "", "monthly_usd": 0, "region": "", "state": "ready",
+     "detail": "fleet capacity answered", "checked_at": ago(600), "provider_id": None,
+     "finish_command": "", "tunnel_command": TUNNEL_TEMPLATE.format(address="192.168.1.40")},
+]
+
+# A lane name on a real farm is longer than a card, and so is a machine name a person gave a
+# ticket number. The quiet state carries one of each, so the ellipsis rule is measured.
+LONG_MACHINES = [
+    {"name": "the-second-farm-for-the-checkout-rewrite-and-its-nightly-lanes",
+     "provider": "do-droplet", "user": "farm", "address": "203.0.113.200",
+     "size": "s-8vcpu-16gb", "monthly_usd": 96, "region": "fra1", "state": "ready",
+     "detail": "fleet capacity answered with fourteen cores free, which is more than this farm "
+               "has, and the whole sentence belongs on the title rather than in the cell",
+     "checked_at": ago(60), "provider_id": 4100, "finish_command": "",
+     "tunnel_command": TUNNEL_TEMPLATE.format(address="203.0.113.200")},
+]
+
+MACHINE_STEP_SECONDS = float(os.environ.get("STUB_MACHINE_SECONDS", "3"))
+MACHINE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
+MACHINE_NAME_RULE = ("a machine name is lower case letters, digits and dashes, starting with a "
+                     "letter, 2 to 31 characters")
+TARGET_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.:_-]+$")
+PUBLIC_KEY_RE = re.compile(r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-[a-z0-9-]+)\s+[A-Za-z0-9+/=]+"
+                           r"(\s+\S.*)?$")
+# The four exact token shapes scrub.py knows. A value that matches one is refused, and the
+# refusal never repeats the value: a sentence that echoes a token has leaked it.
+TOKEN_SHAPES = re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36,}"
+                          r"|github_pat_[A-Za-z0-9_]{50,}|dop_v1_[a-f0-9]{64}")
+SECRET_REFUSAL = ("a secret never goes through this page: store it in a terminal with "
+                  "fleet hosts secret <provider> <NAME>")
+
+
+def advance(row):
+    """A machine created through the page moves on by itself, as the farm's refresher moves it.
+
+    The page must never do this arithmetic: the row is the farm's, and this stub stands in for
+    a refresher that carries one step per pass."""
+    born = row.get("created_at")
+    if not born or row["state"] not in ("creating", "preparing", "needs-login"):
+        return row
+    elapsed = time.time() - born
+    if row["provider"] == "ssh":
+        return row
+    if elapsed < MACHINE_STEP_SECONDS:
+        row["state"] = "creating"
+    elif elapsed < MACHINE_STEP_SECONDS * 2:
+        row["state"] = "preparing"
+        row["address"] = row["address"] or "203.0.113.50"
+        row["provider_id"] = row["provider_id"] or 4200
+    else:
+        row["state"] = "needs-login"
+        row["address"] = row["address"] or "203.0.113.50"
+        row["provider_id"] = row["provider_id"] or 4200
+        row["finish_command"] = FINISH_TEMPLATE.format(address=row["address"])
+    row["checked_at"] = time.time()
+    return row
+
+
+def machines_for(state):
+    rows = [] if state == "empty" else MACHINES
+    if state == "quiet":
+        rows = MACHINES + LONG_MACHINES
+    return [advance(row) for row in rows + SENT["machines"]]
+
+
+# The fields of a machine row in design section 7, as amended (provider_id). The stub keeps a
+# little bookkeeping of its own on a row (created_at), and none of it is ever sent.
+MACHINE_FIELDS = ("name", "provider", "user", "address", "size", "monthly_usd", "region",
+                  "state", "detail", "checked_at", "provider_id", "finish_command",
+                  "tunnel_command")
+
+
+def machines_payload(state, **extra):
+    rows = machines_for(state)
+    # As the farm counts it: a destroyed droplet, and a failed row the provider never made a
+    # droplet for, cost nothing, and neither does a machine of your own.
+    total = sum(row["monthly_usd"] or 0 for row in rows
+                if row["state"] != "destroyed" and row["provider"] != "ssh"
+                and not (row["state"] == "failed" and not row["provider_id"]))
+    return envelope(this=dict(THIS_FARM), total_monthly_usd=total,
+                    machines=[{field: row.get(field) for field in MACHINE_FIELDS}
+                              for row in rows], **extra)
+
+
+def machine_named(name):
+    return next((row for row in machines_for("ready") if row["name"] == name), None)
+
+
+def size_named(slug):
+    droplet = next(row for row in HOST_PRESETS if row["id"] == "do-droplet")
+    return next((size for size in droplet["sizes"] if size["slug"] == slug), None)
+
+
+def machine_plan(body):
+    """What `fleet machines plan --json` prints: the commands, the file, and the live price."""
+    name = str(body.get("name") or "")
+    size = size_named(str(body.get("size") or ""))
+    region = str(body.get("region") or "")
+    if not MACHINE_NAME_RE.match(name):
+        return 400, {"error": MACHINE_NAME_RULE}
+    if size is None:
+        return 400, {"error": "that is not a size this provider sells"}
+    # As `fleet machines plan --json` prints them: each command its argument list, not a string.
+    commands = [
+        ["doctl", "compute", "ssh-key", "import", "murmur-quartz", "--public-key-file",
+         "/tmp/xxxx.pub", "--context", "murmur"],
+        # Inbound SSH only, and every outbound rule: a DigitalOcean firewall denies whatever it
+        # does not list, outbound included, so one without these would cut the farm off from
+        # GitHub and the model providers (internal/research/report-hosting.md, "Firewall").
+        ["doctl", "compute", "firewall", "create", "--name", "murmur-ssh-only", "--tag-names",
+         "murmur-farm", "--inbound-rules",
+         "protocol:tcp,ports:22,address:0.0.0.0/0 protocol:tcp,ports:22,address:::/0",
+         "--outbound-rules",
+         "protocol:tcp,ports:0,address:0.0.0.0/0 protocol:udp,ports:0,address:0.0.0.0/0 "
+         "protocol:icmp,address:0.0.0.0/0 protocol:tcp,ports:0,address:::/0 "
+         "protocol:udp,ports:0,address:::/0", "--context", "murmur"],
+        ["doctl", "compute", "droplet", "create", name, "--size", size["slug"], "--region", region,
+         "--image", "ubuntu-24-04-x64", "--tag-names", "murmur,murmur-farm,murmur-by-quartz",
+         "--user-data-file", "/tmp/xxxx.yaml", "-o", "json", "--context", "murmur"],
+    ]
+    cloud_init = "\n".join([
+        "#cloud-config",
+        "users:",
+        "  - name: farm",
+        "    shell: /bin/bash",
+        "    ssh_authorized_keys:",
+        "      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... farm@quartz",
+        "      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... you@laptop",
+        "packages: [git, tmux, python3, curl, ca-certificates]",
+        "runcmd:",
+        "  - runuser -u farm -- sh -c 'mkdir -p ~/.config/fleet && echo "
+        "FLEET_DASH_BIND=127.0.0.1 >> ~/.config/fleet/env'",
+        "  - loginctl enable-linger farm",
+    ])
+    return 200, {"ok": True, "provider": "do-droplet", "name": name, "size": size["slug"],
+                 "region": region, "monthly_usd": size["monthly_usd"],
+                 "price_source": "live, doctl compute size list",
+                 "commands": commands, "cloud_init": cloud_init}
+
 
 # ------------------------------------------------------------------- the server
 
@@ -801,12 +1091,9 @@ def config_for(state):
                 "ci_daemon": True, "forge": True, "health_panel": False}
     if state == "error":
         features.update({"hq": False, "gpu": False, "cpu_temp": True})
-    settings = {name: dict(value) for name, value in SETTINGS.items()}
-    if state == "error":
-        settings["token"] = {"present": False, "file": "~/.fleet/dash-token"}
     return {"title": "murmur", "version": "2026.09.21-a1b2c3d", "features": features,
             "hq_agent": "dashboard", "farm_alias": "farm", "at": iso(), "stale_since": None, "error": None,
-            "pending": None, "settings": settings}
+            "pending": None}
 
 
 def envelope(stale_since=None, error=None, pending=None, **payload):
@@ -830,7 +1117,8 @@ def pending_payload(path):
         return answer
     key = {"/api/health": "checks", "/api/mail/boxes": "boxes", "/api/mail/thread": "messages",
            "/api/mail/feed": "events", "/api/mail/who": "sessions",
-           "/api/services": "services", "/api/accounts/login-state": "accounts"}.get(path, "items")
+           "/api/services": "services", "/api/accounts/login-state": "accounts",
+           "/api/hosts": "providers", "/api/machines": "machines"}.get(path, "items")
     return envelope(pending=iso(), **{key: []})
 
 
@@ -845,6 +1133,19 @@ def quiet_payload(path, query):
                      "running": [], "queued": [], "recent": QUEUE["recent"]}
     if path == "/api/mail/boxes":
         return 200, envelope(boxes=MAIL_BOXES_DOUBLED)
+    if path == "/api/hosts":
+        # A provider that was slow is not a provider you are logged out of, and this is the one
+        # state that produces that reading.
+        rows = host_rows("ready")
+        for row in rows:
+            if row["id"] == "do-agents":
+                row["login_state"] = "no_answer"
+                row["cli_installed"] = True
+                row["detail"] = ("the check did not come back within fifteen seconds, so this "
+                                 "farm cannot say whether it is logged in")
+        return 200, envelope(providers=rows)
+    if path == "/api/machines":
+        return 200, machines_payload("quiet")
     if path == "/api/agent":
         slug = query.get("slug", [""])[0]
         for agent in LONG_AGENTS:
@@ -937,6 +1238,22 @@ def payload_for(state, path, query):
                                         "cannot be read or switched from here.",
                          "fix": "loginctl enable-linger $USER"}
         return 200, envelope(services=services_for(state))
+    if path == "/api/hosts":
+        if state == "error":
+            # A snapshot the farm could not refresh: the last reading, and since when it is old.
+            return 200, envelope(stale_since=ago(1800),
+                                 error="fleet hosts list did not answer within sixty seconds",
+                                 providers=host_rows("ready"))
+        return 200, envelope(providers=host_rows(state))
+    if path == "/api/machines":
+        if state == "error":
+            # The same envelope as /api/hosts: no GET runs a tool, so a refresh that failed is a
+            # stale snapshot, never a failed request. A route that fails outright is a case the
+            # hostile pass asks for on its own.
+            return 200, machines_payload("ready", stale_since=ago(1800),
+                                         error="fleet machines list did not answer within "
+                                               "sixty seconds")
+        return 200, machines_payload(state)
     if path == "/api/jobs":
         return 200, {"jobs": [job_view(job) for job in JOBS.values()]}
     if path.startswith("/api/jobs/"):
@@ -1036,6 +1353,7 @@ HARNESS = r"""<!doctype html>
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/queue.css">
 <link rel="stylesheet" href="/static/machine.css">
+<link rel="stylesheet" href="/static/hosting.css">
 </head>
 <body>
 <div id="app">
@@ -1414,7 +1732,138 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     "sentence": f"{name} is no longer registered. Its dev "
                                                 f"server port block, {freed}, is free for the "
                                                 "next project."})
+        if parsed.path.startswith("/api/machines") or parsed.path.startswith("/api/hosts"):
+            return self._json(*self._hosting(parsed.path, body))
         return self._json(404, {"error": "not found"})
+
+    def _hosting(self, path, body):
+        """The writes of design section 7, with the refusals the real server makes.
+
+        Every one of them answers 202 with a job, except plan, which is read-only and answers
+        at once. A body carrying a credential by any name is refused before anything else, so a
+        page that started asking for one fails here rather than on a farm."""
+        named = key_field(body)
+        if named:
+            return 400, {"error": f"{named}: {SECRET_REFUSAL}"}
+        # Every string in the body, before any other refusal and before a plan is drawn from it:
+        # a token pasted into the wrong field is refused without being repeated anywhere.
+        if any(isinstance(value, str) and TOKEN_SHAPES.search(value) for value in body.values()):
+            return 400, {"error": f"that value looks like a token: {SECRET_REFUSAL}"}
+        if path == "/api/machines/plan":
+            return machine_plan(body)
+        if path == "/api/machines":
+            return self._machine_create(body)
+        name = str(body.get("name") or "").strip()
+        if path in ("/api/machines/check", "/api/machines/destroy", "/api/machines/adopt",
+                    "/api/machines/forget"):
+            row = machine_named(name)
+            if row is None:
+                return 404, {"error": f"there is no machine called {name or 'that'}"}
+            if path == "/api/machines/destroy":
+                if str(body.get("confirm") or "") != name:
+                    return 400, {"error": "a destroy is confirmed by typing the machine's name"}
+                if row["provider"] == "ssh":
+                    return 400, {"error": "a machine of your own is forgotten, never destroyed"}
+                row["state"] = "destroyed"
+                row["detail"] = "destroyed from the dashboard; nothing is billed for it"
+                row["checked_at"] = time.time()
+                return 202, {"job": job_new("destroy machine", f"deleting {name}")}
+            if path == "/api/machines/adopt":
+                if row["state"] != "unrecorded":
+                    return 400, {"error": "only a droplet this farm does not have a row for is "
+                                          "adopted"}
+                row["state"] = "needs-login"
+                row["detail"] = "adopted from the provider's own facts"
+                row["finish_command"] = FINISH_TEMPLATE.format(address=row["address"])
+                row["checked_at"] = time.time()
+                return 202, {"job": job_new("adopt machine", f"writing the row for {name}")}
+            if path == "/api/machines/forget":
+                forgettable = (row["state"] == "destroyed" or row["provider"] == "ssh"
+                               or (row["state"] == "failed" and not row["provider_id"]))
+                if not forgettable:
+                    return 400, {"error": f"{name} still exists at the provider: destroy it "
+                                          "rather than forgetting it"}
+                if row in MACHINES:
+                    MACHINES.remove(row)
+                if row in SENT["machines"]:
+                    SENT["machines"].remove(row)
+                return 202, {"job": job_new("forget machine", f"dropping the row for {name}")}
+            row["checked_at"] = time.time()
+            if row["state"] == "unreachable":
+                row["state"] = "ready"
+                row["detail"] = "fleet capacity answered"
+            return 202, {"job": job_new("check machine", f"ssh to {name}")}
+        provider = str(body.get("provider") or "").strip()
+        preset = next((row for row in HOST_PRESETS if row["id"] == provider), None)
+        if preset is None:
+            return 404, {"error": f"there is no provider called {provider or 'that'}"}
+        if path == "/api/hosts/check":
+            return 202, {"job": job_new("check host", f"asking {provider} who this farm is")}
+        if path == "/api/hosts/test":
+            if body.get("confirm") is not True:
+                return 400, {"error": "a test starts a real sandbox and costs money: it needs "
+                                      "confirm"}
+            project = str(body.get("project") or "").strip()
+            if not project:
+                return 400, {"error": "a test needs the project whose repository it clones"}
+            TESTS[provider] = {"at": time.time(), "project": project}
+            return 202, {"job": job_new("test runner", f"starting a {provider} sandbox")}
+        return 404, {"error": f"the stub does not serve {path}"}
+
+    def _machine_create(self, body):
+        """POST /api/machines: the row is written before the provider is called, so a droplet
+        can never exist without one (design section 4)."""
+        provider = str(body.get("provider") or "").strip()
+        name = str(body.get("name") or "").strip()
+        if provider not in ("do-droplet", "ssh"):
+            return 400, {"error": "a machine runs on do-droplet or on ssh"}
+        # The rule, never the rejected value: a refusal is printed on the page, and the value may
+        # be a token pasted into the wrong field.
+        if not MACHINE_NAME_RE.match(name):
+            return 400, {"error": MACHINE_NAME_RULE}
+        live = machine_named(name)
+        if live is not None and live["state"] != "destroyed":
+            return 400, {"error": f"there is already a machine called {name}"}
+        if provider == "ssh":
+            target = str(body.get("target") or "").strip()
+            if not TARGET_RE.match(target):
+                return 400, {"error": "a target reads user@host"}
+            port = body.get("port")
+            if port not in (None, "") and not str(port).isdigit():
+                return 400, {"error": "a port is a whole number"}
+            user, _, address = target.partition("@")
+            row = {"name": name, "provider": "ssh", "user": user, "address": address,
+                   "size": "", "monthly_usd": 0, "region": "", "state": "ready",
+                   "detail": "registered from the dashboard", "checked_at": time.time(),
+                   "provider_id": None, "finish_command": "",
+                   "tunnel_command": TUNNEL_TEMPLATE.format(address=address),
+                   "created_at": time.time()}
+            SENT["machines"].append(row)
+            return 202, {"job": job_new("add machine", f"checking ssh to {target}")}
+        size = size_named(str(body.get("size") or ""))
+        if size is None:
+            return 400, {"error": "that is not a size this provider sells"}
+        if not str(body.get("region") or "").strip():
+            return 400, {"error": "a droplet needs a region"}
+        public = str(body.get("ssh_public") or "").strip()
+        # The refusal never repeats the value: a sentence that echoes a token has leaked it.
+        if TOKEN_SHAPES.search(public):
+            return 400, {"error": f"that value looks like a token, not a public key: "
+                                  f"{SECRET_REFUSAL}"}
+        if not PUBLIC_KEY_RE.match(public):
+            return 400, {"error": "a public key is one line of ssh-ed25519, ssh-rsa or "
+                                  "ecdsa-sha2"}
+        if float(body.get("confirm_usd") or 0) != float(size["monthly_usd"]):
+            return 400, {"error": f"the price you confirmed is not the live price, which is "
+                                  f"${size['monthly_usd']} a month"}
+        row = {"name": name, "provider": "do-droplet", "user": "farm", "address": "",
+               "size": size["slug"], "monthly_usd": size["monthly_usd"],
+               "region": str(body.get("region")), "state": "creating",
+               "detail": "the row is written; the provider has not answered yet",
+               "checked_at": time.time(), "provider_id": None, "finish_command": "",
+               "tunnel_command": "", "created_at": time.time()}
+        SENT["machines"].append(row)
+        return 202, {"job": job_new("create machine", f"asking DigitalOcean for {name}")}
 
     def _model_add(self, body):
         """POST /api/models/add: the farm's catalog gains one entry, written from a preset.

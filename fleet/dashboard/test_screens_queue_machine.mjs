@@ -149,9 +149,11 @@ async function measured(page, state, screen, size) {
       };
     });
     const out = [
-      ["carries its six sections",
-        ["Power", "Services", "Accounts", "Models", "Projects", "Settings"]
+      ["carries its five sections",
+        ["Power", "Services", "Accounts", "Models", "Projects"]
           .every((word) => body.includes(word)), body.slice(0, 120)],
+      ["draws no Settings section, which only repeated where files live",
+        !body.includes("written where they live"), "the owner asked for it gone"],
       ["draws no Health section on a farm that has not asked for one",
         !body.includes("What this farm needs"), "Health is off unless FLEET_DASH_HEALTH=on"],
       ["says the dashboard keeps running through a power action",

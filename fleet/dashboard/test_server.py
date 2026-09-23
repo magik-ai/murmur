@@ -1,11 +1,14 @@
 import contextlib
 import datetime
+import glob
 import http.client
 import importlib.util
 import json
 import os
 import pathlib
 import secrets
+import shutil
+import signal
 import socket
 import sys
 import tempfile
@@ -3082,6 +3085,15 @@ def parsed(what, fields):
     record("fleet-parsed " + what + " " + json.dumps(fields, sort_keys=True))
 
 
+def fixture(name):
+    """What a listing prints: the file the test put there, or nothing at all."""
+    path = os.environ.get(name, "")
+    if not path:
+        return "{{}}"
+    with open(path) as handle:
+        return handle.read()
+
+
 def case_loop(words, flags):
     """fleet/bin/fleet parses with hand written case loops: a word starting with a dash is an
     option or a fatal error, and a bare `--` is one of the fatal ones. Mirrored here, because a
@@ -3185,6 +3197,105 @@ elif command == "mode":
 elif command == "accounts":
     parsed("accounts", {{"args": rest}})
     print("  default          session  12%  weekly  40%")
+elif command == "machines":
+    # The hosting CLI, as the design record's section 4 table writes it. Every branch records
+    # the exact argv it was handed, so a test can assert the list and not a string.
+    sub, tail = (rest[0] if rest else ""), rest[1:]
+    record("fleet-argv " + json.dumps(argv))
+    leak = os.environ.get("FLEET_FAKE_LEAK", "")
+    if sub == "list":
+        parsed("machines list", {{"json": "--json" in tail}})
+        print(fixture("FLEET_FAKE_MACHINES"))
+    elif sub in ("plan", "create"):
+        parser = argparse.ArgumentParser(prog="fleet machines " + sub)
+        parser.add_argument("--provider", required=True)
+        parser.add_argument("--name", required=True)
+        parser.add_argument("--size", required=True)
+        parser.add_argument("--region", required=True)
+        parser.add_argument("--pubkey-file")
+        parser.add_argument("--confirm-usd")
+        parser.add_argument("--json", action="store_true")
+        args = parser.parse_args(tail)
+        fields = vars(args)
+        if args.pubkey_file:
+            # What the dashboard actually handed over: the file's mode and its contents, so a
+            # test can prove the key never travelled on a command line and never stayed behind.
+            fields["pubkey_mode"] = oct(os.stat(args.pubkey_file).st_mode & 0o777)
+            with open(args.pubkey_file) as handle:
+                fields["pubkey_text"] = handle.read().strip()
+        parsed("machines " + sub, fields)
+        if sub == "plan":
+            plan = {{"name": args.name, "size": args.size, "region": args.region,
+                    "monthly_usd": 48, "price_source": "live",
+                    "commands": ["doctl compute droplet create " + args.name],
+                    "cloud_init": "#cloud-config\\nusers:\\n  - name: farm\\n"}}
+            if leak:
+                plan["detail"] = "the provider said: " + leak
+                print("doctl: " + leak, file=sys.stderr)
+            print(json.dumps(plan))
+        else:
+            print("machine '%s' is creating ($%s a month)" % (args.name, args.confirm_usd))
+    elif sub == "add":
+        parser = argparse.ArgumentParser(prog="fleet machines add")
+        parser.add_argument("--name", required=True)
+        parser.add_argument("--target", required=True)
+        parser.add_argument("--port")
+        args = parser.parse_args(tail)
+        parsed("machines add", vars(args))
+        print("registered '%s' and reached it over SSH" % args.name)
+    elif sub == "destroy":
+        # cmd_machines_destroy is a case loop: the name is positional, --confirm takes a value.
+        flags, positional = {{}}, []
+        pending = list(tail)
+        while pending:
+            head = pending.pop(0)
+            if head == "--confirm" and pending:
+                flags["confirm"] = pending.pop(0)
+            elif head.startswith("-"):
+                sys.exit("unknown flag: " + head)
+            else:
+                positional.append(head)
+        if not positional or flags.get("confirm") != positional[0]:
+            sys.exit("fleet machines destroy: --confirm must repeat the machine's name")
+        parsed("machines destroy", {{"name": positional[0], "confirm": flags["confirm"]}})
+        print("destroyed '%s'; billing has stopped" % positional[0])
+    elif sub in ("check", "adopt", "forget"):
+        flags, positional = case_loop(tail, set())
+        if not positional:
+            sys.exit("usage: fleet machines %s <name>" % sub)
+        parsed("machines " + sub, {{"name": positional[0]}})
+        print("%s: %s" % (sub, positional[0]))
+    else:
+        sys.exit("fleet machines: unknown verb " + sub)
+elif command == "hosts":
+    sub, tail = (rest[0] if rest else ""), rest[1:]
+    record("fleet-argv " + json.dumps(argv))
+    if sub == "list":
+        parsed("hosts list", {{"json": "--json" in tail}})
+        print(fixture("FLEET_FAKE_HOSTS"))
+    elif sub == "check":
+        flags, positional = case_loop(tail, set())
+        if not positional:
+            sys.exit("usage: fleet hosts check <provider>")
+        parsed("hosts check", {{"provider": positional[0]}})
+        print("%s: logged in as ada@example.com" % positional[0])
+    else:
+        sys.exit("fleet hosts: unknown verb " + sub)
+elif command == "runner":
+    sub, tail = (rest[0] if rest else ""), rest[1:]
+    record("fleet-argv " + json.dumps(argv))
+    if sub == "test":
+        parser = argparse.ArgumentParser(prog="fleet runner test")
+        parser.add_argument("provider")
+        parser.add_argument("--project", required=True)
+        args = parser.parse_args(tail)
+        parsed("runner test", vars(args))
+        leak = os.environ.get("FLEET_FAKE_LEAK", "")
+        if leak:
+            print("railway: " + leak, file=sys.stderr)
+        print("%s runner passed in 31s" % args.provider)
+    else:
+        sys.exit("fleet runner: unknown verb " + sub)
 elif command == "models":
     sub = rest[0] if rest else "list"
     if sub not in ("list", "enable", "disable", "test", "auth"):
@@ -3855,7 +3966,7 @@ class ReadsCostNothingTest(unittest.TestCase):
                     "/api/mail/who", "/api/services", "/api/ci", "/api/ci/log?id=ci-1&tier=build",
                     "/api/sweep", "/api/mode", "/api/metrics", "/api/accounts", "/api/models",
                     "/api/jobs", "/api/jobs/drain-1", "/api/power/preview?action=drain",
-                    "/api/accounts/login-state")
+                    "/api/accounts/login-state", "/api/machines", "/api/hosts")
 
     def test_no_read_route_runs_a_tool_touches_the_network_or_writes_to_disk(self):
         mail = DashboardMailTest("test_the_office_timeline_is_assembled_here_and_never_by_running_hq_feed")
@@ -4244,6 +4355,904 @@ class ModelsContractTest(unittest.TestCase):
         payload = dashboard.config_payload()
         self.assertEqual(payload.get("farm_alias"), dashboard.CA.FARM_ALIAS)
         self.assertTrue(payload["farm_alias"])
+
+MACHINES_JSON = {
+    "this": {"name": "granite", "address": "100.64.0.11"},
+    "total_monthly_usd": 96,
+    "machines": [
+        {"name": "granite", "provider": "this-farm", "user": "work",
+         "address": "100.64.0.11", "size": "", "monthly_usd": 0, "region": "",
+         "state": "ready", "detail": "this farm", "checked_at": "2026-09-23T08:00:00Z",
+         "finish_command": "", "tunnel_command": ""},
+        {"name": "nursery", "provider": "do-droplet", "user": "farm",
+         "address": "203.0.113.7", "size": "s-4vcpu-8gb", "monthly_usd": 48, "region": "fra1",
+         "state": "needs-login", "detail": "first boot finished",
+         "checked_at": "2026-09-23T08:00:00Z",
+         "finish_command": "ssh -t farm@203.0.113.7 'gh auth login'", "tunnel_command": ""},
+        {"name": "orchard", "provider": "do-droplet", "user": "farm",
+         "address": "203.0.113.9", "size": "s-4vcpu-8gb", "monthly_usd": 48, "region": "fra1",
+         "state": "creating", "detail": "the provider is building it",
+         "checked_at": "2026-09-23T08:00:00Z", "finish_command": "", "tunnel_command": ""},
+    ],
+}
+
+HOSTS_JSON = {
+    "providers": [
+        {"id": "do-droplet", "label": "DigitalOcean Droplet", "job": "machine", "stage": "ga",
+         "cli_installed": True, "login_state": "logged_in", "account": "ada@example.com",
+         "detail": "", "checked_at": "2026-09-23T08:00:00Z",
+         "secrets": [], "tested": None, "login": "doctl auth init --context murmur",
+         "install": "snap install doctl", "terms": "billed per second",
+         "pricing": "$48 a month for 4 vCPU", "sizes": [], "regions": ["fra1"]},
+        {"id": "railway", "label": "Railway sandboxes", "job": "runner",
+         "stage": "early access", "cli_installed": True, "login_state": "logged_in",
+         "account": "ada", "detail": "", "checked_at": "2026-09-23T08:00:00Z",
+         "secrets": [{"name": "CLAUDE_CODE_OAUTH_TOKEN", "stored": True, "account": "personal"},
+                     {"name": "GITHUB_TOKEN", "stored": True, "account": ""}],
+         "tested": {"ok": True, "at": "2026-09-23T07:00:00Z", "seconds": 31, "detail": ""},
+         "login": "railway login --browserless", "install": "npm i -g @railway/cli",
+         "terms": "$50 per vCPU-month", "pricing": "$50 per vCPU-month", "sizes": [],
+         "regions": []},
+        {"id": "vercel", "label": "Vercel Sandbox", "job": "runner", "stage": "ga",
+         "cli_installed": False, "login_state": "not_installed", "account": "",
+         "detail": "sandbox is not on this farm", "checked_at": "2026-09-23T08:00:00Z",
+         "secrets": [{"name": "CLAUDE_CODE_OAUTH_TOKEN", "stored": False, "account": ""}],
+         "tested": None, "login": "sandbox login", "install": "npm i -g @vercel/sandbox",
+         "terms": "45 minutes a session on Hobby", "pricing": "about $0.13 an hour",
+         "sizes": [], "regions": []},
+    ],
+}
+
+PUBKEY = ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB2kLMuFlKR6oCbHVPfZmUMZqTVpGkaAxOaCwIKgHRFC "
+          "ada@laptop")
+
+
+class HostingCase(unittest.TestCase):
+    """The shared fixture: a farm whose FLEET_STATE, FLEET_CONFIG and HOME are all temporary,
+    whose PATH holds fake tools and nothing else, and whose `fleet` prints the two JSON shapes
+    of the design record's section 7 from files this test wrote.
+
+    The provider CLIs are on that PATH too, as fakes that record and do nothing. Nothing here
+    may reach a provider or spend a cent, and the cheapest proof of that is a PATH where the
+    real ones cannot be found and a recording of every argv that was tried.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = pathlib.Path(self.tmp.name)
+        self.state = self.root / "state"
+        self.config = self.root / "config"
+        (self.state / "jobs").mkdir(parents=True)
+        self.config.mkdir()
+        (self.config / "projects.toml").write_text('[alpha]\nrepo = "acme/alpha"\n')
+        self.machines_file = self.root / "machines.json"
+        self.hosts_file = self.root / "hosts.json"
+        self.machines_file.write_text(json.dumps(MACHINES_JSON))
+        self.hosts_file.write_text(json.dumps(HOSTS_JSON))
+        for target, value in (("STATE", str(self.state)), ("CONFIG", str(self.config))):
+            patcher = mock.patch.object(dashboard, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for snapshot, blank in ((dashboard._hosting_machines_snapshot,
+                                 {"this": {}, "total_monthly_usd": 0, "machines": []}),
+                                (dashboard._hosting_hosts_snapshot, {"providers": []})):
+            payload = {"at": None, "tried": False, "stale_since": None, "error": None}
+            payload.update(blank)
+            patcher = mock.patch.dict(snapshot, payload, clear=True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    @contextlib.contextmanager
+    def farm(self, **env):
+        """The fake tools, with the two listings pointed at this test's fixture files."""
+        settings = {"FLEET_FAKE_MACHINES": str(self.machines_file),
+                    "FLEET_FAKE_HOSTS": str(self.hosts_file)}
+        settings.update({name: value for name, value in env.items() if value is not None})
+        providers = {name: 'exit 0\n' for name in
+                     ("doctl", "railway", "sandbox", "vercel", "ssh", "scp", "ssh-keygen")}
+        with fake_tools(dict(providers, fleet=FLEET_FAKE), env=settings) as box:
+            with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
+                self.box = box
+                yield box
+
+    def recorded(self, box):
+        return [line for line in box.calls.read_text().splitlines() if line.strip()]
+
+    def argv(self, box):
+        """Every argv the fake fleet was handed, as lists."""
+        return [json.loads(line[len("fleet-argv "):]) for line in self.recorded(box)
+                if line.startswith("fleet-argv ")]
+
+    def finish(self, job_id, seconds=10):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            record = dashboard.read_job(job_id)[1]
+            if record.get("state") != "running":
+                return record
+            time.sleep(0.02)
+        self.fail(f"job {job_id} never finished")
+
+    def only_job(self, action):
+        """The one job record this test left for `action`, read from the job directory."""
+        records = [json.loads(path.read_text()) for path in (self.state / "jobs").glob("*.json")]
+        records = [record for record in records if record.get("action") == action]
+        self.assertEqual(len(records), 1, records)
+        return records[0]
+
+    def done(self, status, payload, seconds=10):
+        """A started job, run to its end. The assertion is here so every caller reads the
+        refusal rather than a KeyError when a route answers 400."""
+        self.assertEqual(status, 202, payload)
+        return self.finish(payload["job"]["id"], seconds)
+
+
+class HostingProvidersTest(unittest.TestCase):
+    """The server's guard map against the library's catalog. The server never imports the
+    catalog at run time, so this test is what keeps the two from drifting: once
+    `fleet/lib/host_presets.py` is in the tree, every id and job it ships must be in the guard,
+    and the guard may name nothing the catalog does not ship."""
+
+    def test_the_guard_map_is_the_catalog_ids_and_jobs(self):
+        path = os.path.join(dashboard.FLEET_HOME, "lib", "host_presets.py")
+        if not os.path.exists(path):
+            self.skipTest("host_presets.py is hosting-core's and has not merged yet")
+        spec = importlib.util.spec_from_file_location("host_presets_under_test", path)
+        catalog = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(catalog)
+        shipped = {row["id"]: row["job"] for row in catalog.presets()}
+        self.assertEqual(dashboard.HOSTING_PROVIDERS, shipped)
+
+
+class HostingTidyTest(unittest.TestCase):
+    """The hosting lane's own files: no trailing whitespace, and the operations paragraph it
+    edited still wraps like the rest of that document."""
+
+    def test_no_line_ends_in_whitespace(self):
+        for name in ("server.py", "test_server.py"):
+            with open(os.path.join(dashboard.HERE, name)) as handle:
+                for number, line in enumerate(handle, 1):
+                    self.assertEqual(line.rstrip("\n"), line.rstrip(), f"{name}:{number}")
+
+    def test_the_snapshot_paragraph_wraps_near_a_hundred(self):
+        path = os.path.join(dashboard.FLEET_HOME, "docs", "OPERATIONS.md")
+        with open(path) as handle:
+            text = handle.read()
+        start = text.index("**Read, from the snapshot.**")
+        paragraph = text[start:text.index("\n\n", start)]
+        for line in paragraph.splitlines():
+            self.assertLessEqual(len(line), 100, line)
+
+
+class HostingSnapshotTest(HostingCase):
+    """The two listings, read on a thread and served from memory. No GET may run a tool: the
+    page redraws every few seconds, and a droplet listing is a request to a provider."""
+
+    def test_one_pass_publishes_both_listings_in_the_shape_the_page_reads(self):
+        with self.farm() as box:
+            dashboard.hosting_refresh()
+            self.assertEqual(self.argv(box),
+                             [["machines", "list", "--json"], ["hosts", "list", "--json"]])
+        machines = dashboard.hosting_machines()
+        self.assertFalse(machines["pending"])
+        self.assertIsNone(machines["error"])
+        self.assertIsNone(machines["stale_since"])
+        self.assertIsNotNone(dashboard.parse_iso(machines["at"]))
+        self.assertEqual(machines["this"], MACHINES_JSON["this"])
+        self.assertEqual(machines["total_monthly_usd"], 96)
+        self.assertEqual([row["name"] for row in machines["machines"]],
+                         ["granite", "nursery", "orchard"])
+        self.assertEqual(machines["machines"][1]["state"], "needs-login")
+        hosts = dashboard.hosting_hosts()
+        self.assertFalse(hosts["pending"])
+        self.assertEqual([row["id"] for row in hosts["providers"]],
+                         ["do-droplet", "railway", "vercel"])
+        self.assertEqual(hosts["providers"][2]["login_state"], "not_installed")
+
+    def test_the_amended_fields_reach_the_page_untouched(self):
+        """The contract amendment: machine rows carry `provider_id`, provider rows carry `cli`,
+        `color`, `engines` and `docs`, and each size carries `default`. The core lane emits
+        them, this server passes them through as they are, and the page relies on them."""
+        machines = json.loads(self.machines_file.read_text())
+        machines["machines"][1]["provider_id"] = 4001
+        machines["machines"][2]["provider_id"] = None
+        self.machines_file.write_text(json.dumps(machines))
+        hosts = json.loads(self.hosts_file.read_text())
+        droplet = hosts["providers"][0]
+        droplet.update({"cli": "doctl", "color": "#0069ff", "engines": ["claude", "codex"],
+                        "docs": "https://docs.digitalocean.com/reference/doctl/"})
+        droplet["sizes"] = [
+            {"slug": "s-2vcpu-4gb", "monthly_usd": 24, "default": False},
+            {"slug": "s-4vcpu-8gb", "monthly_usd": 48, "default": True}]
+        self.hosts_file.write_text(json.dumps(hosts))
+        with self.farm():
+            dashboard.hosting_refresh()
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                    mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+                _, served_machines = fetch_json(base, "/api/machines", token="s3cret")
+                _, served_hosts = fetch_json(base, "/api/hosts", token="s3cret")
+        self.assertEqual([row.get("provider_id", "absent") for row in served_machines["machines"]],
+                         ["absent", 4001, None])
+        self.assertEqual(served_machines["machines"], machines["machines"])
+        served = served_hosts["providers"][0]
+        self.assertEqual(served["cli"], "doctl")
+        self.assertEqual(served["color"], "#0069ff")
+        self.assertEqual(served["engines"], ["claude", "codex"])
+        self.assertEqual(served["docs"], droplet["docs"])
+        self.assertEqual([size["default"] for size in served["sizes"]], [False, True])
+        self.assertEqual(served_hosts["providers"], hosts["providers"])
+
+    def test_before_the_first_pass_both_answers_say_pending_and_not_empty(self):
+        for answer in (dashboard.hosting_machines(), dashboard.hosting_hosts()):
+            self.assertTrue(answer["pending"])
+            self.assertIsNone(answer["at"])
+            self.assertIsNone(answer["error"])
+        self.assertEqual(dashboard.hosting_machines()["machines"], [])
+        self.assertEqual(dashboard.hosting_hosts()["providers"], [])
+
+    def test_a_failed_pass_keeps_the_last_good_answer_and_says_when_it_was_true(self):
+        with self.farm() as box:
+            dashboard.hosting_refresh()
+            good = dashboard.hosting_machines()["at"]
+            box.calls.write_text("")
+            with mock.patch.dict(os.environ,
+                                 {"FLEET_FAKE_FAIL": "doctl: 401 unable to authenticate"}):
+                dashboard.hosting_refresh()
+        for answer in (dashboard.hosting_machines(), dashboard.hosting_hosts()):
+            self.assertFalse(answer["pending"])
+            self.assertEqual(answer["stale_since"], good)
+            self.assertIn("unable to authenticate", answer["error"])
+            self.assertEqual(answer["error"].count("\n"), 0)
+            self.assertNotIn("Traceback", json.dumps(answer))
+        # and the rows a person was looking at are still there, now labelled stale
+        self.assertEqual(len(dashboard.hosting_machines()["machines"]), 3)
+        self.assertEqual(len(dashboard.hosting_hosts()["providers"]), 3)
+
+    def test_a_listing_that_is_not_json_is_a_sentence_and_not_a_traceback(self):
+        self.machines_file.write_text("doctl: command not found\n")
+        self.hosts_file.write_text("[]\n")
+        with self.farm():
+            dashboard.hosting_refresh()
+        machines = dashboard.hosting_machines()
+        self.assertEqual(machines["error"], "fleet machines list did not answer with JSON")
+        self.assertEqual(machines["machines"], [])
+        hosts = dashboard.hosting_hosts()
+        self.assertEqual(hosts["error"], "fleet hosts list did not answer with a JSON object")
+        self.assertNotIn("Traceback", json.dumps([machines, hosts]))
+
+    def test_neither_read_route_runs_a_tool(self):
+        with self.farm() as box:
+            dashboard.hosting_refresh()
+            box.calls.write_text("")
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                    mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+                for route in ("/api/machines", "/api/hosts", "/api/machines", "/api/hosts"):
+                    status, payload = fetch_json(base, route, token="s3cret")
+                    self.assertEqual(status, 200, payload)
+                    self.assertFalse(payload["pending"])
+                status, config = fetch_json(base, "/api/config")
+                self.assertEqual(status, 200)
+            self.assertEqual(box.calls.read_text(), "")
+        self.assertEqual(config["hosting"], {"machines": 3, "runners_connected": 1})
+
+    def test_a_runner_counts_as_connected_only_with_its_secrets_stored(self):
+        """Login and Secrets are separate columns on the page, and a lane can be spawned only
+        with both: logged in with a secret missing is not connected."""
+        listing = json.loads(self.hosts_file.read_text())
+        listing["providers"].append(
+            {"id": "do-agents", "job": "runner", "login_state": "logged_in",
+             "secrets": [{"name": "CLAUDE_CODE_OAUTH_TOKEN", "stored": True, "account": ""},
+                         {"name": "GITHUB_TOKEN", "stored": False, "account": ""}]})
+        listing["providers"].append(
+            {"id": "elsewhere", "job": "runner", "login_state": "logged_in"})
+        self.hosts_file.write_text(json.dumps(listing))
+        with self.farm():
+            dashboard.hosting_refresh()
+        # railway alone: logged in and both secrets stored
+        self.assertEqual(dashboard.hosting_counts()["runners_connected"], 1)
+
+    def test_the_config_counts_are_zero_before_the_first_pass(self):
+        self.assertEqual(dashboard.config_payload()["hosting"],
+                         {"machines": 0, "runners_connected": 0})
+
+    def test_the_refresher_thread_passes_and_can_be_stopped(self):
+        stop = threading.Event()
+        with self.farm() as box:
+            thread = threading.Thread(
+                target=dashboard._hosting_refresher, args=(0.01, stop), daemon=True)
+            thread.start()
+            deadline = time.time() + 5
+            while time.time() < deadline and not dashboard.hosting_machines()["at"]:
+                time.sleep(0.01)
+            stop.set()
+            dashboard._hosting_wake.set()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            self.assertIn(["hosts", "list", "--json"], self.argv(box))
+
+
+class HostingWriteTest(HostingCase):
+    """Nine writes, each a `fleet` command as a job keyed by the resource it touches. The
+    assertion that matters is the argv, exactly: a list, in order, with nothing added."""
+
+    def test_planning_a_droplet_answers_the_cli_json_synchronously(self):
+        with self.farm() as box:
+            status, payload = dashboard.machines_plan(
+                {"provider": "do-droplet", "name": "nursery", "size": "s-4vcpu-8gb",
+                 "region": "fra1", "ssh_public": PUBKEY})
+            self.assertEqual(status, 200, payload)
+            argv = self.argv(box)[0]
+            handed = self.parsed(box, "machines plan")
+        # The CLI's own JSON, at the top level and nothing added: design section 7 says the
+        # route "returns its JSON", and the page reads `monthly_usd` straight off the answer.
+        self.assertEqual(payload["monthly_usd"], 48)
+        self.assertEqual(payload["price_source"], "live")
+        self.assertIn("cloud_init", payload)
+        self.assertNotIn("plan", payload)
+        self.assertNotIn("job", payload)
+        record = self.only_job("machines_plan")
+        self.assertEqual(record["state"], "done")
+        self.assertEqual(record["key"], "machine:nursery")
+        key_file = argv[argv.index("--pubkey-file") + 1]
+        self.assertEqual(argv, ["machines", "plan", "--provider", "do-droplet",
+                                "--name", "nursery", "--size", "s-4vcpu-8gb",
+                                "--region", "fra1", "--pubkey-file", key_file, "--json"])
+        self.assertFalse(os.path.exists(key_file), "the key file outlived the plan")
+        self.assertEqual(handed["pubkey_text"], PUBKEY)
+        self.assertEqual(handed["pubkey_mode"], "0o600")
+
+    def test_a_plan_without_a_public_key_is_still_a_plan(self):
+        with self.farm() as box:
+            status, payload = dashboard.machines_plan(
+                {"provider": "do-droplet", "name": "nursery", "size": "s-4vcpu-8gb",
+                 "region": "fra1"})
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(self.argv(box)[0],
+                             ["machines", "plan", "--provider", "do-droplet", "--name",
+                              "nursery", "--size", "s-4vcpu-8gb", "--region", "fra1", "--json"])
+
+    def test_a_refusing_plan_is_a_sentence_and_never_a_traceback(self):
+        with self.farm(FLEET_FAKE_FAIL="fleet machines plan: doctl is not logged in"):
+            status, payload = dashboard.machines_plan(
+                {"provider": "do-droplet", "name": "nursery", "size": "s-4vcpu-8gb",
+                 "region": "fra1"})
+        self.assertEqual(status, 400)
+        self.assertIn("not logged in", payload["error"])
+        self.assertNotIn("Traceback", json.dumps(payload))
+
+    def parsed(self, box, what):
+        head = "fleet-parsed " + what + " "
+        rows = [json.loads(line[len(head):]) for line in self.recorded(box)
+                if line.startswith(head)]
+        self.assertTrue(rows, f"the fake fleet never parsed a '{what}'")
+        return rows[-1]
+
+    def test_creating_a_droplet_names_the_price_and_hands_the_key_through_a_file(self):
+        with self.farm() as box:
+            status, payload = dashboard.machines_create(
+                {"provider": "do-droplet", "name": "orchard", "size": "s-4vcpu-8gb",
+                 "region": "fra1", "ssh_public": PUBKEY, "confirm_usd": 48})
+            record = self.done(status, payload)
+            argv = self.argv(box)[0]
+            handed = self.parsed(box, "machines create")
+        self.assertEqual(record["state"], "done", record)
+        self.assertEqual(record["key"], "machine:orchard")
+        self.assertEqual(payload["name"], "orchard")
+        key_file = argv[argv.index("--pubkey-file") + 1]
+        self.assertEqual(argv, ["machines", "create", "--provider", "do-droplet",
+                                "--name", "orchard", "--size", "s-4vcpu-8gb",
+                                "--region", "fra1", "--pubkey-file", key_file,
+                                "--confirm-usd", "48"])
+        self.assertEqual(handed["pubkey_text"], PUBKEY)
+        self.assertEqual(handed["pubkey_mode"], "0o600")
+        self.assertFalse(os.path.exists(key_file), "the key file outlived the job")
+
+    def test_a_price_with_cents_reaches_the_cli_as_the_person_typed_it(self):
+        with self.farm() as box:
+            status, payload = dashboard.machines_create(
+                {"provider": "do-droplet", "name": "orchard", "size": "s-2vcpu-4gb",
+                 "region": "fra1", "ssh_public": PUBKEY, "confirm_usd": "24.5"})
+            self.done(status, payload)
+            self.assertEqual(self.argv(box)[0][-2:], ["--confirm-usd", "24.5"])
+
+    def test_a_confirmed_price_is_never_reformatted_on_its_way_to_the_cli(self):
+        """The CLI refuses a price that differs from the live one, so a rounding here would
+        refuse a person who typed the right number."""
+        for typed, handed in (("12345.67", "12345.67"), ("48.00", "48.00"), (48, "48"),
+                              (" 24.5 ", "24.5"), (12.34, "12.34")):
+            self.assertEqual(dashboard._confirm_usd(typed), (handed, ""), typed)
+        for refused in ("1e-7", "1_000", "+48", "0x30", "inf", "48.", ".5", True):
+            self.assertEqual(dashboard._confirm_usd(refused)[0], "", refused)
+
+    def test_a_price_with_leading_zeros_is_refused_with_the_number_to_type(self):
+        self.assertEqual(dashboard._confirm_usd("00048"),
+                         ("", "write the price without leading zeros, as 48"))
+        self.assertEqual(dashboard._confirm_usd("000.5"),
+                         ("", "write the price without leading zeros, as 0.5"))
+        self.assertEqual(dashboard._confirm_usd("0.5"), ("0.5", ""))
+
+    def test_a_machine_of_your_own_is_registered_and_buys_nothing(self):
+        with self.farm() as box:
+            status, payload = dashboard.machines_create(
+                {"provider": "ssh", "name": "attic", "target": "farm@10.0.0.4"})
+            record = self.done(status, payload)
+            self.assertEqual(self.argv(box)[0],
+                             ["machines", "add", "--name", "attic", "--target", "farm@10.0.0.4"])
+        self.assertEqual(record["state"], "done", record)
+        self.assertEqual(record["key"], "machine:attic")
+
+    def test_a_machine_of_your_own_may_name_its_port(self):
+        with self.farm() as box:
+            status, payload = dashboard.machines_create(
+                {"provider": "ssh", "name": "attic", "target": "farm@10.0.0.4", "port": "2222"})
+            self.done(status, payload)
+            self.assertEqual(self.argv(box)[0],
+                             ["machines", "add", "--name", "attic", "--target", "farm@10.0.0.4",
+                              "--port", "2222"])
+
+    def test_check_adopt_and_forget_are_one_verb_and_one_name(self):
+        for route, verb in ((dashboard.machines_check, "check"),
+                            (dashboard.machines_adopt, "adopt"),
+                            (dashboard.machines_forget, "forget")):
+            with self.farm() as box:
+                status, payload = route({"name": "nursery"})
+                record = self.done(status, payload)
+                self.assertEqual(self.argv(box)[0], ["machines", verb, "nursery"], verb)
+            self.assertEqual(record["state"], "done", record)
+            self.assertEqual(record["key"], "machine:nursery")
+
+    def test_destroying_repeats_the_name_to_the_cli_as_well(self):
+        with self.farm() as box:
+            status, payload = dashboard.machines_destroy({"name": "nursery",
+                                                          "confirm": "nursery"})
+            record = self.done(status, payload)
+            self.assertEqual(self.argv(box)[0],
+                             ["machines", "destroy", "nursery", "--confirm", "nursery"])
+        self.assertEqual(record["state"], "done", record)
+
+    def test_checking_a_provider_is_keyed_by_the_provider(self):
+        with self.farm() as box:
+            status, payload = dashboard.hosts_check({"provider": "railway"})
+            record = self.done(status, payload)
+            self.assertEqual(self.argv(box)[0], ["hosts", "check", "railway"])
+        self.assertEqual(record["key"], "host:railway")
+        self.assertEqual(payload["provider"], "railway")
+
+    def test_testing_a_runner_runs_the_runner_verb_with_the_project(self):
+        with self.farm() as box:
+            status, payload = dashboard.hosts_test({"provider": "railway", "project": "alpha",
+                                                    "confirm": True})
+            record = self.done(status, payload)
+            self.assertEqual(self.argv(box)[0],
+                             ["runner", "test", "railway", "--project", "alpha"])
+        self.assertEqual(record["state"], "done", record)
+        self.assertEqual(record["key"], "host:railway")
+
+    def test_a_runner_test_that_hangs_is_asked_to_stop_before_it_is_killed(self):
+        """A test past its timeout still holds a paid sandbox. A SIGKILL would give `fleet
+        runner test` no chance to run its own delete, so it is sent SIGTERM first and given a
+        grace period; only a tool that ignores that is killed."""
+        marker = self.root / "cleaned-up"
+        hung = f'''#!{sys.executable}
+import os, signal, sys, time
+def tidy(signum, frame):
+    with open({str(marker)!r}, "w") as handle:
+        handle.write("deleted the sandbox")
+    sys.exit(143)
+signal.signal(signal.SIGTERM, tidy)
+with open(os.environ["TOOL_CALLS"], "a") as handle:
+    handle.write("fleet " + " ".join(sys.argv[1:]) + "\\n")
+time.sleep(30)
+'''
+        with self.farm() as box:
+            (box.bin / "fleet").write_text(hung)
+            with mock.patch.object(dashboard, "HOSTING_TEST_TIMEOUT", 1), \
+                    mock.patch.object(dashboard, "HOSTING_TEST_GRACE", 10):
+                status, payload = dashboard.hosts_test(
+                    {"provider": "railway", "project": "alpha", "confirm": True})
+                record = self.done(status, payload, seconds=20)
+        self.assertEqual(record["state"], "failed", record)
+        self.assertEqual(marker.read_text(), "deleted the sandbox")
+        self.assertIn("did not answer within 1s and stopped when asked", record["error"])
+
+    def test_a_tool_that_ignores_the_stop_is_killed_after_the_grace(self):
+        started = time.time()
+        with fake_tools({"stubborn": f'''#!{sys.executable}
+import signal, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+time.sleep(30)
+'''}):
+            rc, _out, err = dashboard.run_tool(["stubborn"], timeout=1, grace=1)
+        self.assertEqual(rc, 124)
+        self.assertIn("did not answer within 1s and was killed after a 1s grace", err)
+        self.assertLess(time.time() - started, 10)
+
+    def test_a_detached_grandchild_holding_the_pipes_does_not_hold_the_job(self):
+        """A descendant that left the process group survives the SIGKILL and keeps the pipes
+        open. Reading until they close would never return, and the job would keep its key."""
+        pidfile = self.root / "detached.pid"
+        started = time.time()
+        setsid, sleep = shutil.which("setsid"), shutil.which("sleep")
+        if not setsid or not sleep:
+            self.skipTest("this machine has no setsid to detach a grandchild with")
+        with fake_tools({"leaver": f'#!/bin/sh\n{setsid} {sleep} 40 &\necho $! > "{pidfile}"\n'
+                                   f'{sleep} 30\n'}):
+            try:
+                rc, _out, err = dashboard.run_tool(["leaver"], timeout=1, grace=1)
+            finally:
+                if pidfile.exists():
+                    try:
+                        os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                    except (OSError, ValueError):
+                        pass
+        self.assertEqual(rc, 124)
+        self.assertIn("did not answer within 1s", err)
+        self.assertLess(time.time() - started, 12)
+
+    def test_a_second_machine_may_be_added_while_the_first_one_boots(self):
+        """The interlock is the machine, not the verb: one droplet booting must not stop the
+        next one from being ordered, and must stop a second press of its own Check."""
+        gate = self.state / "gate"
+        blocker = self.state / "slow-fleet"
+        blocker.write_text('#!/bin/sh\nwhile [ ! -f "%s" ]; do sleep 0.02; done\n' % gate)
+        blocker.chmod(0o755)
+        with self.farm():
+            with mock.patch.object(dashboard, "fleet_bin", return_value=str(blocker)):
+                status, first = dashboard.machines_check({"name": "nursery"})
+                self.assertEqual(status, 202, first)
+                again, refusal = dashboard.machines_check({"name": "nursery"})
+                self.assertEqual(again, 409)
+                self.assertIn("already running", refusal["error"])
+                other, second = dashboard.machines_create(
+                    {"provider": "ssh", "name": "attic", "target": "farm@10.0.0.4"})
+                self.assertEqual(other, 202, second)
+                gate.write_text("go")
+                self.finish(first["job"]["id"])
+                self.finish(second["job"]["id"])
+
+    def test_a_job_that_ends_asks_the_snapshot_to_look_again(self):
+        """A row that has just gone `creating` must not sit there for 45 seconds."""
+        wake = RecordingEvent()
+        with self.farm(), mock.patch.object(dashboard, "_hosting_wake", wake):
+            status, payload = dashboard.machines_check({"name": "nursery"})
+            self.done(status, payload)
+            deadline = time.time() + 5
+            while time.time() < deadline and not wake.wakes:
+                time.sleep(0.02)
+            self.assertTrue(wake.wakes, "the snapshot was never asked to look again")
+
+    def test_every_write_needs_the_token(self):
+        bodies = [("/api/machines/plan", {"provider": "do-droplet", "name": "nursery",
+                                          "size": "s-4vcpu-8gb", "region": "fra1"}),
+                  ("/api/machines", {"provider": "ssh", "name": "attic",
+                                     "target": "farm@10.0.0.4"}),
+                  ("/api/machines/check", {"name": "nursery"}),
+                  ("/api/machines/destroy", {"name": "nursery", "confirm": "nursery"}),
+                  ("/api/machines/adopt", {"name": "nursery"}),
+                  ("/api/machines/forget", {"name": "nursery"}),
+                  ("/api/hosts/check", {"provider": "railway"}),
+                  ("/api/hosts/test", {"provider": "railway", "project": "alpha",
+                                       "confirm": True})]
+        with self.farm() as box:
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                    mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+                for route, body in bodies:
+                    status, payload = fetch_json(base, route, method="POST", body=body)
+                    self.assertEqual(status, 403, route)
+                    self.assertNotIn("Traceback", json.dumps(payload))
+                self.assertEqual(box.calls.read_text(), "", "a refused write still ran a tool")
+                # and with it, each one answers for itself
+                for route, body in bodies:
+                    status, payload = fetch_json(base, route, token="s3cret", method="POST",
+                                                 body=body)
+                    self.assertIn(status, (200, 202), (route, payload))
+                    if "job" in payload:
+                        self.finish(payload["job"]["id"])
+                    self.assertNotIn("Traceback", json.dumps(payload))
+
+    def test_a_cross_site_write_is_refused_whatever_token_it_carries(self):
+        with self.farm() as box:
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                    mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+                status, payload = fetch_json(
+                    base, "/api/machines/check", token="s3cret", method="POST",
+                    body={"name": "nursery"}, headers={"Origin": "https://evil.example"})
+                self.assertEqual(status, 403, payload)
+            self.assertEqual(box.calls.read_text(), "")
+
+
+class HostingRefusalTest(HostingCase):
+    """Everything a body can get wrong. Each one is a 400 with a sentence, and not one word of
+    any of them reaches a command line."""
+
+    def refusals(self, route, bodies):
+        with self.farm() as box:
+            for body in bodies:
+                status, payload = route(body)
+                self.assertEqual(status, 400, (body, payload))
+                self.assertIn("error", payload)
+                self.assertNotIn("Traceback", json.dumps(payload))
+            self.assertEqual(box.calls.read_text(), "",
+                             "a refused body still reached the command line")
+
+    def test_a_name_that_is_not_a_machine_name_never_reaches_an_argv(self):
+        self.refusals(dashboard.machines_check,
+                      [{}, {"name": ""}, {"name": "-rf"}, {"name": "../../etc/passwd"},
+                       {"name": "Nursery"}, {"name": "n"}, {"name": "a" * 41},
+                       {"name": "nursery; rm -rf /"}, {"name": "nurse ry"},
+                       {"name": "nursery\nmachines destroy granite"}])
+
+    def test_a_provider_this_farm_does_not_know_is_refused(self):
+        self.refusals(dashboard.hosts_check,
+                      [{}, {"provider": ""}, {"provider": "aws"}, {"provider": "--help"},
+                       {"provider": "do droplet"}])
+
+    def test_a_runner_is_not_a_machine_and_a_machine_is_not_a_runner(self):
+        self.refusals(dashboard.machines_plan,
+                      [{"provider": "railway", "name": "nursery", "size": "s-4vcpu-8gb",
+                        "region": "fra1"}])
+        self.refusals(dashboard.hosts_test,
+                      [{"provider": "do-droplet", "project": "alpha", "confirm": True}])
+
+    def test_a_listed_provider_without_a_job_is_neither_a_machine_nor_a_runner(self):
+        """`fleet hosts list` may report an id this server has never heard of, and the snapshot
+        accepts it; a row without a `job` is still refused by both the machine and the runner
+        routes, because an empty job is not a match for either."""
+        listing = json.loads(self.hosts_file.read_text())
+        listing["providers"].append({"id": "hetzner", "label": "Hetzner"})
+        self.hosts_file.write_text(json.dumps(listing))
+        with self.farm():
+            dashboard.hosting_refresh()
+        self.assertIn("hetzner", [row["id"] for row in dashboard.hosting_hosts()["providers"]])
+        self.refusals(dashboard.machines_plan,
+                      [{"provider": "hetzner", "name": "nursery", "size": "s-4vcpu-8gb",
+                        "region": "fra1"}])
+        self.refusals(dashboard.machines_create,
+                      [{"provider": "hetzner", "name": "nursery", "size": "s-4vcpu-8gb",
+                        "region": "fra1", "ssh_public": PUBKEY, "confirm_usd": 48}])
+        self.refusals(dashboard.hosts_test,
+                      [{"provider": "hetzner", "project": "alpha", "confirm": True}])
+
+    def test_a_size_or_a_region_that_is_not_a_slug_is_refused(self):
+        base = {"provider": "do-droplet", "name": "nursery", "size": "s-4vcpu-8gb",
+                "region": "fra1"}
+        self.refusals(dashboard.machines_plan,
+                      [dict(base, size=""), dict(base, size="s"), dict(base, size="S-4VCPU"),
+                       dict(base, size="s-4vcpu-8gb; doctl"), dict(base, size="a" * 33),
+                       dict(base, region=""), dict(base, region="--force"),
+                       dict(base, region="fra1 nyc3")])
+
+    def test_a_droplet_without_a_public_key_is_refused_with_the_reason(self):
+        with self.farm() as box:
+            status, payload = dashboard.machines_create(
+                {"provider": "do-droplet", "name": "orchard", "size": "s-4vcpu-8gb",
+                 "region": "fra1", "confirm_usd": 48})
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"],
+                             "Your SSH public key is how your laptop reaches the machine.")
+            self.assertEqual(box.calls.read_text(), "")
+
+    def test_a_public_key_that_is_not_one_is_refused(self):
+        base = {"provider": "do-droplet", "name": "orchard", "size": "s-4vcpu-8gb",
+                "region": "fra1", "confirm_usd": 48}
+        self.refusals(dashboard.machines_create,
+                      [dict(base, ssh_public="hello"),
+                       dict(base, ssh_public="-----BEGIN OPENSSH PRIVATE KEY-----"),
+                       dict(base, ssh_public="ssh-dss AAAAB3NzaC1kc3M= ada@laptop"),
+                       dict(base, ssh_public=PUBKEY + "\nssh-rsa AAAA= second@key"),
+                       dict(base, ssh_public="ssh-ed25519 $(doctl account get) ada")])
+
+    def test_the_public_key_field_is_named_so_the_classifier_lets_it_through(self):
+        """`pubkey` carries the word "key" and is refused by the models routes' classifier,
+        which is exactly why the field is `ssh_public`. Both halves are the contract."""
+        with self.farm() as box:
+            status, payload = dashboard.machines_create(
+                {"provider": "do-droplet", "name": "orchard", "size": "s-4vcpu-8gb",
+                 "region": "fra1", "confirm_usd": 48, "pubkey": PUBKEY})
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"], dashboard.HOSTING_KEY_REFUSAL)
+            self.assertEqual(box.calls.read_text(), "")
+
+    def test_a_body_that_carries_a_secret_is_refused_and_the_secret_is_not_echoed(self):
+        secret = "sk-ant-oat01-" + "z" * 40
+        bodies = [{"name": "nursery", "token": secret},
+                  {"name": "nursery", "api_key": secret},
+                  {"name": "nursery", "CLAUDE_CODE_OAUTH_TOKEN": secret},
+                  {"name": "nursery", "Provider-Secret": secret},
+                  {"name": "nursery", "password": secret},
+                  {"name": "nursery", "credentials": secret}]
+        with self.farm() as box:
+            for body in bodies:
+                for route in (dashboard.machines_check, dashboard.machines_adopt,
+                              dashboard.machines_forget, dashboard.machines_plan,
+                              dashboard.machines_create, dashboard.hosts_check,
+                              dashboard.hosts_test, dashboard.machines_destroy,
+                              lambda sent: dashboard.machines_destroy(
+                                  dict(sent, confirm=sent["name"]))):
+                    # destroy twice: without its confirmation, and with a matching one, so the
+                    # classifier is proved to run before the confirm check and not behind it
+                    status, payload = route(body)
+                    self.assertEqual(status, 400, (route, body))
+                    # The whole answer is that one sentence: not the value, and not the
+                    # field's name either, which a page would happily draw back on screen.
+                    self.assertEqual(payload, {"error": dashboard.HOSTING_KEY_REFUSAL})
+                    self.assertNotIn(secret, json.dumps(payload))
+            self.assertEqual(box.calls.read_text(), "")
+
+    def test_a_token_typed_into_the_wrong_box_is_not_echoed_in_the_refusal(self):
+        """The classifier reads field names, so a token pasted into `size` passes it and meets
+        the slug check, whose sentence quotes what was typed. That quote is scrubbed."""
+        secret = "sk-ant-oat01-" + "z" * 40
+        base = {"provider": "do-droplet", "name": "nursery", "size": "s-4vcpu-8gb",
+                "region": "fra1"}
+        cases = [(dashboard.machines_plan, dict(base, size=secret)),
+                 (dashboard.machines_plan, dict(base, region=secret)),
+                 (dashboard.machines_plan, dict(base, provider=secret)),
+                 (dashboard.hosts_check, {"provider": secret}),
+                 (dashboard.hosts_test, {"provider": "railway", "project": secret,
+                                         "confirm": True})]
+        with self.farm() as box:
+            for route, body in cases:
+                status, payload = route(body)
+                self.assertEqual(status, 400, (route, body))
+                self.assertNotIn(secret[:20], json.dumps(payload))
+                self.assertIn("[redacted]", payload["error"])
+            self.assertEqual(box.calls.read_text(), "")
+
+    def test_destroying_is_refused_unless_the_name_is_typed_back(self):
+        self.refusals(dashboard.machines_destroy,
+                      [{"name": "nursery"}, {"name": "nursery", "confirm": ""},
+                       {"name": "nursery", "confirm": "yes"},
+                       {"name": "nursery", "confirm": "granite"},
+                       {"name": "", "confirm": ""}, {"confirm": "nursery"}])
+
+    def test_a_runner_test_is_refused_without_the_confirmation_and_a_real_project(self):
+        self.refusals(dashboard.hosts_test,
+                      [{"provider": "railway", "project": "alpha"},
+                       {"provider": "railway", "project": "alpha", "confirm": "true"},
+                       {"provider": "railway", "project": "alpha", "confirm": 1},
+                       {"provider": "railway", "project": "alpha", "confirm": False},
+                       {"provider": "railway", "project": "ghost", "confirm": True},
+                       {"provider": "railway", "project": "", "confirm": True},
+                       {"provider": "railway", "project": "../alpha", "confirm": True}])
+
+    def test_a_price_that_is_not_a_number_is_refused(self):
+        base = {"provider": "do-droplet", "name": "orchard", "size": "s-4vcpu-8gb",
+                "region": "fra1", "ssh_public": PUBKEY}
+        self.refusals(dashboard.machines_create,
+                      [base, dict(base, confirm_usd=""), dict(base, confirm_usd="free"),
+                       dict(base, confirm_usd=0), dict(base, confirm_usd=-48),
+                       dict(base, confirm_usd="48; doctl"), dict(base, confirm_usd="nan")])
+
+    def test_a_target_or_a_port_that_is_not_one_is_refused(self):
+        base = {"provider": "ssh", "name": "attic", "target": "farm@10.0.0.4"}
+        self.refusals(dashboard.machines_create,
+                      [dict(base, target=""), dict(base, target="10.0.0.4"),
+                       dict(base, target="farm@10.0.0.4 rm -rf /"),
+                       dict(base, target="farm@10.0.0.4;id"),
+                       dict(base, target="-lroot@10.0.0.4"), dict(base, target=".x@10.0.0.4"),
+                       dict(base, target="farm@-oProxyCommand"),
+                       dict(base, port="0"), dict(base, port="65536"), dict(base, port="-1"),
+                       dict(base, port="ssh"), dict(base, port="22 22")])
+
+    def test_a_refused_body_leaves_no_temporary_key_file_behind(self):
+        before = set(glob.glob(os.path.join(tempfile.gettempdir(), "fleet-pubkey-*")))
+        with self.farm() as box:
+            for body in ({"provider": "do-droplet", "name": "orchard", "size": "nope!",
+                          "region": "fra1", "ssh_public": PUBKEY, "confirm_usd": 48},
+                         {"provider": "do-droplet", "name": "orchard", "size": "s-4vcpu-8gb",
+                          "region": "fra1", "ssh_public": PUBKEY, "confirm_usd": "free"}):
+                self.assertEqual(dashboard.machines_create(body)[0], 400)
+            self.assertEqual(box.calls.read_text(), "")
+        self.assertEqual(set(glob.glob(os.path.join(tempfile.gettempdir(),
+                                                    "fleet-pubkey-*"))), before)
+
+    def test_a_write_that_loses_its_resource_race_leaves_no_key_file_behind(self):
+        """A 409 starts no thread, so nothing would have cleaned up after it."""
+        gate = self.state / "gate"
+        blocker = self.state / "slow-fleet"
+        blocker.write_text('#!/bin/sh\nwhile [ ! -f "%s" ]; do sleep 0.02; done\n' % gate)
+        blocker.chmod(0o755)
+        before = set(glob.glob(os.path.join(tempfile.gettempdir(), "fleet-pubkey-*")))
+        body = {"provider": "do-droplet", "name": "orchard", "size": "s-4vcpu-8gb",
+                "region": "fra1", "ssh_public": PUBKEY, "confirm_usd": 48}
+        with self.farm():
+            with mock.patch.object(dashboard, "fleet_bin", return_value=str(blocker)):
+                status, first = dashboard.machines_create(body)
+                self.assertEqual(status, 202, first)
+                self.assertEqual(dashboard.machines_create(body)[0], 409)
+                gate.write_text("go")
+                self.finish(first["job"]["id"])
+        self.assertEqual(set(glob.glob(os.path.join(tempfile.gettempdir(),
+                                                    "fleet-pubkey-*"))), before)
+
+    def test_no_hosting_route_answers_with_a_traceback(self):
+        """Every route, against a body of the wrong shape entirely."""
+        routes = (dashboard.machines_plan, dashboard.machines_create, dashboard.machines_check,
+                  dashboard.machines_destroy, dashboard.machines_adopt,
+                  dashboard.machines_forget, dashboard.hosts_check, dashboard.hosts_test)
+        with self.farm() as box:
+            for route in routes:
+                for body in ({}, None, {"name": None}, {"provider": None},
+                             {"name": ["nursery"]}, {"provider": {"id": "railway"}},
+                             {"name": 7, "provider": 7, "confirm": 7}):
+                    status, payload = route(body)
+                    self.assertEqual(status, 400, (route, body, payload))
+                    self.assertNotIn("Traceback", json.dumps(payload))
+            self.assertEqual(box.calls.read_text(), "")
+
+
+class HostingScrubTest(HostingCase):
+    """A provider CLI that prints a token into its own error message must not leave it in this
+    farm's job records or in an answer. The scrub is at the top of _finish_job and inside
+    run_job_now, so the `error` sentence tool_message builds is clean too."""
+
+    def setUp(self):
+        super().setUp()
+        self.secret = "rw_live_" + "q" * 32
+        secrets_dir = self.state / "secrets" / "hosts" / "railway"
+        secrets_dir.mkdir(parents=True)
+        (secrets_dir / "GITHUB_TOKEN").write_text(self.secret + "\n")
+        self.shaped = "sk-ant-oat01-" + "w" * 40
+
+    def leaky_tool(self):
+        path = self.state / "leaky"
+        path.write_text("#!/bin/sh\n"
+                        'echo "connecting with %s"\n'
+                        'echo "railway: %s is not valid" >&2\n'
+                        "exit 1\n" % (self.shaped, self.secret))
+        path.chmod(0o755)
+        return str(path)
+
+    def test_neither_a_stored_secret_nor_a_token_shape_survives_into_a_job_record(self):
+        status, payload = dashboard.start_job("hosts_check", [self.leaky_tool()], timeout=10)
+        self.assertEqual(status, 202)
+        record = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            record = dashboard.read_job(payload["job"]["id"])[1]
+            if record.get("state") != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(record["state"], "failed", record)
+        written = json.dumps(record)
+        self.assertNotIn(self.secret, written)
+        self.assertNotIn(self.shaped, written)
+        self.assertIn("[redacted]", record["output"])
+        # the sentence tool_message built out of what the tool said is clean as well
+        self.assertEqual(record["error"], "connecting with [redacted]")
+        # and so is the file on disk, which is what a later GET reads
+        on_disk = (self.state / "jobs" / (record["id"] + ".json")).read_text()
+        self.assertNotIn(self.secret, on_disk)
+        self.assertNotIn(self.shaped, on_disk)
+        with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+            status, served = fetch_json(base, "/api/jobs/" + record["id"], token="s3cret")
+            self.assertEqual(status, 200)
+            self.assertNotIn(self.secret, json.dumps(served))
+            self.assertNotIn(self.shaped, json.dumps(served))
+
+    def test_a_synchronous_answer_is_scrubbed_before_the_page_ever_sees_it(self):
+        with self.farm(FLEET_FAKE_LEAK=self.secret) as box:
+            status, payload = dashboard.machines_plan(
+                {"provider": "do-droplet", "name": "nursery", "size": "s-4vcpu-8gb",
+                 "region": "fra1"})
+            self.assertEqual(status, 200, payload)
+            self.assertNotIn(self.secret, box.calls.read_text())
+        answer = json.dumps(payload)
+        self.assertNotIn(self.secret, answer)
+        self.assertIn("[redacted]", payload["detail"])
+        record = self.only_job("machines_plan")
+        self.assertNotIn(self.secret, (self.state / "jobs" /
+                                       (record["id"] + ".json")).read_text())
+
+    def test_a_stale_listing_error_carries_no_secret_either(self):
+        with self.farm(FLEET_FAKE_FAIL="doctl: token %s was rejected" % self.secret):
+            dashboard.hosting_refresh()
+        answer = json.dumps(dashboard.hosting_machines())
+        self.assertNotIn(self.secret, answer)
+        self.assertIn("[redacted]", dashboard.hosting_machines()["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

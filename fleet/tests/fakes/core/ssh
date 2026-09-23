@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""A fake ssh: it records the call and answers the two probes a farm makes, without a network.
+
+  FAKE_LOG=<path>              every call appended as one JSON line {argv, stdin}
+  FAKE_SSH_CLOUD_INIT=<text>   what `cloud-init status` prints (default "status: running")
+  FAKE_SSH_CAPACITY=1          `fleet capacity` answers, so the machine is ready
+  FAKE_SSH_FAIL=1              every connection is refused (exit 255, as ssh does)
+  FAKE_SSH_SLEEP=20            answer slowly, so a caller's timeout can fire
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fakelib import die, flag, out, record, slow  # noqa: E402
+
+
+def main():
+    argv = record()
+    slow("SSH")
+    remote = " ".join(argv[1:])
+
+    if flag("FAKE_SSH_FAIL"):
+        die("ssh: connect to host port 22: Connection refused", 255)
+
+    if "cloud-init status" in remote:
+        out(flag("FAKE_SSH_CLOUD_INIT", "status: running"))
+        return 0
+
+    if "fleet capacity" in remote:
+        if flag("FAKE_SSH_CAPACITY"):
+            out("capacity: 3 of 8 agents, 12 GB free")
+            return 0
+        die("bash: line 1: fleet: command not found", 127)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

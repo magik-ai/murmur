@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""A fake doctl: the documented shapes, none of the network.
+
+Answers the calls fleet/lib/machines.py and fleet/lib/hosts.py make, from environment
+variables a test sets:
+
+  FAKE_LOG=<path>            every call appended as one JSON line {argv, stdin}
+  FAKE_DOCTL_LOGGED_IN=1     the account is logged in; without it every call fails as doctl does
+  FAKE_DOCTL_FAIL_AT=<verb>  create | import | firewall | list | get | delete fails
+  FAKE_DOCTL_PRICE=48        the live monthly price of s-4vcpu-8gb that `compute size list` gives
+  FAKE_DOCTL_DROPLETS=<file> the droplets this account has, a JSON list; create and delete
+                             rewrite it, so a test can watch a droplet appear and vanish
+  FAKE_DOCTL_SSH_KEYS=<file> the account's SSH keys, a JSON list; import appends to it
+  FAKE_DOCTL_FIREWALLS=<file> the account's firewalls, a JSON list; create appends to it
+  FAKE_DOCTL_NO_HARNESS=1    this doctl build has no harness-runtime commands
+  FAKE_DOCTL_SLEEP=20        answer slowly, so a caller's timeout can fire
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fakelib import (die, flag, load_json_file, out, record, save_json_file,  # noqa: E402
+                      slow, value_after)
+
+AUTH_ERROR = ("Error: unable to initialize DigitalOcean API client: access token is required. "
+              "(hint: run 'doctl auth init')")
+
+SIZES = [
+    {"slug": "s-2vcpu-4gb", "memory": 4096, "vcpus": 2, "disk": 80,
+     "price_monthly": 24.0, "price_hourly": 0.03571, "available": True, "regions": ["fra1"]},
+    {"slug": "s-4vcpu-8gb", "memory": 8192, "vcpus": 4, "disk": 160,
+     "price_monthly": 48.0, "price_hourly": 0.07143, "available": True, "regions": ["fra1"]},
+    {"slug": "s-8vcpu-16gb", "memory": 16384, "vcpus": 8, "disk": 320,
+     "price_monthly": 96.0, "price_hourly": 0.14286, "available": True, "regions": ["fra1"]},
+]
+
+
+def fails_at(verb):
+    return flag("FAKE_DOCTL_FAIL_AT") == verb
+
+
+def droplets_file():
+    return flag("FAKE_DOCTL_DROPLETS")
+
+
+def droplets():
+    return load_json_file(droplets_file(), [])
+
+
+def write_droplets(rows):
+    if droplets_file():
+        save_json_file(droplets_file(), rows)
+
+
+def sizes():
+    rows = [dict(row) for row in SIZES]
+    price = flag("FAKE_DOCTL_PRICE")
+    if price:
+        for row in rows:
+            if row["slug"] == "s-4vcpu-8gb":
+                row["price_monthly"] = float(price)
+    return rows
+
+
+def compute(argv):
+    rest = argv[2:]
+    group = rest[0] if rest else ""
+    verb = rest[1] if len(rest) > 1 else ""
+
+    if group == "size" and verb == "list":
+        out(json.dumps(sizes()))
+        return 0
+
+    if group == "droplet":
+        if verb == "list":
+            if fails_at("list"):
+                die("Error: GET https://api.digitalocean.com/v2/droplets: 500 (request \"x\")")
+            tag = value_after(rest, "--tag-name")
+            rows = [row for row in droplets() if not tag or tag in row.get("tags", [])]
+            out(json.dumps(rows))
+            return 0
+        if verb == "get":
+            if fails_at("get"):
+                die("Error: GET https://api.digitalocean.com/v2/droplets/x: 404 (not found)")
+            wanted = rest[2] if len(rest) > 2 else ""
+            rows = [row for row in droplets() if str(row.get("id")) == str(wanted)]
+            if not rows:
+                die("Error: Droplet not found")
+            out(json.dumps(rows))
+            return 0
+        if verb == "create":
+            if fails_at("create"):
+                die("Error: POST https://api.digitalocean.com/v2/droplets: 422 "
+                    "(the region is not available)")
+            name = rest[2] if len(rest) > 2 else "unnamed"
+            tags = [t for t in value_after(rest, "--tag-names").split(",") if t]
+            slug = value_after(rest, "--size")
+            # The droplet is priced from its own size, so a caller that read the wrong size
+            # would show the wrong price.
+            price = next((row["price_monthly"] for row in sizes() if row["slug"] == slug), 0.0)
+            rows = droplets()
+            new = {
+                "id": 9000 + len(rows),
+                "name": name,
+                "status": "new",
+                "tags": tags,
+                "region": {"slug": value_after(rest, "--region")},
+                "size_slug": slug,
+                "size": {"slug": slug, "price_monthly": price},
+                "networks": {"v4": []},
+                "created_at": "2026-09-23T10:00:00Z",
+            }
+            rows.append(new)
+            write_droplets(rows)
+            out(json.dumps([new]))
+            return 0
+        if verb == "delete":
+            if fails_at("delete"):
+                die("Error: DELETE https://api.digitalocean.com/v2/droplets/x: 403 (forbidden)")
+            wanted = rest[2] if len(rest) > 2 else ""
+            write_droplets([row for row in droplets() if str(row.get("id")) != str(wanted)])
+            return 0
+
+    if group == "ssh-key":
+        path = flag("FAKE_DOCTL_SSH_KEYS")
+        keys = load_json_file(path, [])
+        if verb == "list":
+            out(json.dumps(keys))
+            return 0
+        if verb == "import":
+            if fails_at("import"):
+                die("Error: POST https://api.digitalocean.com/v2/account/keys: 422 "
+                    "(SSH Key is already in use on your account)")
+            pub = value_after(rest, "--public-key-file")
+            body = ""
+            if pub and os.path.exists(pub):
+                with open(pub, encoding="utf-8") as handle:
+                    body = handle.read().strip()
+            new = {"id": 4242, "name": rest[2] if len(rest) > 2 else "key",
+                   "fingerprint": flag("FAKE_SSH_FINGERPRINT", "aa:bb:cc:dd:ee:ff"),
+                   "public_key": body}
+            keys.append(new)
+            if path:
+                save_json_file(path, keys)
+            out(json.dumps([new]))
+            return 0
+
+    if group == "firewall":
+        path = flag("FAKE_DOCTL_FIREWALLS")
+        walls = load_json_file(path, [])
+        if verb == "list":
+            out(json.dumps(walls))
+            return 0
+        if verb == "create":
+            if fails_at("firewall"):
+                die("Error: POST https://api.digitalocean.com/v2/firewalls: 422 (name taken)")
+            new = {"id": "fw-1", "name": value_after(rest, "--name"),
+                   "tags": [t for t in value_after(rest, "--tag-names").split(",") if t]}
+            walls.append(new)
+            if path:
+                save_json_file(path, walls)
+            out(json.dumps([new]))
+            return 0
+
+    die(f"Error: unknown command \"{' '.join(rest)}\" for \"doctl compute\"")
+
+
+def main():
+    argv = record()
+    slow("DOCTL")
+    args = argv[1:]
+    if not args:
+        die("Usage: doctl [command]", 1)
+
+    if args[0] == "version":
+        out("doctl version 1.0.0-fake")
+        return 0
+
+    if args[0] == "harness-runtime" and flag("FAKE_DOCTL_NO_HARNESS"):
+        die('Error: unknown command "harness-runtime" for "doctl"')
+
+    if not flag("FAKE_DOCTL_LOGGED_IN"):
+        die(AUTH_ERROR)
+
+    if args[0] == "account" and args[1:2] == ["get"]:
+        out(json.dumps([{
+            "email": flag("FAKE_DOCTL_EMAIL", "owner@example.com"),
+            "droplet_limit": 25, "email_verified": True, "status": "active",
+            "uuid": "0000-fake",
+        }]))
+        return 0
+
+    if args[0] == "harness-runtime":
+        if args[1:2] == ["list"]:
+            out("[]")
+            return 0
+        die('Error: unknown command for "doctl harness-runtime"')
+
+    if args[0] == "compute":
+        return compute(argv)
+
+    die(f'Error: unknown command "{args[0]}" for "doctl"')
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

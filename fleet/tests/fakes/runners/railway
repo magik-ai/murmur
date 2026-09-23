@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""A fake `railway` that answers the documented sandbox commands and records every call."""
+import json
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _fake  # noqa: E402
+
+argv = sys.argv[1:]
+
+
+def leak():
+    """FAKE_RAILWAY_LEAKS=1: fail, and echo the stored token into stderr the way a careless
+    CLI might. It is the input the scrub has to catch, so the value comes from the farm's own
+    0600 file and is never written into the call log."""
+    if not os.environ.get("FAKE_RAILWAY_LEAKS"):
+        return False
+    return _echo_token()
+
+
+def _echo_token():
+    path = os.path.join(os.environ.get("FLEET_STATE", ""), "secrets", "hosts", "railway",
+                        "CLAUDE_CODE_OAUTH_TOKEN")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            value = handle.read().strip()
+    except OSError:
+        value = "?"
+    sys.stderr.write(f"railway: auth failed for token {value}\n")
+    return True
+
+
+def main():
+    if argv[:1] == ["--version"]:
+        _fake.log(["railway"] + argv)
+        if leak():
+            return 1
+        print("railway 4.6.1")
+        return 0
+    if argv[:2] == ["sandbox", "create"]:
+        path = _fake.value_after(argv, "--env-file")
+        _fake.log(["railway"] + argv,
+                  extra={"env_file": _fake.env_file_facts(path),
+                         "handle_exists": _fake.handle_exists()})
+        if os.environ.get("FAKE_CREATE_SLOW"):
+            # A create still in flight when the farm is stopped: logged, then slow to answer.
+            time.sleep(float(os.environ["FAKE_CREATE_SLOW"]))
+        if leak():
+            return 1
+        if os.environ.get("FAKE_CREATE_UNUSABLE"):
+            # The provider made a sandbox and answered with something this farm cannot read.
+            print(json.dumps({"ok": True}))
+            return 0
+        print(json.dumps({"id": os.environ.get("FAKE_SANDBOX_ID", "sbx-fake-01")}))
+        return 0
+    if argv[:2] == ["sandbox", "exec"]:
+        script = _fake.read_stdin()
+        _fake.log(["railway"] + argv, script)
+        return _fake.dispatch(script)
+    if argv[:2] == ["sandbox", "destroy"]:
+        _fake.log(["railway"] + argv)
+        if leak() or (os.environ.get("FAKE_DESTROY_LEAKS") and _echo_token()):
+            return 1
+        if os.environ.get("FAKE_DESTROY_FAILS"):
+            sys.stderr.write("railway: the sandbox could not be destroyed\n")
+            return 1
+        print("destroyed")
+        return 0
+    _fake.log(["railway"] + argv)
+    sys.stderr.write(f"fake railway: unknown command {' '.join(argv)}\n")
+    return 1
+
+
+sys.exit(main())

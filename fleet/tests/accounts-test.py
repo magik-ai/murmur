@@ -196,6 +196,52 @@ check("when every account is past the ceiling but under FULL, rotation still pic
 check("the displayed pick prefers session headroom over weekly headroom",
       ca.pick_from(_deep) == "fresh")
 
+
+# N. an account is read by whose login it is, not by its folder (owner, 2026-09-23)
+import json as _json  # noqa: E402
+import os as _os  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+with _tempfile.TemporaryDirectory() as _home:
+    _extra = _os.path.join(_home, ".fleet", "claude-accounts", "second")
+    _os.makedirs(_extra)
+    _os.makedirs(_os.path.join(_home, ".claude"))
+    with open(_os.path.join(_home, ".claude.json"), "w") as _handle:
+        _json.dump({"oauthAccount": {"emailAddress": "owner.one@example.com"}}, _handle)
+    with open(_os.path.join(_extra, ".claude.json"), "w") as _handle:
+        _json.dump({"oauthAccount": {"emailAddress": "second.login@example.com"}}, _handle)
+    _saved = (ca.HOME, ca.EXTRA_DIR)
+    ca.HOME, ca.EXTRA_DIR = _home, _os.path.join(_home, ".fleet", "claude-accounts")
+    try:
+        check("the default folder shows the login it is signed in as",
+              ca.display("default") == "owner.one", ca.display("default"))
+        check("an extra folder shows its own login", ca.display("second") == "second.login",
+              ca.display("second"))
+        check("a login name leads back to its folder", ca.canonical("owner.one") == "default")
+        check("a folder name is still accepted", ca.canonical("default") == "default")
+        check("the email is read without the network",
+              ca.account_email("second") == "second.login@example.com")
+        _third = _os.path.join(_home, ".fleet", "claude-accounts", "third")
+        _os.makedirs(_third)
+        with open(_os.path.join(_third, ".claude.json"), "w") as _handle:
+            _json.dump({"oauthAccount": {"emailAddress": "second.login@example.com"}}, _handle)
+        check("two folders on one login are told apart by their folder",
+              ca.display("second") == "second.login (second)"
+              and ca.display("third") == "second.login (third)",
+              f"{ca.display('second')} / {ca.display('third')}")
+        check("a login two folders share leads to neither",
+              ca.canonical("second.login") == "second.login")
+        check("each twin's own display name leads back to it",
+              ca.canonical("second.login (third)") == "third")
+        import shutil as _shutil  # noqa: E402
+        _shutil.rmtree(_third)
+        _os.remove(_os.path.join(_extra, ".claude.json"))
+        check("a folder whose config is gone falls back to its folder name",
+              ca.display("second") == "second", ca.display("second"))
+    finally:
+        ca.HOME, ca.EXTRA_DIR = _saved
+
+
 print()
 print("RESULT: " + ("ALL PASS" if ok else "FAILURES"))
 sys.exit(0 if ok else 1)

@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Every tool farm/install.sh reaches for after its preflight, faked, so a test can run the
+installer from its first line to its last on a scratch HOME without changing the machine.
+
+One script, linked under each name it answers to (gh, hq, loginctl, systemctl, uv, claude,
+apt-get, curl). Each call is recorded in $FAKE_LOG like every other fake here. Nothing is
+downloaded, installed or logged in to: `gh repo clone` makes a stand-in murmur checkout whose
+fleet/install.sh only writes its own argv to $HOME/fleet-install.txt.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _fakelib import die, out, record  # noqa: E402
+
+# The real fleet/install.sh makes the fleet's config directory; so does the stand-in.
+FLEET_INSTALL = """#!/usr/bin/env bash
+mkdir -p "${FLEET_CONFIG:-$HOME/.config/fleet}"
+printf '%s\\n' "$*" >> "$HOME/fleet-install.txt"
+"""
+
+
+def gh(args):
+    if args[:1] == ["--version"]:
+        out("gh version 2.60.0 (fake)")
+    elif args[:2] == ["auth", "status"]:
+        out("Logged in to github.com as fakeuser")
+    elif args[:2] == ["api", "user"]:
+        out("fakeuser")
+    elif args[:2] == ["repo", "clone"]:
+        target = args[3]
+        os.makedirs(os.path.join(target, "fleet"), exist_ok=True)
+        os.makedirs(os.path.join(target, "hq", "bin"), exist_ok=True)
+        path = os.path.join(target, "fleet", "install.sh")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(FLEET_INSTALL)
+        os.chmod(path, 0o755)
+        with open(os.path.join(target, "hq", "bin", "hq"), "w", encoding="utf-8") as handle:
+            handle.write("raise SystemExit(0)\n")
+    elif args[:2] == ["repo", "view"]:
+        out("{}")
+    else:
+        die("fake gh: not a call the installer makes: " + " ".join(args))
+    return 0
+
+
+def main():
+    argv = record()
+    name, args = argv[0], argv[1:]
+    if name == "gh":
+        return gh(args)
+    if name == "loginctl":
+        if "Linger" in args:
+            out("yes")
+        return 0
+    if name == "uv":
+        out("uv 0.5.0")
+        return 0
+    if name == "claude":
+        out("2.1.0 (Claude Code)")
+        return 0
+    if name in ("hq", "systemctl"):
+        return 0
+    die(f"fake {name}: this test never installs or downloads anything", 1)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

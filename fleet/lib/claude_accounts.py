@@ -52,18 +52,56 @@ SPAWN_SESSION_CEILING = 80
 # ~/.claude cannot be renamed - it is what the CLI uses with no env at all - so the default
 # account carries a display name instead. Both forms are accepted wherever a name is, and a
 # deployment that wants the account shown under its real login adds it here.
-DISPLAY_NAMES = {"default": "default"}
+DISPLAY_NAMES = {}
+
+
+def account_email(name: str) -> str:
+    """The login this account's folder is signed in as, read from the config file Claude Code
+    keeps beside it (no network). `default` is the CLI's own config, which lives in the home
+    directory, not inside ~/.claude. Empty when the file is missing or unreadable."""
+    folder = account_dirs().get(name)
+    if not folder:
+        return ""
+    path = (os.path.join(HOME, ".claude.json") if name == "default"
+            else os.path.join(folder, ".claude.json"))
+    try:
+        with open(path, encoding="utf-8") as handle:
+            account = (json.load(handle) or {}).get("oauthAccount") or {}
+    except (OSError, ValueError, AttributeError):
+        return ""
+    email = account.get("emailAddress")
+    return email.strip() if isinstance(email, str) else ""
 
 
 def display(name: str) -> str:
-    return DISPLAY_NAMES.get(name, name)
+    """What a person reads for an account: a name set in DISPLAY_NAMES, else the part of its
+    login before the @, else the folder name. The folder `default` is ~/.claude, which says
+    nothing about whose subscription it is (owner, 2026-09-23: "what does default mean, if it
+    is jane.doe?")."""
+    if name in DISPLAY_NAMES:
+        return DISPLAY_NAMES[name]
+    login = _login(name)
+    if not login:
+        return name
+    # Two folders signed in to one login would read the same; the folder tells them apart, so a
+    # typed name can never land on a subscription the person did not mean.
+    twins = [other for other in account_dirs() if other != name and _login(other) == login]
+    return f"{login} ({name})" if twins else login
+
+
+def _login(name: str) -> str:
+    email = account_email(name)
+    return email.split("@", 1)[0] if email else ""
 
 
 def canonical(name: str) -> str:
-    for canon, label in DISPLAY_NAMES.items():
-        if name == label:
-            return canon
-    return name
+    """The folder name for whatever a person typed: the folder itself, or its display name. A
+    name two folders share matches neither, so it is refused downstream as unknown."""
+    dirs = account_dirs()
+    if name in dirs:
+        return name
+    matches = [canon for canon in dirs if display(canon) == name]
+    return matches[0] if len(matches) == 1 else name
 
 
 def account_dirs() -> dict:

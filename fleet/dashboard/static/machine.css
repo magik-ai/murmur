@@ -145,3 +145,4 @@ tbody td.m-windows { max-width: none; }
   .m-limits { flex-wrap: wrap; white-space: normal; }
   .m-port { width: 100%; }
 }
+.m-account { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }

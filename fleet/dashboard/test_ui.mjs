@@ -915,7 +915,8 @@ await okAsync("a limit window is labelled by its own name", async () => {
   const source = read("static/views/board.js");
   assert.ok(!/fable/i.test(source), "no window may be singled out by name in the page");
   assert.ok(!/<svg|base64/i.test(source), "a mark comes from the server, not from a logo in the page");
-  assert.match(source, /Out of room/, "a subscription with nothing left does not say so on the Board");
+  assert.match(source, /fmt\.room\(account\)/, "the Board asks the shared rule whether an account has room");
+  assert.match(read("static/core/fmt.js"), /Out of room/, "a subscription with nothing left does not say so");
 });
 
 await okAsync("the quiet farm carries what the live farm showed and no other state does", async () => {
