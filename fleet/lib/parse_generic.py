@@ -180,11 +180,13 @@ for line in sys.stdin:
     line = line.strip()
     if not line:
         continue
+    # Any line at all means the engine started. Aider, Ollama and the other plain-text CLIs never
+    # print JSON, and counting only JSON lines settled every one of their lanes as "never started".
+    _saw_event = True
     # try to pull human text out of a json line; else use the raw line
     act = line
     try:
         o = json.loads(line)
-        _saw_event = True
         if isinstance(o, dict):
             if o.get("type") == "error":
                 said = o.get("message") or o.get("error") or line

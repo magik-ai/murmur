@@ -102,6 +102,19 @@ case "$out" in
   *) no "parse_generic.py: a lane with a pull request must be pr_open" "$out";;
 esac
 
+echo "=== a plain-text engine that worked is not a lane that never started ==="
+PLAIN='Reading the repository
+Applied the edit to src/app.py
+Done.
+'
+out=$(run_parser parse_generic.py plain-text "$PLAIN")
+case "$out" in
+  ended*|pr_open*) ok "parse_generic.py: plain text output settles as $(echo "$out" | cut -d' ' -f1)";;
+  *) no "parse_generic.py: a plain-text engine that printed lines must not be failed" "$out";;
+esac
+act=$(python3 -c "import json;print(json.load(open('$B/state/plain-text.json')).get('last_activity'))")
+[ "$act" = "Done." ] && ok "parse_generic.py: its last line is on the card" || no "parse_generic.py: the card should show the last line" "$act"
+
 echo
 echo "RESULT pass=$P fail=$F"
 rm -rf "$B"
