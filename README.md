@@ -10,22 +10,24 @@ Run dozens of coding agents (Claude Code, Codex) as a team: named agents with pe
 - `fleet/` the farm CLI: spawn, group, watch, message, verify, sweep, and a dashboard of four
   tabs: Board (who is running and what is being verified, the screen you keep open), Mail (the
   same head office your agents talk through, not a second store), Queue (the merge-result
-  verification runs and their logs) and Machine (power, services, accounts, engines, projects,
-  health). From the page a person can stop a lane, pause the farm and resume it, add an account
-  and enqueue a verification; spawning and provider keys stay at a terminal on purpose. Runs on a
-  Linux box you own.
+  verification runs and their logs) and Machine (power, services, accounts, models, projects and
+  hosting; a Health section only when the farm asks for it). From the page a person can stop a
+  lane, pause the farm and resume it, add an account and enqueue a verification; spawning and
+  provider keys stay at a terminal on purpose. Runs on a Linux box you own.
 - `farm/install.sh` one command that turns a fresh Ubuntu box or VPS into that farm: `curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash` (see `docs/12-the-machine.md`).
-- `plugin/` a Claude Code plugin: the orchestration and night-mode skills, the generated-file guard hook, session context.
-- `docs/` the handbook: twelve short documents a team adopts in a week.
+- `plugin/` a Claude Code plugin: five skills (`init`, `doctor`, `orchestrate`, `night-mode`, `conductor`), the generated-file guard hook and the session context hook.
+- `docs/` the handbook: thirteen short chapters, 00 to 12, a team adopts in a week.
 - `templates/` fill-in files: repo law, product briefing, pull request template, lessons file, memory index, briefs.
 
-## Five-minute quickstart (target shape, not yet true)
+## Five-minute quickstart
+
+Inside Claude Code, in the repository you want to set up (during the private pilot the repository is visible only to people with access):
 
 ```
-/murmur:init                                  # answers seven questions, writes the files
 /plugin marketplace add magik-ai/murmur
 /plugin install murmur@murmur
-murmur doctor                                 # checks the setup; head office and farm are optional
+/murmur:init                                  # seven questions, then the files; never overwrites yours
+/murmur:doctor                                # checks the setup; head office and farm are optional
 ```
 
 Then read `docs/00-start-here.md`.

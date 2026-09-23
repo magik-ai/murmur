@@ -1,8 +1,9 @@
-# The `team` plugin
+# The `murmur` plugin
 
 A Claude Code plugin that carries the working method of this repository into
-any project: three skills for the roles an agent team needs, and two hooks
-that keep a session inside the rules without anyone repeating them.
+any project: two skills that set a repository up and check it, three skills for
+the roles an agent team needs, and two hooks that keep a session inside the
+rules without anyone repeating them.
 
 A plugin cannot ship a `CLAUDE.md`, so the laws arrive two ways instead: as
 skills that load when the work matches them, and as a session-start hook that
@@ -33,11 +34,13 @@ also be called by name.
 
 | Skill | Loads when you say | What it does |
 | --- | --- | --- |
+| `init` | "set up murmur", "murmur init", "onboard this repo" | Seven questions with defaults, then the contract, the tracker rules, the pull request template, the lessons file and the guard list, never overwriting a file you have. |
+| `doctor` | "murmur doctor", "check my setup", "is this repo set up" | A table of checks and one word for where the setup stands, naming the optional pieces (a head office, an agent machine) that are not set up yet. |
 | `orchestrate` | "fan this out", "spawn lanes", "run this as a team", "split this across agents" | Splitting a batch into lanes with disjoint file manifests, identity and capacity checks before spawning, waiting for an explicit go, tracking workers through events rather than transcripts, assembling lanes into one pull request, merging only on the owner's word. |
 | `night-mode` | "night mode", "unattended run", "have it done by morning", "finish this while I sleep" | Driving the current scope to a defined finish with nobody watching: a frozen scope, a heartbeat checklist, decide alone and log every contested call, three allowed resting states, one report in the morning. |
 | `conductor` | "release manager", "keep the queue moving", "conductor", "ride this to production" | Owning the delivery road: queue watching that does not burn the shared API budget, the conveyor from green to deployed, ejection forensics, trains, freezes, the hold veto, and watching production after a wave. |
 
-All three skills use `<OWNER>` for the person who owns the product.
+The three role skills use `<OWNER>` for the person who owns the product.
 `orchestrate` and `night-mode` also use `<TRACKER>` for wherever work is
 tracked, and `night-mode` uses `<FARM>` for a machine that runs headless
 workers. Edit them to your own names, or leave them: an agent reads them as
@@ -96,6 +99,13 @@ note and never a failed session.
 
 ```
 .claude-plugin/plugin.json   name, description, version
+commands/init.md             the /murmur:init command
+commands/doctor.md           the /murmur:doctor command
+skills/init/SKILL.md
+skills/doctor/SKILL.md
+scripts/murmur_init.py       what init runs: asks nothing itself, writes every file
+scripts/murmur_doctor.py     what doctor runs: the checks and their table
+templates -> ../templates    the files init writes from
 skills/orchestrate/SKILL.md
 skills/night-mode/SKILL.md
 skills/conductor/SKILL.md
