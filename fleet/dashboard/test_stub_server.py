@@ -796,8 +796,9 @@ SETTINGS = {
 # ------------------------------------------------------------------- the server
 
 def config_for(state):
+    # health_panel is off, as on every farm that has not set FLEET_DASH_HEALTH=on.
     features = {"hq": True, "slice": True, "gpu": True, "cpu_temp": True,
-                "ci_daemon": True, "forge": True}
+                "ci_daemon": True, "forge": True, "health_panel": False}
     if state == "error":
         features.update({"hq": False, "gpu": False, "cpu_temp": True})
     settings = {name: dict(value) for name, value in SETTINGS.items()}

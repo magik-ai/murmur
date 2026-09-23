@@ -404,6 +404,7 @@ Everything below is optional, has a working default, and belongs in `~/.config/f
 | `FLEET_FARM_ALIAS` | this machine's hostname | the ssh host name printed in the account-login instructions. The hostname is almost never how you actually reach the box, and a wrong name there sends an operator to a machine that does not answer |
 | `FLEET_NVIDIA_SMI` | `nvidia-smi` on PATH | the GPU sensor. Unset and absent, `fleet mode auto` is inert and says so once |
 | `FLEET_LHM_URL` | unset | a LibreHardwareMonitor endpoint for CPU temperature. Unset, the temperature reads UNKNOWN and never blocks a spawn |
+| `FLEET_DASH_HEALTH` | unset (off) | `on` draws the Health section on the Machine tab: the hardware tiles (graphics card, processor temperature, load, memory, disk) and the prerequisites table. Off by default because most machines have neither sensor; the Board's setup checklist does not depend on it |
 | `FLEET_CODEX_BIN` | `/usr/bin/codex` | the codex CLI lanes run. Point it at a user-level install (`npm i -g --prefix ~/.local/share/codex-cli @openai/codex@latest`) when the system one needs root to update: a newer CLI is what unlocks newer models |
 | `FLEET_CODEX_MODEL` | `gpt-5.6-sol` | the model a codex lane runs when `fleet spawn` gets no `--model` |
 

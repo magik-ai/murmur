@@ -72,6 +72,16 @@ const REQUIRED_FILES = [
 /* The machine tab is written in another lane. It is checked like every other view once its
    file is on the farm, and its absence is not a failure of this one. */
 const MACHINE = "static/views/machine.js";
+
+/* The Machine tab's count points at its Health section, so it is drawn only when that section
+   is: the badge must bail out on the same feature the render checks. Read from the source,
+   because the browser harness draws no tab badges. */
+ok("machine: the tab count and the Health section hang on the same feature", () => {
+  const source = read(MACHINE);
+  const badge = source.slice(source.indexOf("  badge(context) {"), source.indexOf("  render(context) {"));
+  assert.match(badge, /if \(!context\.features\.health_panel\) return "";/);
+  assert.match(source, /context\.features\.health_panel \? healthSection\(context\) : null/);
+});
 const hasMachine = fs.existsSync(path.join(HERE, MACHINE));
 
 ok("every file the design record names exists, and the four it removes are gone", () => {

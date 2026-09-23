@@ -210,7 +210,16 @@ def free_features():
     return {"hq": bool(hq_binary() and hq_office()),
             "gpu": bool(M.NVIDIA),
             "cpu_temp": bool(M.LHM_URL),
-            "forge": "github" if shutil.which("gh") else "unknown"}
+            "forge": "github" if shutil.which("gh") else "unknown",
+            "health_panel": health_panel_on()}
+
+
+def health_panel_on():
+    """Whether the Machine tab draws its Health section. Off unless this farm asks for it with
+    FLEET_DASH_HEALTH=on: its hardware tiles read sensors (a graphics card, a hardware monitor
+    endpoint) that most machines do not have, so a fresh farm would open on a wall of
+    "not configured". The setup checklist on the Board does not depend on it."""
+    return os.environ.get("FLEET_DASH_HEALTH", "").strip().lower() in ("1", "on", "true", "yes")
 
 
 def measured_features():
@@ -243,6 +252,7 @@ def config_payload():
             "cpu_temp": free["cpu_temp"],
             "ci_daemon": bool(units.get("ci_daemon")),
             "forge": free["forge"],
+            "health_panel": free["health_panel"],
         },
         "hq_agent": dash_hq_agent(),
         # The name a person types after `ssh -t` to reach this farm, for every command the page

@@ -1862,6 +1862,8 @@ export default {
     "/api/engines", "/api/projects", "/api/projects/next-port", "/api/health", "/api/metrics",
   ],
   badge(context) {
+    /* The count points at the Health section, so it is drawn only when that section is. */
+    if (!context.features.health_panel) return "";
     const checks = list((context.res("/api/health").data || {}).checks);
     return checks.filter((check) => check.state === "missing" || check.state === "error").length || "";
   },
@@ -1872,7 +1874,9 @@ export default {
       accountsSection(context),
       modelsSection(context),
       projectsSection(context),
-      healthSection(context),
+      /* Off unless the farm sets FLEET_DASH_HEALTH=on: its tiles read hardware sensors most
+         machines do not have. */
+      context.features.health_panel ? healthSection(context) : null,
       settingsSection(context),
     ];
   },

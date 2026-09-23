@@ -700,7 +700,16 @@ for (const view of ["queue", "machine"]) {
    runner, a different service on a different unit, and a fix column that hands a reader the
    wrong one of the two sends them to stop the farm's other half. */
 {
-  const { page, context } = await open({ view: "machine", state: "error" });
+  /* The prerequisites table lives in the Health section, which a farm draws only when it sets
+     FLEET_DASH_HEALTH=on; this page is that farm. */
+  const healthOn = async (route) => {
+    const answer = await route.fetch();
+    const config = await answer.json();
+    config.features = { ...(config.features || {}), health_panel: true };
+    return route.fulfill({ response: answer, json: config });
+  };
+  const { page, context } = await open({ view: "machine", state: "error",
+    overrides: { "/api/config": healthOn } });
   const row = await page.evaluate(() => {
     const found = [...document.querySelectorAll("#view table tr")]
       .find((node) => /queue runner/.test(node.innerText));
@@ -708,6 +717,16 @@ for (const view of ["queue", "machine"]) {
   });
   check("machine: the queue runner is fixed by the command that starts the queue runner",
     /fleet ci daemon start/.test(row), row.slice(0, 160));
+  await context.close();
+}
+
+/* A farm that has not asked for the Health section draws none, even with prerequisites
+   missing. (The tab's count is checked in test_ui.mjs: this harness draws no tab badges.) */
+{
+  const { page, context } = await open({ view: "machine", state: "error" });
+  const body = await text(page);
+  check("machine: with Health off, the page draws no Health section",
+    !/What this farm needs/.test(body), body.slice(0, 120));
   await context.close();
 }
 

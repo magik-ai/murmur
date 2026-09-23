@@ -2299,13 +2299,14 @@ class DashboardConfigTest(unittest.TestCase):
         self.assertEqual(payload["hq_agent"], "dashboard")
         self.assertEqual(payload["features"], {"hq": False, "slice": False, "gpu": False,
                                                "cpu_temp": False, "ci_daemon": False,
-                                               "forge": "unknown"})
+                                               "forge": "unknown", "health_panel": False})
 
     def test_a_complete_machine_reports_each_part_it_has(self):
         systemctl = 'case "$*" in *LoadState*) echo loaded;; esac\n'
         with fake_tools({"gh": "exit 0\n", "hq": "exit 0\n", "systemctl": systemctl},
                         env={"FLEET_DASH_TITLE": "acme farm",
-                             "FLEET_DASH_HQ_AGENT": "console"}) as box:
+                             "FLEET_DASH_HQ_AGENT": "console",
+                             "FLEET_DASH_HEALTH": "on"}) as box:
             write_hq_config(box)
             with mock.patch.object(dashboard.M, "NVIDIA", "/usr/bin/nvidia-smi"), \
                     mock.patch.object(dashboard.M, "LHM_URL", "http://host:8085/data.json"):
@@ -2314,7 +2315,14 @@ class DashboardConfigTest(unittest.TestCase):
         self.assertEqual(payload["hq_agent"], "console")
         self.assertEqual(payload["features"], {"hq": True, "slice": True, "gpu": True,
                                                "cpu_temp": True, "ci_daemon": True,
-                                               "forge": "github"})
+                                               "forge": "github", "health_panel": True})
+
+    def test_the_health_section_is_off_unless_the_farm_asks_for_it(self):
+        for value, expected in (("", False), ("off", False), ("0", False), ("on", True),
+                                ("1", True), ("true", True), ("YES", True), (" on ", True)):
+            with mock.patch.dict(os.environ, {"FLEET_DASH_HEALTH": value}):
+                self.assertIs(dashboard.config_payload()["features"]["health_panel"], expected,
+                              repr(value))
 
     def test_hq_installed_but_never_pointed_at_an_office_is_not_a_feature(self):
         # The binary alone proves nothing: without a repository every mail route has nowhere

@@ -149,9 +149,11 @@ async function measured(page, state, screen, size) {
       };
     });
     const out = [
-      ["carries all seven sections",
-        ["Power", "Services", "Accounts", "Models", "Projects", "Health", "Settings"]
+      ["carries its six sections",
+        ["Power", "Services", "Accounts", "Models", "Projects", "Settings"]
           .every((word) => body.includes(word)), body.slice(0, 120)],
+      ["draws no Health section on a farm that has not asked for one",
+        !body.includes("What this farm needs"), "Health is off unless FLEET_DASH_HEALTH=on"],
       ["says the dashboard keeps running through a power action",
         /keeps running through all of these/.test(body), body.slice(0, 160)],
       ["draws the models table with its six columns",

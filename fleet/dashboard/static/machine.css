@@ -73,7 +73,9 @@
 .m-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex: none; }
 .m-runs .cmd { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m-detail { font-size: 11px; line-height: 1.4; margin-top: 3px; overflow-wrap: anywhere; }
-.m-row-actions { gap: 6px; flex-wrap: wrap; align-items: center; }
+/* One line in the table, whatever buttons a row has (the owner's one-line rule): three buttons
+   used to wrap and make that one row twice as tall. In the phone card list they may wrap. */
+.m-row-actions { gap: 6px; flex-wrap: nowrap; align-items: center; }
 .m-detail-list dd { overflow-wrap: anywhere; }
 
 /* On a phone the table becomes a card list: one card per model, read in the order a person
@@ -81,6 +83,7 @@
    wide, which on a 390px screen put Status, Last test and Actions off the edge, and those are
    two of the columns this section exists for. */
 @media (max-width: 640px) {
+  .m-row-actions { flex-wrap: wrap; }
   .m-models, .m-models thead, .m-models tbody, .m-models tr, .m-models td { display: block; }
   .m-models thead { display: none; }
   .m-models tr {
