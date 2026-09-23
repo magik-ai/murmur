@@ -491,6 +491,48 @@ class DashboardServerTest(unittest.TestCase):
                     self.assertIsNone(dashboard.ci_queue()["daemon_alive"])
 
 
+class PageBuildTest(unittest.TestCase):
+    """The build number a tab compares with the one it was loaded from.
+
+    It used to be the page shell's own date only, so a deploy that changed nothing but a script
+    kept the old number, and a tab opened before that deploy never learned it was running old
+    code (owner, 2026-09-23: the Board "lost" its Fable limits in exactly such a tab).
+    """
+
+    def test_a_changed_script_changes_the_build(self):
+        with tempfile.TemporaryDirectory() as root:
+            index = os.path.join(root, "index.html")
+            static = os.path.join(root, "static")
+            os.makedirs(os.path.join(static, "views"))
+            script = os.path.join(static, "views", "board.js")
+            for path in (index, script):
+                with open(path, "w") as handle:
+                    handle.write("x")
+                os.utime(path, (1_000_000, 1_000_000))
+            with mock.patch.object(dashboard, "INDEX", index), mock.patch.object(dashboard, "STATIC", static):
+                before = dashboard.page_build()
+                os.utime(script, (2_000_000, 2_000_000))
+                after = dashboard.page_build()
+        self.assertEqual(before, "1000000")
+        self.assertEqual(after, "2000000")
+
+    def test_the_route_answers_with_it(self):
+        with tempfile.TemporaryDirectory() as root:
+            index = os.path.join(root, "index.html")
+            static = os.path.join(root, "static")
+            os.makedirs(static)
+            script = os.path.join(static, "app.js")
+            for path, when in ((index, 1_000_000), (script, 3_000_000)):
+                with open(path, "w") as handle:
+                    handle.write("x")
+                os.utime(path, (when, when))
+            with mock.patch.object(dashboard, "INDEX", index), mock.patch.object(dashboard, "STATIC", static):
+                with running_server() as base:
+                    with urllib.request.urlopen(f"{base}/api/version", timeout=5) as response:
+                        body = json.loads(response.read())
+        self.assertEqual(body["v"], "3000000")
+
+
 class AccountTroubleTest(unittest.TestCase):
     """What a subscription card is told when the numbers could not be read.
 

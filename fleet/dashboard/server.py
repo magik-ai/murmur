@@ -246,6 +246,19 @@ def dash_hq_agent():
     return os.environ.get("FLEET_DASH_HQ_AGENT", "").strip() or DEFAULT_HQ_AGENT
 
 
+def page_build():
+    """The newest file the page is made of, as a number that changes on every deploy. The page's
+    shell alone was the old answer, and a deploy that changed only a script left it the same, so
+    a tab opened before the deploy never learned that it was running old code."""
+    newest = 0.0
+    for path in [INDEX] + [os.path.join(root, name) for root, _dirs, names in os.walk(STATIC) for name in names]:
+        try:
+            newest = max(newest, os.path.getmtime(path))
+        except OSError:
+            pass
+    return str(int(newest))
+
+
 _version_cache = {"value": None}
 
 
@@ -4133,11 +4146,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # before it has this.
                 self._send(200, json.dumps(config_payload()))
             elif path.startswith("/api/version"):
-                try:
-                    v = str(int(os.path.getmtime(INDEX)))
-                except Exception:
-                    v = "0"
-                self._send(200, json.dumps({"v": v}))
+                self._send(200, json.dumps({"v": page_build()}))
             elif path.startswith("/api/identities"):
                 # one code name -> one mark; the card reads its emoji/colour from here,
                 # not from the per-agent field, so an initiator is never scattered.

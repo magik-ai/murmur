@@ -421,6 +421,84 @@ for (const [from, wanted, name] of [
   await context.close();
 }
 
+/* The search field is the only field in its box: it takes the whole width, and its focus is a
+   line along its own bottom edge rather than an outline the box's corners cut in half (owner,
+   2026-09-23: the field stopped at 200px and its focus ring was clipped on two sides). */
+{
+  const { page, context } = await open({ hash: "#/board" });
+  await page.keyboard.press("Meta+k");
+  await page.waitForTimeout(400);
+  await page.keyboard.type("demo");
+  const field = await page.evaluate(() => {
+    const input = document.getElementById("paletteInput");
+    const box = input.closest(".palette-box");
+    const style = getComputedStyle(input);
+    return {
+      input: Math.round(input.getBoundingClientRect().width),
+      box: Math.round(box.clientWidth),
+      focused: document.activeElement === input,
+      outline: style.outlineStyle,
+      edge: style.borderBottomColor,
+      accent: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
+    };
+  });
+  check("the search field takes the whole width of its box", Math.abs(field.input - field.box) <= 2, JSON.stringify(field));
+  check("the search field shows focus without an outline its box would cut",
+    field.focused && field.outline === "none" && field.edge === field.accent, JSON.stringify(field));
+  await context.close();
+}
+
+/* A tab left open across a deploy says so and offers a reload, instead of quietly running the
+   old code against the new data (owner, 2026-09-23). */
+{
+  let build = "1000";
+  const { page, context } = await open({
+    hash: "#/board",
+    overrides: {
+      "/api/version": (handler) => handler.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ v: build }) }),
+    },
+  });
+  await page.waitForTimeout(1200);
+  const before = await page.evaluate(() => Boolean(document.querySelector(".update-strip")));
+  build = "2000";
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForTimeout(1200);
+  const after = await page.evaluate(() => {
+    const strip = document.querySelector(".update-strip");
+    return strip ? { text: strip.textContent, button: Boolean(strip.querySelector("button")) } : null;
+  });
+  check("a tab on the build it was loaded from shows no update note", before === false, String(before));
+  check("a tab left open across a deploy says so and offers a reload",
+    Boolean(after && after.button && /updated/.test(after.text)), JSON.stringify(after));
+  await context.close();
+}
+
+/* The note arrives on its own, up to thirty seconds after a deploy, so it lands on whoever is
+   typing: a half-written message and its cursor must survive it. */
+{
+  let build = "1000";
+  const { page, context } = await open({
+    hash: "#/mail",
+    overrides: {
+      "/api/version": (handler) => handler.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ v: build }) }),
+    },
+  });
+  await page.waitForTimeout(1200);
+  await page.click("#mailText");
+  await page.keyboard.type("half a message");
+  build = "2000";
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForTimeout(1200);
+  const kept = await page.evaluate(() => ({
+    note: Boolean(document.querySelector(".update-strip")),
+    value: document.getElementById("mailText") && document.getElementById("mailText").value,
+    focused: document.activeElement && document.activeElement.id,
+  }));
+  check("a half-typed message and its cursor survive the update note",
+    kept.note && kept.value === "half a message" && kept.focused === "mailText", JSON.stringify(kept));
+  await context.close();
+}
+
 /* ------------------------------------------------------------------- the reader's own eyes */
 
 {

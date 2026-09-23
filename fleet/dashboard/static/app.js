@@ -32,7 +32,7 @@ const BY_ID = new Map(VIEWS.map((view) => [view.id, view]));
 /* Asked for on every tab: the page cannot draw its chrome without them, and the jump
    palette can only offer a conversation it has heard of. */
 const ALWAYS = ["/api/config", "/api/access", "/api/identities", "/api/health",
-  "/api/metrics", "/api/mode", "/api/mail/boxes"];
+  "/api/metrics", "/api/mode", "/api/mail/boxes", "/api/version"];
 const TICK = 3000;
 
 /* An address the old seven tabs answered on, and where that reader is taken now. A bookmark
@@ -193,8 +193,32 @@ export function paint() {
   // One tab holds itself to the window and scrolls inside its own panes. The page may not
   // scroll under it, or the fixed panes slide away from their header.
   document.body.classList.toggle("fixed-page", Boolean(view.fixed));
-  render(document.getElementById("view"), [readOnlyNote(), view.render(context)]);
+  /* The tab's own content is keyed, so a note that appears above it (an update, read-only) never
+     moves it to a new position and rebuilds it: a rebuilt Mail tab lost a half-typed message. */
+  const body = [].concat(view.render(context));
+  body.forEach((node, index) => {
+    if (node && node.props && node.props.key == null) node.props.key = `view-${view.id}-${index}`;
+  });
+  render(document.getElementById("view"), [newBuildNote(), readOnlyNote(), ...body]);
   paintDrawer();
+}
+
+/* The build this tab was loaded from. A tab left open across a deploy keeps running the old code
+   against the new data, which looks exactly like a fix that never shipped (owner, 2026-09-23: the
+   Board "lost" its Fable limits in a tab opened before the deploy that added them). */
+let loadedBuild = "";
+
+function newBuildNote() {
+  const version = api.resource("/api/version").data;
+  const current = version && version.v ? String(version.v) : "";
+  if (!loadedBuild) {
+    loadedBuild = current;
+    return null;
+  }
+  if (!current || current === loadedBuild) return null;
+  return h("div", { class: "banner warn update-strip", key: "update", role: "status" },
+    h("span", null, "This dashboard was updated after this tab was opened. Reload it to see the new version."),
+    h("button", { type: "button", class: "button small primary", onclick: () => location.reload() }, "Reload"));
 }
 
 /* A dashboard with no write token is a legitimate way to run this, and it must not look

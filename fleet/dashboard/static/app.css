@@ -619,6 +619,9 @@ td.num, th.num { font-family: var(--font-mono); font-variant-numeric: tabular-nu
 }
 .banner.warn { background: var(--tone-wait-bg); border-color: var(--tone-wait); color: var(--text); }
 .banner.bad { background: var(--tone-fail-bg); border-color: var(--tone-fail); color: var(--text); }
+.update-strip { flex: none; align-items: center; margin-bottom: 12px; }
+body.fixed-page .update-strip { margin-bottom: 0; }
+.update-strip span { flex: 1; }
 
 
 /* --------------------------------------------------------- 8. drawer */
@@ -656,7 +659,11 @@ td.num, th.num { font-family: var(--font-mono); font-variant-numeric: tabular-nu
   background: var(--surface); border: 1px solid var(--line-strong);
   border-radius: var(--radius); box-shadow: var(--shadow-2); overflow: hidden;
 }
-.palette-box input { width: 100%; height: 44px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0 14px; }
+/* The one field in the box, so it takes the whole width (the 200px ceiling every other field
+   carries does not apply), and it shows focus by its own bottom edge: an outline would be cut
+   off by the box's rounded corners. */
+.palette-box input { width: 100%; max-width: none; height: 44px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0 14px; }
+.palette-box input:focus-visible { outline: none; border-bottom-color: var(--accent); }
 .palette-box ul { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow-y: auto; }
 .palette-box li {
   display: flex; align-items: center; gap: 8px;
