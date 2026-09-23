@@ -101,6 +101,30 @@ const READ_ONLY = JSON.stringify({
   loopback: true,
 });
 
+/* ------------------------------------------- every table on the tab is one line per row */
+
+{
+  const { page, context } = await open({ view: "machine" });
+  await page.waitForTimeout(600);
+  const tables = await page.evaluate(() => {
+    const out = {};
+    for (const table of document.querySelectorAll("#view .tablewrap table")) {
+      const section = table.closest("section");
+      const name = section && section.querySelector("h2") ? section.querySelector("h2").textContent.trim() : "?";
+      const rows = [...table.querySelectorAll("tbody tr")].map((row) => Math.round(row.getBoundingClientRect().height));
+      if (rows.length > 1) out[name] = rows;
+    }
+    return out;
+  });
+  for (const [name, heights] of Object.entries(tables)) {
+    check(`machine: every row of the ${name} table is the same height`,
+      Math.max(...heights) - Math.min(...heights) <= 2, heights.join(", "));
+  }
+  check("machine: the tab has tables to hold to that rule", Object.keys(tables).length >= 3,
+    Object.keys(tables).join(", "));
+  await context.close();
+}
+
 /* ------------------------------------------------- a page that may not write */
 
 for (const view of ["queue", "machine"]) {
@@ -740,6 +764,12 @@ for (const view of ["queue", "machine"]) {
         test: Boolean(row.querySelector("[data-model-test]")),
         remove: Boolean(row.querySelector("[data-model-remove]")),
         text: row.innerText,
+        // one line per row: the key command and a failure's reason ride on titles, not on
+        // second lines, so they are read from where they live
+        hint: row.querySelector("[data-model-auth-hint]")
+          ? row.querySelector("[data-model-auth-hint]").getAttribute("title") : "",
+        why: row.querySelector("td:nth-child(4) .pill").getAttribute("title") || "",
+        lines: Math.round(row.getBoundingClientRect().height),
       };
     }
     return out;
@@ -764,9 +794,9 @@ for (const view of ["queue", "machine"]) {
       row.switch === wanted.switch && row.test === wanted.test && row.remove === wanted.remove,
       JSON.stringify(row).slice(0, 160));
   }
-  check("machine: a model with no key names the command that gives it one, and offers Test",
-    /fleet models auth kimi/.test(seen.kimi.text) && seen.kimi.test === true,
-    seen.kimi.text.slice(0, 200));
+  check("machine: a model with no key offers the command that gives it one, and Test",
+    /fleet models auth kimi/.test(seen.kimi.hint) && seen.kimi.test === true,
+    `${seen.kimi.hint} | ${seen.kimi.text.slice(0, 120)}`);
   check("machine: a model that is failing every call can still be switched off",
     seen.codex.switch === true && seen.codex.switchLabel === "Switch off",
     JSON.stringify(seen.codex).slice(0, 160));
@@ -776,8 +806,16 @@ for (const view of ["queue", "machine"]) {
   check("machine: a model with one status wears one pill in that column",
     (seen.claude.pills || []).filter((word) => word === "On").length === 1,
     (seen.claude.pills || []).join(", "));
-  check("machine: a failing model says why, under the pill and not only in a hover",
-    /the last health call timed out/.test(seen.codex.text), seen.codex.text.slice(0, 200));
+  check("machine: a failing model carries its reason on the pill, and the row stays one line",
+    /the last health call timed out/.test(seen.codex.why) && !/timed out/.test(seen.codex.text),
+    `${seen.codex.why} | ${seen.codex.text.slice(0, 120)}`);
+  {
+    // The owner's rule: a one-line table has one-line cells. Every row is the same height as
+    // the first, whatever its cells hold, or a cell has wrapped.
+    const heights = Object.values(seen).map((row) => row.lines);
+    check("machine: every models row is one line high, none taller than its neighbours",
+      heights.length > 1 && Math.max(...heights) - Math.min(...heights) <= 2, heights.join(", "));
+  }
   check("machine: a model that is not installed says so, with what to run",
     /Not installed/.test(seen.local.text) && /example.invalid/.test(seen.local.text)
     && !/on the path/.test(seen.local.text), seen.local.text.slice(0, 200));

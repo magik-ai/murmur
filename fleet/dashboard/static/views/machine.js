@@ -338,7 +338,7 @@ function servicesSection(context) {
             h("td", null, row.label || row.id),
             h("td", null, pill(serviceMeaning(row.state), fmt.titleCase(row.state || "unknown"), row.detail || "")),
             h("td", { class: "num" }, row.since ? fmt.ago(row.since) : "not known"),
-            h("td", { class: "wrap" }, row.what || ""),
+            h("td", { title: row.what || "" }, row.what || ""),
             h("td", null, list(row.actions).length
               ? h("div", { class: "row" }, list(row.actions).map((action) => h("button", {
                 key: action,
@@ -377,7 +377,8 @@ export function windows(account) {
 function windowBars(account) {
   const rows = windows(account);
   if (!rows.length) return h("span", { class: "muted" }, "no numbers yet");
-  return h("div", { class: "m-limits" }, rows.map((row) => h("div", { class: "m-limit", key: row.name },
+  const summary = rows.map((row) => `${row.name} ${fmt.percent(row.percent)}`).join(", ");
+  return h("div", { class: "m-limits", title: summary }, rows.map((row) => h("div", { class: "m-limit", key: row.name },
     h("span", { class: "m-lname" }, row.name),
     h("span", {
       class: `bar ${row.percent >= 95 ? "fail" : row.percent >= 70 ? "wait" : ""}`.trim(),
@@ -393,9 +394,9 @@ function loginCell(states, name) {
   if (!found) return h("span", { class: "muted" }, "not read yet");
   const [meaning, word] = LOGIN[found.state] || ["pause", fmt.titleCase(found.state || "unknown")];
   const sentence = found.sentence || "";
-  return h("div", { class: "m-login" },
+  return h("div", { class: "m-login", title: sentence },
     pill(meaning, word, sentence),
-    sentence ? h("span", { class: "muted" }, sentence) : null);
+    sentence ? h("span", { class: "muted cell-text" }, sentence) : null);
 }
 
 async function refreshAccounts(context) {
@@ -708,8 +709,8 @@ function accountsSection(context) {
           h("tbody", null, list(data.accounts).map((account) => h("tr", { key: account.name },
             h("td", null, account.label || account.name),
             h("td", null, account.engine || "unknown"),
-            h("td", { class: "wrap" }, loginCell(states, account.name)),
-            h("td", { class: "wrap" }, windowBars(account)),
+            h("td", null, loginCell(states, account.name)),
+            h("td", null, windowBars(account)),
             h("td", { class: "num" }, account.read_at ? fmt.ago(account.read_at) : "never"),
             h("td", null, h("button", {
               class: "ghost-button small",
@@ -926,8 +927,21 @@ function modelActions(context, model, where) {
     /* The one command that fixes this row, written where the row is. A cell that offered
        Remove and nothing else sent a person back to the dialog to find the command it had
        shown them one step earlier. */
-    out.push(h("code", { key: `${where}:auth`, class: "cmd", "data-model-auth-hint": model.id },
-      `fleet models auth ${model.id}`));
+    const command = `fleet models auth ${model.id}`;
+    out.push(h("button", {
+      key: `${where}:auth`,
+      class: "ghost-button small",
+      "data-model-auth-hint": model.id,
+      title: `Copy the command that stores the key: ${command}`,
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(command);
+          toast(`Copied: ${command}. Run it in a terminal, then press Test.`);
+        } catch (error) {
+          toast(`Run in a terminal: ${command}`, "bad");
+        }
+      },
+    }, "Key command"));
   }
   if (!out.length) {
     out.push(h("span", { key: `${where}:none`, class: "muted" }, "Install it first"));
@@ -968,12 +982,8 @@ function runsAs(model) {
   if (model.installed === false) {
     /* One row, one state, said once: "Not installed" is the Status pill's word. This cell
        carries the one thing the pill cannot, the command that puts it on this farm. */
-    return [
-      h("span", { class: "muted", key: "missing" },
-        "Nothing on this farm's PATH. Install it with:"),
-      h("code", { class: "cmd", key: "hint" },
-        model.install_hint || `install ${model.command || model.id}`),
-    ];
+    const hint = model.install_hint || `install ${model.command || model.id}`;
+    return h("code", { class: "cmd", key: "hint", title: `Not on this farm's PATH. Install it with: ${hint}` }, hint);
   }
   return h("span", { class: "mono" }, model.path || model.command || "on the path");
 }
@@ -983,7 +993,7 @@ function modelRow(context, model) {
   const [meaning, label] = STATUS[status];
   const detail = String(model.health_detail || "");
   return h("tr", { key: model.id },
-    h("td", { class: "wrap" }, h("button", {
+    h("td", null, h("button", {
       class: "m-model-name",
       "data-model-open": model.id,
       title: "Open what this model is for, and its terms.",
@@ -995,12 +1005,11 @@ function modelRow(context, model) {
       h("span", { class: "muted mono m-id" }, model.id)))),
     /* Every cell but the name carries the name of its column. On a phone the table is a card
        list, the header row is gone, and this attribute is what each line is called there. */
-    h("td", { class: "wrap m-runs", "data-col": "Runs as" }, runsAs(model)),
-    h("td", { class: "wrap", "data-col": "Access" }, accessOf(model)),
-    h("td", { class: "wrap", "data-col": "Status" },
-      pill(meaning, label, detail),
-      status === "failing" && detail
-        ? h("div", { class: "muted m-detail", key: "why" }, detail) : null),
+    h("td", { class: "m-runs", "data-col": "Runs as" }, runsAs(model)),
+    h("td", { "data-col": "Access", title: accessOf(model) }, accessOf(model)),
+    /* One line, one word: a failing model's reason is the pill's title and the drawer's
+       first row, not a second line that made this row taller than its neighbours. */
+    h("td", { "data-col": "Status" }, pill(meaning, label, detail)),
     h("td", { class: "num", "data-col": "Last test" },
       model.last_test ? fmt.ago(model.last_test) : "never"),
     h("td", { "data-col": "Actions" },
@@ -1799,7 +1808,7 @@ function healthSection(context) {
         h("tbody", null, list(data.checks).map((check) => h("tr", { key: check.id },
           h("td", null, check.label || check.id),
           h("td", null, pill(HEALTH_MEANING[check.state] || "pause", HEALTH_WORD[check.state] || check.state, "")),
-          h("td", { class: "wrap" }, check.detail || ""),
+          h("td", { title: check.detail || "" }, check.detail || ""),
           h("td", { class: "mono" }, check.fix || "none needed")))))),
     })));
 }
