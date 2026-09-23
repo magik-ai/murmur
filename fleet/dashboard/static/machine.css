@@ -130,6 +130,9 @@
    cell's title. */
 .m-limits { display: flex; gap: 10px; align-items: center; min-width: 0; white-space: nowrap; overflow: hidden; }
 .m-limit { flex: 0 0 auto; }
+/* Three windows with their numbers need about 460 px: this one cell is exempt from the table's
+   320 px cap, so the last percentage is never the thing that gets cut. */
+tbody td.m-windows { max-width: none; }
 .m-limit { display: grid; grid-template-columns: auto 48px 36px; gap: 5px; align-items: center; }
 .m-lname { color: var(--text-dim); font-size: 11px; }
 

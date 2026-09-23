@@ -710,7 +710,7 @@ function accountsSection(context) {
             h("td", null, account.label || account.name),
             h("td", null, account.engine || "unknown"),
             h("td", null, loginCell(states, account.name)),
-            h("td", null, windowBars(account)),
+            h("td", { class: "m-windows" }, windowBars(account)),
             h("td", { class: "num" }, account.read_at ? fmt.ago(account.read_at) : "never"),
             h("td", null, h("button", {
               class: "ghost-button small",

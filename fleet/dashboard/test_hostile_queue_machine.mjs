@@ -122,6 +122,9 @@ const READ_ONLY = JSON.stringify({
   }
   check("machine: the tab has tables to hold to that rule", Object.keys(tables).length >= 3,
     Object.keys(tables).join(", "));
+  const cut = await page.evaluate(() => [...document.querySelectorAll(".m-limits")]
+    .map((node) => node.scrollWidth - node.clientWidth));
+  check("machine: no subscription window is cut off at 1440", cut.every((px) => px <= 1), cut.join(", "));
   await context.close();
 }
 
