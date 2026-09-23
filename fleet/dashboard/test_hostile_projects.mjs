@@ -140,6 +140,48 @@ async function openImport(page) {
   await page.waitForSelector("[data-repo]", { timeout: 5000 });
 }
 
+/* ------------------------------------------------------------------ Re-check */
+
+/* Re-check keeps the strip drawn while the farm checks, and shows the new answer within
+   seconds of the check ending. The end-to-end run saw the answer a minute late; the first fix
+   blanked the strip into a loading skeleton for the whole check. */
+{
+  let phase = "before";
+  let reads = 0;
+  const { page, context, thrown } = await open({ gh: "no_git", overrides: {
+    "/api/github": async (handler) => {
+      if (handler.request().method() !== "GET") return handler.continue();
+      const response = await handler.fetch();
+      const json = await response.json();
+      if (phase === "checking") {
+        reads += 1;
+        json.checking = reads < 3;
+        if (reads >= 3) json.git_uses_login = true;
+      }
+      return handler.fulfill({ response, json });
+    },
+  } });
+  const before = await sectionText(page);
+  phase = "checking";
+  const started = Date.now();
+  await page.click("#view [data-github-check]");
+  await page.waitForTimeout(1300);
+  const during = await page.evaluate(() => Boolean(document.querySelector("#view [data-login-state]"))
+    && Boolean(document.querySelector("#view [data-github-check]")));
+  let gone = false;
+  for (let i = 0; i < 24 && !gone; i += 1) {
+    gone = !/Git on this farm does not use this login/.test(await sectionText(page));
+    if (!gone) await page.waitForTimeout(500);
+  }
+  const took = Date.now() - started;
+  check("recheck: the farm's old answer was drawn before the press",
+    /Git on this farm does not use this login/.test(before), before.slice(0, 200));
+  check("recheck: the strip stays drawn while the check runs, never a skeleton", during, String(during));
+  check("recheck: the new answer shows within seconds of the check ending", gone && took < 9000, `${took} ms, ${reads} reads`);
+  check("recheck: nothing threw", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
 /* ------------------------------------------------ a page that may not write, and one that may */
 
 {
@@ -197,6 +239,8 @@ const STRIP = [
   ["no_answer", /did not answer, so whether GitHub is connected cannot be told/, null],
   ["fine", /scopes cannot be read for this kind of token; the access check still applies/, /Signed in/],
   ["office_denied", /cannot write to the head office your-org\/agent-hq: this account can only read/, /Signed in/],
+  ["unread", /Signed in as @octo-farm\. What the agents may do is not known yet/,
+    /Whether this login can write to the head office your-org\/agent-hq is not known yet/],
 ];
 
 for (const [gh, first, second] of STRIP) {
@@ -206,6 +250,12 @@ for (const [gh, first, second] of STRIP) {
   if (gh === "two_flag") {
     check("strip two_flag: a two_identities that is not {file, line, variable} draws nothing",
       !/Two identities/.test(body) && !(await page.$("[data-strip='two']")), body.slice(0, 200));
+  }
+  if (gh === "unread") {
+    check("strip unread: never prints a null login, never promises a right, never calls the office refused",
+      !/@null|@undefined/.test(body) && !/Agents can copy/.test(body) && !/cannot write to the head office/.test(body)
+      && !/this kind of token/.test(body),
+      body.slice(0, 300));
   }
   if (gh === "missing_repo" || gh === "no_scopes") {
     check(`strip ${gh}: the headline never claims the agents can copy and push`,
@@ -414,6 +464,11 @@ for (const state of ["ready", "quiet"]) {
   }));
   check("import: the name is the repository's", config.name === "billing", config.name);
   check("import: and says where the copy goes", config.copied === "Copied to ~/work/billing on this farm", config.copied);
+  /* The hint follows the typing at once, not at the next repaint a few seconds later. */
+  await page.fill("[data-project-name]", "billing-app");
+  const hintNow = await page.evaluate(() => document.querySelector("[data-copied-to]").innerText);
+  check("import: the folder hint follows the typing at once", hintNow === "Copied to ~/work/billing-app on this farm", hintNow);
+  await page.fill("[data-project-name]", "billing");
   check("import: the branch is the default, then the protected ones, then a typed name",
     JSON.stringify(config.branches) === JSON.stringify(["trunk (default)", "release/2026 (protected)", "Type another name"]),
     config.branches.join(" | "));
@@ -879,7 +934,9 @@ for (const [typed, full] of [
 {
   const { page, context, requests } = await open();
   await page.click("[data-github-check]");
-  await page.waitForTimeout(700);
+  /* The button says "Asking GitHub" until the farm's check has answered (the page reads until
+     "checking" clears), then rests for the cooldown. */
+  await page.waitForTimeout(2000);
   const posts = requests.filter((request) => request.method === "POST" && request.path === "/api/github/check");
   const after = await page.evaluate(() => {
     const node = document.querySelector("[data-github-check]");

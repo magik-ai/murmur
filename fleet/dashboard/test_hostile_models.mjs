@@ -915,7 +915,9 @@ async function oneLine(page, selector) {
     && /The request failed, and its reason is not shown here\./.test(drawn), drawn.slice(-300));
   await second.context.close();
 
-  /* Each of the server's seven sentences (lib/model_discovery.py FAILURES) is drawn as sent. */
+  /* Each of the server's seven failure sentences (lib/model_discovery.py FAILURES) is drawn as
+     sent; the eighth, a row with no list at all, is not a failure and says so in its own words. */
+  const NO_LIST = "this provider has no list to offer here; add a model by its name";
   const SENTENCES = [
     "the CLI is not installed", "it did not answer in 15 seconds", "its output could not be read",
     "the file is missing", "the CLI exited with an error", "nothing answered on its port",
@@ -927,7 +929,7 @@ async function oneLine(page, selector) {
       "/api/engines": engines(),
       "/api/models/discover": (handler) => handler.fulfill({
         status: 200, contentType: "application/json",
-        body: JSON.stringify({ source: "docs", error: SENTENCES[next], models: [] }),
+        body: JSON.stringify({ source: "docs", error: next < SENTENCES.length ? SENTENCES[next] : NO_LIST, models: [] }),
       }),
     },
   });
@@ -940,7 +942,12 @@ async function oneLine(page, selector) {
       shown === `The request failed: ${sentence}. The list below is the docs list.`, shown);
     next += 1;
   }
-  check("models: nothing threw across the seven sentences", each.thrown.length === 0, each.thrown[0]);
+  await each.page.click("[data-model-request='kimi']");
+  await each.page.waitForTimeout(500);
+  const none = await each.page.evaluate(() => (document.querySelector("#drawer [data-model-failed]") || {}).textContent || "");
+  check("models: a provider with no list says so, and does not call it a failed request",
+    none === "This provider has no list to offer here. Add a model by its name below.", none);
+  check("models: nothing threw across the eight sentences", each.thrown.length === 0, each.thrown[0]);
   await each.context.close();
 
   const third = await open({
@@ -1790,6 +1797,41 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   await context.close();
 }
 
+/* The default model is on whether or not it was saved: the sidebar ticks and locks it and a lane
+   spawned without a model runs it, so the table counts it too (the end-to-end run saw "None on"). */
+{
+  const { page, context, thrown } = await open({
+    overrides: { "/api/engines": engines({ codex: { models_on: [], default_model: "gpt-6-sol" } }) },
+  });
+  const cell = await page.evaluate(() => {
+    const node = document.querySelector("[data-model-count='codex']");
+    return node ? { text: node.textContent, title: node.getAttribute("title") } : null;
+  });
+  check("models: the default model counts as on in the table",
+    Boolean(cell) && cell.text === "1 on" && cell.title === "gpt-6-sol", JSON.stringify(cell));
+  check("models: nothing threw counting the default", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* Codex signs in through a page on port 1455 of the farm, so its sidebar gives the command that
+   forwards the port, the one the Accounts row gives, not Claude's /login steps. */
+{
+  const { page, context, thrown } = await open({
+    overrides: { "/api/engines": engines({ codex: { status: "failing", health: "fail" } }) },
+  });
+  await openSidebar(page, "codex");
+  const seen = await page.evaluate(() => {
+    const host = document.getElementById("drawerBody") || document;
+    const node = host.querySelector("[data-model-login]");
+    return { login: node ? node.textContent : "", text: host.innerText || "" };
+  });
+  check("models: the Codex sidebar gives the codex login with the forwarded port",
+    seen.login === "ssh -L 1455:localhost:1455 -t farm codex login" && !/type \/login/.test(seen.text),
+    JSON.stringify(seen).slice(0, 240));
+  check("models: nothing threw in the Codex sidebar", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
 /* A subscription is logged in, not keyed, so its third step is a login command and the steps
    that go with it. Every preset is choosable on a farm with an empty catalog, which is the one
    place this branch can be reached. */
@@ -1816,6 +1858,26 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   check("machine: and says the login happens in a terminal, not here",
     /not on this page/.test(seen.text) && /\/login/.test(seen.text), seen.text.slice(0, 300));
   check("machine: nothing threw on a farm with no models", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* Codex in the same dialog: its third step is the codex login with the forwarded port, not
+   Claude's /login steps (the end-to-end run's defect 6, on its second screen). */
+{
+  const { page, context, thrown } = await open({ view: "machine", state: "empty" });
+  await page.click("[data-add-model]");
+  await page.waitForTimeout(700);
+  await page.click("#drawer [data-preset='codex']");
+  await page.waitForTimeout(400);
+  const seen = await page.evaluate(() => {
+    const host = document.getElementById("drawerBody");
+    const node = host.querySelector("[data-model-login]");
+    return { login: node ? node.textContent : "", text: host.innerText };
+  });
+  check("machine: adding Codex gives the codex login with the forwarded port",
+    seen.login === "ssh -L 1455:localhost:1455 -t farm codex login" && !/type \/login/.test(seen.text),
+    JSON.stringify(seen).slice(0, 220));
+  check("machine: nothing threw adding Codex", thrown.length === 0, thrown[0]);
   await context.close();
 }
 

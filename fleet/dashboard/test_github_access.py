@@ -71,6 +71,8 @@ if tool == "git":
             print(name)
         sys.exit(1 if bad else 0)
     if args[:2] == ["ls-remote", "--exit-code"]:
+        if any(url in " ".join(args[2:]) for url in sc.get("ls_remote_unreadable", [])):
+            sys.exit(128)
         sys.exit(0 if " ".join(args[2:]) in sc.get("ls_remote_ok", []) else 2)
     if args[:1] == ["-C"] and args[2:] == ["remote", "get-url", "origin"]:
         origin = sc.get("origins", {}).get(args[1])
@@ -506,7 +508,66 @@ class Watcher(Base):
             self.assertTrue(GA.watch_tick(now=1300.0))
 
 
+class AccountRefused(Base):
+    def test_a_login_whose_account_call_is_refused_names_the_login_and_claims_nothing(self):
+        # The login lands while GitHub refuses the account call (an hour whose allowance is
+        # spent): the page used to say "Signed in as @null" and promise every right.
+        scenario = connected_scenario()
+        scenario["api"]["user"] = api(403, {"message": "API rate limit exceeded"}, remaining=0)
+        with farm(scenario):
+            GA.configure(office=lambda: "acme/office")
+            GA.run_pass()
+            answer = GA.github_answer()
+            self.assertEqual(answer["login_state"], "connected")
+            self.assertEqual(answer["login"], "octo")
+            self.assertFalse(answer["account_read"])
+            self.assertIsNone(answer["office"]["writable"])
+            self.assertIn("did not answer about the account", answer["office"]["detail"])
+            self.assertNotIn("being saved", answer["office"]["detail"])
+
+    def test_an_answered_account_is_read(self):
+        with farm():
+            GA.run_pass()
+            self.assertTrue(GA.github_answer()["account_read"])
+
+    def test_a_farm_that_is_not_signed_in_says_so_about_the_office(self):
+        scenario = connected_scenario(auth={"rc": 1, "out": "You are not logged into any GitHub hosts.\n"})
+        with farm(scenario):
+            GA.configure(office=lambda: "acme/office")
+            GA.run_pass()
+            office = GA.github_answer()["office"]
+            self.assertIsNone(office["writable"])
+            self.assertIn("not signed in", office["detail"])
+
+
 class Check(Base):
+    def test_a_check_is_checking_until_its_pass_answers_and_never_pending(self):
+        # The page reads "checking" to know when a Re-check has its answer; without it the answer
+        # showed at the next minute's read. "pending" must stay false: the page draws a loading
+        # skeleton for it. The pass is held on an event so the check is exact.
+        import threading
+        with farm():
+            GA.run_pass()
+            self.assertFalse(GA.github_answer()["pending"])
+            self.assertFalse(GA.github_answer()["checking"])
+            started, go = threading.Event(), threading.Event()
+
+            def held_pass(fresh=False):
+                started.set()
+                go.wait(5)
+
+            with mock.patch.object(GA, "_pass", side_effect=held_pass):
+                code, payload = GA.check_request(now=5000.0)
+                try:
+                    self.assertEqual(code, 202)
+                    self.assertTrue(started.wait(5))
+                    self.assertTrue(GA.github_answer()["checking"])
+                    self.assertFalse(GA.github_answer()["pending"])
+                finally:
+                    go.set()
+                    payload["_thread"].join(10)
+            self.assertFalse(GA.github_answer()["checking"])
+
     def test_one_at_a_time_and_a_cooldown(self):
         with farm() as box:
             code, payload = GA.check_request(now=1000.0)
@@ -743,6 +804,20 @@ class Access(Base):
             checks, _ = self.run_access(box, {"repo": "octo/one", "name": "one",
                                               "branch": "gone"})
             self.assertEqual(checks["base_branch"]["state"], "fail")
+            self.assertIn("There is no branch gone", checks["base_branch"]["sentence"])
+
+    def test_a_repository_git_cannot_read_is_not_a_missing_branch(self):
+        # Git answers 128, not 2, when it could not read the repository at all (a private one
+        # before `gh auth setup-git`): the branch may well exist.
+        scenario = access_scenario(ls=("HEAD",))
+        scenario["ls_remote_unreadable"] = ["octo/one.git"]
+        with farm(scenario) as box:
+            checks, _ = self.run_access(box, {"repo": "octo/one", "name": "one",
+                                              "branch": "release/2026"})
+            self.assertEqual(checks["base_branch"]["state"], "fail")
+            self.assertNotIn("There is no branch", checks["base_branch"]["sentence"])
+            self.assertIn("could not read octo/one", checks["base_branch"]["sentence"])
+            self.assertEqual(checks["base_branch"]["fix"], "ssh -t farm gh auth setup-git")
 
     def folder_case(self, origin, ssh=None):
         extra = {}

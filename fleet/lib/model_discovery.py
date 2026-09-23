@@ -459,7 +459,9 @@ def annotate(answer, row):
 
 def _human(provider, answer):
     lines = []
-    if answer["error"]:
+    if answer["error"] == FAILURES["no_list"]:
+        lines.append(f"{provider}: {answer['error']}")
+    elif answer["error"]:
         lines.append(f"{provider}: {answer['error']}; the docs list instead")
     where = "from your account" if answer["source"] == "account" else "from the docs"
     count = len(answer["models"])

@@ -172,14 +172,16 @@ fleet models off claude haiku          # refuses the default model
 | Qwen Code | `~/.qwen/settings.json` `modelProviders` |
 | Kimi Code | `~/.kimi/config.toml` `[models.*]` |
 | OpenCode | `opencode models` |
-| Claude Code, Gemini CLI, Aider | the docs list in `lib/model_discovery.py` |
-| Custom | none: the name a person types |
+| Claude Code, Gemini CLI, Grok Build, Aider | the docs list in `lib/model_discovery.py` |
+| Custom, or a hand-written row | none: the name a person types, and a sentence saying there is no list |
 
 Only an id, a label and a description are kept from any source, and the answer passes
 `lib/scrub.py` with every credential-looking value of the provider's file added (the Qwen and Kimi
 files hold keys). A failure answers the docs list with one fixed sentence: the CLI is not
 installed, it did not answer in 15 seconds, its output could not be read, the file is missing, the
-CLI exited with an error, nothing answered on its port, it listed no models. A catalog that still
+CLI exited with an error, nothing answered on its port, it listed no models. A row with no route
+and no documented list answers an eighth: this provider has no list to offer here; add a model by
+its name. A catalog that still
 carries the retired `models = "sonnet, opus"` string reads it as the first `models_on`; the first
 `fleet models on|off` rewrites it.
 

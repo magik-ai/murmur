@@ -251,7 +251,7 @@ def _blank():
             "login_state": None, "login": None, "scopes": None, "git_uses_login": None,
             "two_identities": None, "office": {"repo": None, "writable": None, "detail": ""},
             "rate_remaining": None, "repos": [], "listed": False, "truncated": False,
-            "known": {}, "known_at": {}}
+            "known": {}, "known_at": {}, "account_read": False, "checking": False}
 
 
 _snapshot = _blank()
@@ -301,7 +301,9 @@ def _publish(update, stale_error=None, good=False):
             _snapshot["error"] = stale_error
 
 
-def _office(repos, spend_ok):
+def _office(repos, spend_ok, unchecked=None):
+    """What the login may do in the head office. `unchecked` is the reason given when it was not
+    asked; the default is the saving-calls reason, which is only true when calls are saved."""
     try:
         office = str(_hooks["office"]() or "").strip()
     except Exception:
@@ -320,7 +322,7 @@ def _office(repos, spend_ok):
                     "detail": "The head office is not written as owner/name."}
         if not spend_ok:
             return {"repo": office, "writable": None,
-                    "detail": "Not checked: GitHub calls are being saved for the agents."}
+                    "detail": unchecked or "Not checked: GitHub calls are being saved for the agents."}
         status, _, body = gh_api(_api_path(office))
         if status in (403, 404):
             return {"repo": office, "writable": False,
@@ -353,7 +355,9 @@ def _pass(fresh=False):
     if state in ("no_gh", "not_connected"):
         base.update({"login": None, "scopes": None, "git_uses_login": None,
                      "rate_remaining": None, "repos": [], "listed": False, "truncated": False,
-                     "known": {}, "known_at": {}, "office": _office([], False)})
+                     "known": {}, "known_at": {}, "account_read": False,
+                     "office": _office([], False, "Not checked: this farm is not signed in to "
+                                                  "GitHub.")})
         _publish(base, good=True)
         return
     if state == "no_answer":
@@ -362,11 +366,20 @@ def _pass(fresh=False):
         return
     status, fields, body = gh_api("user")
     if status != 200 or not isinstance(body, dict):
+        with _lock:
+            read_before = _snapshot.get("account_read")
+        if not read_before:
+            # Signed in, but the account itself has not been read yet: carry the login gh
+            # reported, and claim nothing about what it may do until GitHub answers.
+            base.update({"login": login or None, "scopes": None, "account_read": False,
+                         "git_uses_login": git_uses_login(),
+                         "office": _office([], False, "Not checked yet: GitHub did not answer "
+                                                      "about the account.")})
         _publish(base, stale_error=_call_error("the account", status))
         return
     base.update({"login": str(body.get("login") or login or "") or None,
                  "scopes": fields["scopes"], "rate_remaining": fields["remaining"],
-                 "git_uses_login": git_uses_login()})
+                 "git_uses_login": git_uses_login(), "account_read": True})
     remaining = fields["remaining"]
     if remaining is not None and remaining < RATE_FLOOR:
         _publish(base, stale_error=_saving(remaining))
@@ -471,8 +484,9 @@ def github_answer():
                     key=str.lower)
     owners = ([login] if login else []) + others
     return {"at": _iso(snap["at"]), "stale_since": _iso(snap["stale_since"]),
-            "error": snap["error"], "pending": snap["pending"],
+            "error": snap["error"], "pending": snap["pending"], "checking": bool(snap.get("checking")),
             "login_state": snap["login_state"], "login": login, "scopes": scopes,
+            "account_read": bool(snap.get("account_read")),
             "missing_scopes": missing, "git_uses_login": snap["git_uses_login"],
             "two_identities": snap["two_identities"], "office": snap["office"],
             "owners": owners, "rate_remaining": snap["rate_remaining"],
@@ -556,6 +570,11 @@ def check_request(now=None):
         return 409, {"error": "The GitHub connection is being checked right now; the answer "
                               "arrives in a few seconds.", "retry_after": 5}
     _last_check["at"] = now
+    # The page reads "checking" until this pass has answered, so a Re-check shows its own answer
+    # within seconds instead of at the next minute's read. It is not "pending": that one means no
+    # pass has ever answered, and the page draws a loading skeleton for it.
+    with _lock:
+        _snapshot["checking"] = True
 
     def work():
         try:
@@ -563,6 +582,8 @@ def check_request(now=None):
         except Exception:
             pass
         finally:
+            with _lock:
+                _snapshot["checking"] = False
             _pass_lock.release()
 
     thread = threading.Thread(target=work, name="github-check", daemon=True)
@@ -755,10 +776,18 @@ def access_request(body):
     elif wanted == default:
         checks.append(_check("base_branch", "ok", f"The base branch {wanted} is the default "
                                                   "branch."))
-    elif _ls_remote(repo, f"refs/heads/{wanted}") == 0:
-        checks.append(_check("base_branch", "ok", f"The base branch {wanted} exists."))
     else:
-        checks.append(_check("base_branch", "fail", f"There is no branch {wanted} in {repo}."))
+        found = _ls_remote(repo, f"refs/heads/{wanted}")
+        if found == 0:
+            checks.append(_check("base_branch", "ok", f"The base branch {wanted} exists."))
+        elif found == 2:
+            # git ls-remote --exit-code answers 2 only when it read the repository and found no
+            # such ref; anything else means it could not read the repository at all.
+            checks.append(_check("base_branch", "fail", f"There is no branch {wanted} in {repo}."))
+        else:
+            checks.append(_check("base_branch", "fail",
+                                 f"Git on this farm could not read {repo}, so the branch {wanted} "
+                                 "could not be checked.", commands()["setup_git"]))
 
     checks.append(_folder_check(repo, name, login))
     return 200, {"repo": repo, "branch": wanted, "name": name, "checks": checks,

@@ -188,6 +188,17 @@ function connected(data) {
   return Boolean(data && data.login_state === "connected");
 }
 
+/* "Signed in as @name", or, when gh reported no name, that a login exists at all. */
+function signedIn(data) {
+  return data && data.login ? `Signed in as @${data.login}` : "Signed in to GitHub";
+}
+
+/* Whether GitHub has answered about the account yet. Until it has, the page says so and promises
+   nothing about what the agents may do (a login can land while the account call is refused). */
+function accountRead(data) {
+  return Boolean(data && data.account_read !== false);
+}
+
 function scopeText(data) {
   if (!data) return "";
   if (data.scopes === null || data.scopes === undefined) {
@@ -245,19 +256,37 @@ async function recheck(context) {
   gh.checkBusy = true;
   gh.checkError = "";
   context.paint();
+  let running = false;
   try {
     await apiPost("/api/github/check", {});
     gh.checkQuietUntil = Date.now() + CHECK_QUIET_MS;
+    running = true;
     toast("GitHub was asked again.");
   } catch (error) {
     const wait = Number(error && error.payload && error.payload.retry_after);
     if (error && error.status === 429) {
       gh.checkQuietUntil = Date.now() + (Number.isFinite(wait) && wait > 0 ? wait * 1000 : CHECK_QUIET_MS);
     }
-    gh.checkError = serverReason(error) || "GitHub was not asked again.";
+    /* A 409 means a check is already running: its answer is worth waiting for too. */
+    running = Boolean(error && error.status === 409);
+    if (!running) gh.checkError = serverReason(error) || "GitHub was not asked again.";
   } finally {
+    /* The farm answers the press at once and checks in the background, with "checking" set
+       until that pass answers. The page waits a moment (a read already in flight may carry the
+       answer from before the press), then reads until "checking" clears, so the new answer shows
+       in seconds rather than at the next minute's read. The strip stays drawn all along. */
+    if (running) {
+      for (let tries = 0; tries < 25; tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, tries ? 1000 : 800));
+        await context.refresh("/api/github");
+        const now = context.res("/api/github").data;
+        if (!now || !now.checking) break;
+      }
+    } else {
+      await context.refresh("/api/github");
+    }
     gh.checkBusy = false;
-    await context.refresh("/api/github");
+    context.paint();
   }
 }
 
@@ -311,6 +340,10 @@ function officeLine(data) {
     return stripLine(["done", "Head office"], `This login can write to the head office ${office.repo}.`,
       office.detail || "", "office");
   }
+  if (office.writable === null || office.writable === undefined) {
+    return stripLine(["pause", "Not checked"], `Whether this login can write to the head office ${office.repo} `
+      + "is not known yet.", office.detail || "", "office");
+  }
   const why = office.detail ? `: ${office.detail}` : ".";
   return stripLine(["fail", "Head office"], `This login cannot write to the head office ${office.repo}${why}`,
     office.detail || "", "office");
@@ -331,9 +364,12 @@ function strip(context, data, projects) {
     lines.push(stripLine(["fail", "Not connected"], "GitHub is not connected on this farm.",
       "gh reports no account at all.", "state", connectButton(context, true)));
   } else if (state === "connected") {
-    const missing = lacking(data);
-    const can = headline(missing);
-    lines.push(stripLine(["done", "Connected"], `Signed in as @${data.login}. ${can}`, scopeText(data), "state",
+    const read = accountRead(data);
+    const missing = read ? lacking(data) : [];
+    const can = read ? headline(missing)
+      : "What the agents may do is not known yet: GitHub has not answered about the account.";
+    lines.push(stripLine(["done", "Connected"], `${signedIn(data)}. ${can}`,
+      read ? scopeText(data) : (data.error || "The account is read again at the next check."), "state",
       recheckButton(context),
       h("button", {
         class: "p-link",
@@ -341,7 +377,7 @@ function strip(context, data, projects) {
         "data-github-switch": "",
         onclick: () => openConnect(context, "switch"),
       }, "Switch account")));
-    if (data.scopes === null || data.scopes === undefined) {
+    if (read && (data.scopes === null || data.scopes === undefined)) {
       lines.push(h("p", { class: "muted p-strip-note", key: "scopes" }, scopeText(data)));
     }
     for (const scope of missing) {
@@ -457,10 +493,11 @@ function connectBody(context) {
           + "the Git question, run this as well:"),
         commandRow(cmd.setup_git, "setup-git-command", "setup"),
       ],
-    stepHead(2, done ? `Signed in as @${data.login}` : "Waiting for the login",
+    stepHead(2, done ? signedIn(data) : "Waiting for the login",
       done ? "The agents act as this account from now on." : null),
     h("div", { class: "row m-wait", key: "wait" },
-      pill(done ? "done" : "wait", done ? "Connected" : "Waiting", scopeText(data)),
+      pill(done ? "done" : "wait", done ? "Connected" : "Waiting",
+        accountRead(data) ? scopeText(data) : "The account is not read yet"),
       h("span", { class: "muted" }, done
         ? "Nothing else to do here."
         : "This page reads the farm's answer every three seconds; nothing to press here.")),
@@ -1022,6 +1059,10 @@ function configureStep(context) {
           imp.name = event.target.value;
           imp.nameError = "";
           imp.checks = null;
+          /* The hint follows the typing without a repaint of the whole dialog under the caret. */
+          const hint = event.target.parentNode && event.target.parentNode.querySelector("[data-copied-to]");
+          const typed = (!looksLikeToken(imp.name) && imp.name.trim()) || "<name>";
+          if (hint) hint.textContent = `Copied to ~/work/${typed} on this farm`;
         },
       }),
       h("span", { class: "muted", "data-copied-to": "" }, `Copied to ~/work/${name} on this farm`)),

@@ -338,7 +338,10 @@ const CANNOT_TAKE = "This provider runs the model its own settings choose; chang
 /* "3 on" in the cell and the names in its title. */
 function modelCount(model) {
   if (!takesModel(model)) return ["Its own setting", CANNOT_TAKE];
-  const ids = modelsOn(model);
+  /* The default model is always on (the sidebar ticks and locks it, and a lane spawned without
+     a model runs it), so it is counted here too, first, as the sidebar lists it. */
+  const fallback = defaultModel(model);
+  const ids = [fallback, ...modelsOn(model).filter((id) => id !== fallback)].filter(Boolean);
   if (!ids.length) return ["None on", "No model is switched on. Open the provider to choose some."];
   return [`${ids.length} on`, ids.join(", ")];
 }
@@ -400,6 +403,15 @@ function loginRows(context, model) {
   const kind = accessKind(model);
   if (kind === "key") return [commandRow(`fleet models auth ${model.id}`, "model-auth")];
   if (kind === "local") return [];
+  if (model.engine === "codex" || model.id === "codex") {
+    /* Codex signs in through a page on port 1455 of the machine it runs on, so the port comes
+       back through the ssh session; this is the command the Accounts row gives too. */
+    return [
+      commandRow(`ssh -L 1455:localhost:1455 -t ${farmAlias(context)} codex login`, "model-login"),
+      h("p", { class: "muted", key: "login" },
+        "Open the address it prints in your own browser and sign in; the forwarded port carries the answer back to the farm."),
+    ];
+  }
   return [
     commandRow(`ssh -t ${farmAlias(context)} ${model.command || model.id}`, "model-login"),
     h("p", { class: "muted", key: "login" }, "In the window it opens, type /login, then /exit."),
@@ -517,7 +529,12 @@ async function requestModels(context, model) {
         cost_note: String(entry.cost_note || ""),
       }));
     state.answer = { source, models };
-    state.failed = answer && answer.error ? failureSentence(answer.error) : "";
+    /* A provider with nothing to list is not a failed request: it says so in its own words. */
+    state.failed = answer && answer.error
+      ? (models.length || source !== "docs" || !/^this provider has no list/.test(answer.error)
+        ? failureSentence(answer.error)
+        : "This provider has no list to offer here. Add a model by its name below.")
+      : "";
   } catch (error) {
     state.failed = serverReason(error) || "The farm did not answer the request.";
   } finally {
@@ -967,6 +984,20 @@ function nameStep(context, preset) {
 function accessStep(context, preset) {
   const name = (local.modelId || preset.id || "the model").trim();
   const binary = local.modelBin || preset.bin || name;
+  if (preset.kind === "subscription" && (preset.engine === "codex" || preset.id === "codex")) {
+    /* Codex signs in through a page on port 1455 of the farm, so the port comes back through
+       the ssh session; the Accounts row and the provider sidebar give the same command. */
+    return [
+      stepHead(3, "Log it in", "A subscription is logged in once, in a terminal on your own "
+        + "machine, not on this page. Run:"),
+      commandRow(`ssh -L 1455:localhost:1455 -t ${farmAlias(context)} codex login`, "model-login"),
+      h("ol", { key: "steps" },
+        h("li", { key: "1" }, "Run the command from wherever you reach this farm"),
+        h("li", { key: "2" }, "Open the address it prints in your own browser"),
+        h("li", { key: "3" }, "Sign in with the account that holds the subscription"),
+        h("li", { key: "4" }, "Come back here when the terminal says you are logged in")),
+    ];
+  }
   if (preset.kind === "subscription") {
     return [
       stepHead(3, "Log it in", "A subscription is logged in once, in a terminal on your own "

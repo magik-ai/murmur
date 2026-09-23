@@ -21,6 +21,7 @@ request's query, from the query of the page that made it, or from STUB_GH:
     no_answer       gh did not answer
     fine            a fine-grained token, whose scopes cannot be read
     office_denied   the login cannot write to the head office
+    unread          signed in (gh names the login), but GitHub refused the account call: nothing read
     flip            not connected for STUB_GH_FLIP_SECONDS after the first read, then connected
 
 `long=1` adds a project whose name, repository and branch are all too long for their cells.
@@ -38,7 +39,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 VARIANTS = ("connected", "missing_scope", "missing_repo", "no_scopes", "no_git", "two", "two_flag",
-            "not_connected", "no_gh", "no_answer", "fine", "office_denied", "flip")
+            "not_connected", "no_gh", "no_answer", "fine", "office_denied", "flip", "unread")
 FLIP_SECONDS = float(os.environ.get("STUB_GH_FLIP_SECONDS", "6"))
 CHECK_COOLDOWN = 60
 ENV_FILE = "/home/farm/.config/fleet/env"
@@ -182,9 +183,15 @@ def github_payload(state, variant, farm="farm"):
     if variant == "office_denied":
         office = {"repo": "your-org/agent-hq", "writable": False,
                   "detail": "this account can only read your-org/agent-hq"}
+    if variant == "unread":
+        scopes = None
+        error = "GitHub refused the account call (HTTP 403); the last answer is kept."
+        office = {"repo": "your-org/agent-hq", "writable": None,
+                  "detail": "Not checked yet: GitHub did not answer about the account."}
     answer = {
         "at": at, "stale_since": None, "error": error, "pending": None,
-        "login_state": current, "login": LOGIN if signed else None,
+        "login_state": current, "login": LOGIN if signed else None, "checking": False,
+        "account_read": signed and variant != "unread",
         "scopes": scopes if signed else None, "missing_scopes": missing if signed else [],
         "git_uses_login": (variant != "no_git") if signed else None,
         "two_identities": ({"file": ENV_FILE, "line": 3, "variable": "GH_TOKEN"}
