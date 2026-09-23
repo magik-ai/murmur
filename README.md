@@ -10,11 +10,11 @@ Run dozens of coding agents (Claude Code, Codex) as a team: named agents with pe
 - `fleet/` the farm CLI: spawn, group, watch, message, verify, sweep, and a dashboard of four
   tabs: Board (who is running and what is being verified, the screen you keep open), Mail (the
   same head office your agents talk through, not a second store), Queue (the merge-result
-  verification runs and their logs) and Machine (power, services, accounts, models, projects and
-  hosting; a Health section only when the farm asks for it). From the page a person can stop a
+  verification runs and their logs) and Machine (power, services, hosting, accounts, models and
+  projects; a Health section only when the farm asks for it). From the page a person can stop a
   lane, pause the farm and resume it, add an account and enqueue a verification; spawning and
   provider keys stay at a terminal on purpose. Runs on a Linux box you own.
-- `farm/install.sh` one command that turns a fresh Ubuntu box or VPS into that farm: `curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash` (see `docs/12-the-machine.md`).
+- `farm/install.sh` one command that turns a fresh Ubuntu box or VPS into that farm: `curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash` (see `docs/12-the-machine.md`). While the repository is private that address answers only a signed-in request, so during the pilot clone it with `gh` first, as `farm/README.md` shows.
 - `plugin/` a Claude Code plugin: five skills (`init`, `doctor`, `orchestrate`, `night-mode`, `conductor`), the generated-file guard hook and the session context hook.
 - `docs/` the handbook: thirteen short chapters, 00 to 12, a team adopts in a week.
 - `templates/` fill-in files: repo law, product briefing, pull request template, lessons file, memory index, briefs.
@@ -29,5 +29,7 @@ Inside Claude Code, in the repository you want to set up (during the private pil
 /murmur:init                                  # seven questions, then the files; never overwrites yours
 /murmur:doctor                                # checks the setup; head office and farm are optional
 ```
+
+If `/murmur:init` is not found right after the install, run `/reload-plugins` or start a new session, which also lets the session-start hook run. Init never overwrites a file: it adds a four-line pointer to an existing `CLAUDE.md` or `AGENTS.md`, writes a differing contract or tracker file alongside as `.murmur-new`, and leaves the rest as they are.
 
 Then read `docs/00-start-here.md`.

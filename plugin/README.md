@@ -25,7 +25,7 @@ the session-start hook runs.
 
 ## Start here
 
-Run `/murmur:init` in the repository you want to set up. It asks seven questions, one at a time, each with a default, and writes the contract, the tracker rules, the pull request template, the lessons file and the guard list. It never overwrites a file you already have: a differing file is written alongside as `.murmur-new`. Run it again later and it asks only what is new. Then `/murmur:doctor` checks the setup and says which optional pieces (a head office, an agent machine) are not set up yet.
+Run `/murmur:init` in the repository you want to set up. It asks seven questions, one at a time, each with a default, and writes the contract, the tracker rules, the pull request template, the lessons file and the guard list. It never overwrites a file you already have: a differing contract or tracker file is written alongside as `.murmur-new`, the pull request template, the lessons file and the guard list are left alone when they exist, and an existing `CLAUDE.md` or `AGENTS.md` gets a four-line pointer to the contract. Run it again later and it asks only what is new. Then `/murmur:doctor` checks the setup and says which optional pieces (a head office, an agent machine) are not set up yet.
 
 ## Skills
 
@@ -55,8 +55,10 @@ regenerates it instead. It runs before `Edit`, `Write`, `MultiEdit` and
 `NotebookEdit`, reads the tool input from standard input, and exits 2 with a
 one-line reason when the target path matches.
 
-It is off until a repository turns it on. **To turn it on, create
-`.claude/generated-files.txt`** in that repository, one glob per line:
+It is off until a repository has `.claude/generated-files.txt`, one glob per
+line. `/murmur:init` writes that file from the example below, so after init the
+guard is on for the example's entries: edit the file to your own generated
+paths, or empty it to switch the guard off.
 
 ```
 docs/contracts/openapi.json  npm run generate:api
@@ -69,9 +71,9 @@ and lines starting with `#` are ignored. A glob that does not begin with `/`
 or `*` matches any path ending that way, so entries can be written relative to
 the repository root whatever the checkout is called.
 
-Copy `hooks/generated-files.example.txt` as a starting point. With no such
-file the hook exits 0 and says nothing, so installing the plugin never blocks
-anything by surprise.
+`hooks/generated-files.example.txt` is the starting point init copies. With no
+such file the hook exits 0 and says nothing, so installing the plugin alone
+never blocks anything by surprise.
 
 ### `session-context.sh` (SessionStart)
 
