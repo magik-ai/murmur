@@ -21,6 +21,11 @@ jobs:
           cd fleet
           python3 tests/sensors-test.py
           python3 tests/supervisor-test.py lib/supervisor.py
+      - name: Stream parser
+        run: |
+          cd fleet
+          python3 tests/model-switch-test.py
+          bash tests/silent-start-test.sh
       - name: Dashboard and the model catalog
         run: |
           cd fleet

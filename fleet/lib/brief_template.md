@@ -19,10 +19,19 @@ Rules:
 - **Never write an em-dash, anywhere.** Not in code, not in copy, not in a commit message,
   a PR body, a report or a message to a person. Use a comma, a colon, a full stop or
   parentheses.
-- **Report so a person can act on it.** Your READY or blocked message to the orchestrator names
-  what is done, what is not, and what a person sees. Put durable output in the PR, the issue or
-  your report: never leave work only in the worktree, because a result nobody can read is lost
-  work, and the janitor buries the tree.
+- **Report so a person can act on it.** Open your READY or blocked message with what you need
+  from the orchestrator or the owner (a decision, an approval, access), or 'nothing needed'. Then
+  name what is done, what is not, and what a person sees. Mark anything you could not confirm, and
+  say where you looked: an unchecked claim is not a finding. Put durable output in the PR, the
+  issue or your report: never leave work only in the worktree, because a result nobody can read is
+  lost work, and the janitor buries the tree.
+- **Keep your task list in a file, not in your head.** For a slice longer than an hour, keep a
+  checklist in `/tmp/{{AGENT_ID}}-tasks.md` (outside git, so it never lands in a commit): tick
+  items as they finish and add what you discover. When your context is summarized, re-read the
+  file instead of trusting your memory of the conversation.
+- **If your task is a review**, report only what you would block the merge for, each with file and
+  line, why it is wrong, and how to show it fails (a test, a command or steps). Everything else
+  goes under 'Optional' and never starts a fix round.
 - Bootstrap this worktree before building if the task needs it (its own `.venv` / `node_modules` / `.env` per the repo quick-start). A fresh worktree has none of these.
 
 Working alongside sibling agents, avoid the shared-resource traps (these cause real 30-minute stalls):

@@ -181,6 +181,47 @@ def short_activity(ev):
     return None
 
 
+def _model_family(name):
+    """'claude-opus-5-5[1m]' -> 'claude-opus-5-5', 'claude-haiku-4-5-20251001' -> 'claude-haiku-4-5'.
+
+    The init event may carry a context suffix the API's message.model never does, and an alias
+    and its dated snapshot are one model. Only an 8-digit date is dropped: a plain prefix match
+    would call claude-opus-5 the same model as claude-opus-5-5."""
+    return re.sub(r"-\d{8}$", "", (name or "").split("[", 1)[0].strip().lower())
+
+
+def _same_model(a, b):
+    return _model_family(a) == _model_family(b)
+
+
+def note_answering_model(state, ev):
+    """Record when the model answering is not the one the lane started on.
+
+    A lane can change model mid-run without saying so: a safety flag moves the session to an
+    older model, and `--fallback-model` moves it on overload. Either way the card still shows the
+    model it was spawned with, and a review that finished on another model reads as if it had
+    not. Returns the new model when this event is the first sign of a change, else None."""
+    # A subagent's replies ride in the parent stream tagged with the Task call that started it;
+    # a sonnet or haiku subagent under an opus lane is the lane working, not the lane moving.
+    if ev.get("parent_tool_use_id"):
+        return None
+    model = (ev.get("message") or {}).get("model")
+    # Claude Code stamps its own error and notice messages "<synthetic>": no model answered them.
+    if not isinstance(model, str) or not model or model.startswith("<"):
+        return None
+    started = state.get("model_actual")
+    if not isinstance(started, str) or not started:
+        state["model_actual"] = model
+        return None
+    if _same_model(model, started):
+        return None
+    last = (state.get("model_switch") or {}).get("to")
+    if last and _same_model(model, last):
+        return None
+    state["model_switch"] = {"from": started, "to": model, "at": int(time.time())}
+    return model
+
+
 s = load()
 s["status"] = "running"
 save(s)
@@ -207,6 +248,11 @@ for line in sys.stdin:
         a = short_activity(ev)
         if a:
             s["last_activity"] = a
+        if t == "assistant":
+            switched_to = note_answering_model(s, ev)
+            if switched_to:
+                append_event(slug, s, "model-switched", model_from=s["model_switch"]["from"],
+                             model_to=switched_to)
 
     elif t == "rate_limit_event":
         # surface quota pressure so the orchestrator can flex the fleet

@@ -48,6 +48,7 @@ for fp in sorted(glob.glob(os.path.join(os.environ["FLEET_STATE"], "state", "*.j
         "issues": s.get("issues") or None, "scope": s.get("scope") or None,
         "spawned_by": s.get("spawned_by"), "started_at": s.get("started_at"),
         "respawn_count": s.get("respawn_count", 0), "activity": s.get("last_activity"),
+        "model_switch": s.get("model_switch") or None,
     })
 
 print(json.dumps({"farm": farm, "lanes": lanes}))

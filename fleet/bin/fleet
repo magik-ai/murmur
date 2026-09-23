@@ -870,6 +870,10 @@ for s in rows:
         if age > 900 and _unit_inactive(str(s.get("slug") or "")):
             status = status + "?"
             act = f"no unit, no process for {int(age // 3600)}h — dead?  " + act
+    # A lane that changed model mid-run says so first: its card still names the spawn model.
+    switch = s.get("model_switch") or {}
+    if switch.get("to"):
+        act = f"model switched to {switch['to']}  " + act
     print(f"  {s.get('slug','')[:22]:<22} {s.get('project','')[:10]:<10} "
           f"{(s.get('engine') or 'claude')[:7]:<7} {tier[:7]:<7} "
           f"{status:<10} {prn:<6} {act[:60]}")
@@ -1168,6 +1172,9 @@ if s.get("restart"): line += f"  ·  restart {s['restart']}"
 print(line)
 if s.get("scope"): print(f"  scope delivered {s['scope'].get('delivered')} dropped {s['scope'].get('dropped')}")
 print(f"  pr {pr}")
+if s.get("model_switch"):
+    sw = s["model_switch"]
+    print(f"  model switched mid-run: {sw.get('from')} -> {sw.get('to')}")
 if s.get("last_activity"): print(f"  step: {s['last_activity']}")
 last = os.path.join(st, "logs", slug + ".last")
 if os.path.exists(last):
