@@ -120,15 +120,17 @@
 
 /* Table cells are one line each (owner rule 2026-09-23): a pill and its sentence sit side by
    side, the sentence cut with an ellipsis and carried in full by the cell's title. */
-.m-login { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+/* The sentence yields to the windows: three bars with their numbers need the room more than
+   the tail of "Lanes can be spawned on this account", which the title carries in full. */
+.m-login { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 300px; }
 .m-login .pill { flex: 0 0 auto; }
 .m-login .cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
 /* The bars clip as a whole at the cell's edge, never a label mid-word; the full list is the
    cell's title. */
-.m-limits { display: flex; gap: 14px; align-items: center; min-width: 0; white-space: nowrap; overflow: hidden; }
+.m-limits { display: flex; gap: 10px; align-items: center; min-width: 0; white-space: nowrap; overflow: hidden; }
 .m-limit { flex: 0 0 auto; }
-.m-limit { display: grid; grid-template-columns: auto 56px 38px; gap: 6px; align-items: center; }
+.m-limit { display: grid; grid-template-columns: auto 48px 36px; gap: 5px; align-items: center; }
 .m-lname { color: var(--text-dim); font-size: 11px; }
 
 .m-settings dd { display: grid; gap: 2px; }
