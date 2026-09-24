@@ -40,6 +40,21 @@ def sandbox(tmp_path, monkeypatch):
     work = tmp_path / "work"
     work.mkdir()
     monkeypatch.chdir(work)
+    # Every command that acts under a name also heartbeats that name's session
+    # issue, through its own `gh`. A test that stubs the office for mail or
+    # claims would still reach GitHub that way, so the heartbeat's office is
+    # cut here too: it has no session issues and refuses every write. A test
+    # about presence installs its own fakes over these.
+    from hq import presence
+
+    def no_writes(args, **_kwargs):
+        raise AssertionError(f"a test reached `gh` through the heartbeat: {args[:2]}")
+    monkeypatch.setattr(presence, "find_issue", lambda title: None)
+    monkeypatch.setattr(presence, "gh", no_writes)
+    # The heartbeat goes out from a detached child process, which would not see
+    # any of these fakes. Here the child's work runs in-process instead, so no
+    # test starts a real process unless it opts in.
+    monkeypatch.setattr(presence, "start_child", lambda name: presence.post_heartbeat(name))
     return tmp_path
 
 

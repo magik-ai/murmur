@@ -4,6 +4,7 @@ import os
 import sys
 
 from .config import load_config
+from .presence import keep_alive
 from .util import MissingTool, run, slug
 
 
@@ -174,9 +175,15 @@ def require_identity(strict=True):
     or consumes another agent's work. That is not hypothetical: on 2026-09-16 a
     session whose own file had just been removed by `hq bye` fell through to the
     shared state and signed a second `hq bye` as a different, live agent, taking that
-    agent off the board. Reads that only display something may pass strict=False."""
+    agent off the board. Reads that only display something may pass strict=False.
+
+    Acting under a name is also proof of life, so a name this session owns gets
+    its presence refreshed here, at most once an hour (see `presence`): the one
+    funnel every name-acting command passes through, so none can forget it."""
     name, source = identity_source()
     if name and (not strict or source in SESSION_SCOPED_SOURCES):
+        if source in SESSION_SCOPED_SOURCES:
+            keep_alive(name)
         return name
     if name and strict:
         sys.exit(

@@ -157,6 +157,11 @@ class Config:
         return self.state / "lastread"
 
     @property
+    def presence_dir(self):
+        """One stamp per name: when this machine last heartbeated for it."""
+        return self.state / "presence.d"
+
+    @property
     def claims_index(self):
         return self.state / "claims.index"
 

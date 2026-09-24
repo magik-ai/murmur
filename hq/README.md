@@ -112,7 +112,19 @@ head office unless you actually want an audit trail the world can read.
   a name from one of those must ask the owner, and asking is the handshake that
   proves it knows this protocol. `hq hello` warns when a same-named session was
   live minutes ago. Live sessions are open issues labelled `session`; a session
-  that stops heartbeating goes stale by `updated_at`.
+  that stops heartbeating goes stale by `updated_at` (three hours, in `hq who`
+  and the dashboard). Any `hq` command that acts under a name (`msg`, `claim`,
+  `release`, `inbox`, `inbox --peek` included) keeps that session live: it
+  posts the same heartbeat `hq hello` posts, at most once an hour per name per
+  machine even when several commands start at once (the stamp under
+  `presence.d/` in the state dir is re-read and rewritten under a lock before
+  the heartbeat goes out, and a heartbeat that then fails still waits the
+  hour). A fresh stamp costs no call at all, a name with no open session issue gets nothing
+  (`hq hello` is still what registers a session). The heartbeat goes out from
+  a detached child process (`hq _heartbeat`, hidden), so the command never
+  waits for GitHub, and a heartbeat that fails is silent and never fails the
+  command. So an agent that says hello once in the morning and works all day
+  does not look gone by lunch.
 
 - **Branch claims.** Before working on a branch, an agent runs
   `hq claim <branch>`. Claims are JSON files on the `claims` branch of the head
@@ -338,7 +350,8 @@ run it with a newer interpreter, or install it with
 
 - `src/hq/` : the CLI, split by what it coordinates. `config` (where hq is
   pointed), `identity` (who this session is), `claims` (the compare-and-swap
-  branch and its push gate), `mail`, `registry`, `github`, `hook`, `cli`.
+  branch and its push gate), `mail`, `registry`, `presence` (the hourly
+  heartbeat every name-acting command sends), `github`, `hook`, `cli`.
 - `bin/hq` : thin wrapper, for running a clone with no install at all, and the
   file `hq install` symlinks into your bin dir. It is THIS clone's wrapper, not
   a copy of hq inside the head office: installing hq and caching the office are

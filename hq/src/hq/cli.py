@@ -8,6 +8,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from . import presence
 from .claims import cmd_check_push, cmd_claim, cmd_claims, cmd_release
 from .config import (
     DEFAULTS,
@@ -263,6 +264,10 @@ def parse_args(ap):
 
 
 def main():
+    if sys.argv[1:2] == [presence.CHILD_COMMAND]:
+        # The detached heartbeat child (see `presence.keep_alive`): handled
+        # before argparse so it stays out of `hq --help`.
+        raise SystemExit(presence.child_main(sys.argv[2:]))
     speak_utf8()
     ap = argparse.ArgumentParser(prog="hq", description=USAGE,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)

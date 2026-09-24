@@ -17,6 +17,7 @@ from .identity import (
     session_key_source,
     shared_identity_owner,
 )
+from .presence import heartbeat_body, mark_heartbeat
 from .util import iso, now, run, slug
 
 # A session that has not heartbeated in this long is shown as stale, not live.
@@ -57,7 +58,8 @@ def cmd_hello(args):
             f"task: {args.task or '-'}\nstarted: {iso(now())}")
     number = ensure_issue(f"session: {name}", "session", body)
     gh(["issue", "comment", str(number), "--repo", repo,
-        "--body", f"heartbeat {iso(now())} - {args.task or 'session start'}"])
+        "--body", heartbeat_body(args.task or "session start")])
+    mark_heartbeat(name, cfg)
     scope = f"session {key}" if key else "this machine (no session id available)"
     print(f"hello {name}: session #{number} registered; identity saved for {scope}")
 
