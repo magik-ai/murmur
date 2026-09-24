@@ -48,7 +48,11 @@ for (const scheme of ["light", "dark"]) {
     colorScheme: scheme,
   })).newPage();
   await page.goto(`${URL}/#/machine`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1600);
+  /* The tab draws each section as its answer comes in, so a fixed wait measures whichever
+     sections happen to be in. Wait until every meaning is on the page, up to ten seconds; a
+     meaning still missing then is reported below. */
+  await page.waitForFunction((names) => names.every((name) => document.querySelector(`#view .pill.${name}`)),
+    Object.keys(WANTED), { timeout: 10000 }).catch(() => {});
 
   const measured = await page.evaluate(() => {
     const out = {};
