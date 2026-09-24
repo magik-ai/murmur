@@ -305,7 +305,7 @@ cmd_spawn() {
   # that are not the ones the operator wrote. Refuse the spawn, in one line, before anything is
   # created.
   local policy_err
-  if ! policy_err="$(_policy limits.max_agents 2>&1 >/dev/null)"; then
+  if ! policy_err="$(_policy limits.ram_min_gb 2>&1 >/dev/null)"; then
     echo "REFUSING to spawn: ${policy_err%%$'\n'*}"
     return 2
   fi
@@ -498,15 +498,17 @@ HOOK_DISPATCH
   if [ "$hq_on" = "1" ]; then
     cat > "$hookdir/pre-push.d/10-hq-claims" <<'HOOK_HQ'
 #!/usr/bin/env bash
-# agent-hq claims guard: refuse pushing to a branch claimed by another agent.
+# Head office claims guard: refuse pushing to a branch claimed by another agent.
 hq_bin="$(command -v hq || echo "$HOME/.local/bin/hq")"
 [ -x "$hq_bin" ] || exit 0
 repo_url="$(git remote get-url origin 2>/dev/null)" || exit 0
 wt_agent="$(git config hq.agent 2>/dev/null || true)"
 export HQ_AGENT="${wt_agent:-${HQ_AGENT:-}}"
 [ -n "$HQ_AGENT" ] || unset HQ_AGENT
+# `--` because a branch name is not ours to choose: `refs/heads/-weird` is a legal ref, and
+# without the separator hq reads it as an option and lets the push through unchecked.
 while read -r _l _ls remote _rs; do
-  case "$remote" in refs/heads/*) "$hq_bin" check-push "$repo_url" "${remote#refs/heads/}" || exit 1 ;; esac
+  case "$remote" in refs/heads/*) "$hq_bin" check-push -- "$repo_url" "${remote#refs/heads/}" || exit 1 ;; esac
 done
 exit 0
 HOOK_HQ
@@ -604,7 +606,7 @@ PY
   # coordination mail rides into THIS launch's prompt. The brief file persisted
   # above stays clean, so a respawn never replays stale mail.
   if [ "$hq_on" = "1" ]; then
-    sys="$sys"$'\n\n'"AGENT-HQ: you are '$hq_agent'. Check mail between tasks with 'hq inbox'; message peers with 'hq msg <agent|all> \"...\"'; your lane branch is already claimed for you - release is automatic on merge, and never push to a branch claimed by someone else."
+    sys="$sys"$'\n\n'"AGENT-HQ: you are '$hq_agent'. Check mail between tasks with 'hq inbox'; message peers with 'hq msg <agent|all> \"...\"'. Your lane branch '$branch' is already claimed for you: the claim expires by itself after 24 hours, and 'hq release $branch' ends it sooner once the branch is merged. Never push to a branch claimed by someone else."
     local hq_mail
     hq_mail="$(HQ_AGENT="$hq_agent" hq inbox 2>/dev/null || true)"
     if [ -n "$hq_mail" ] && [ "$hq_mail" != "inbox empty" ]; then

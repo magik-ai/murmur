@@ -429,8 +429,8 @@ function strip(context, data, projects) {
   }
   const two = twoIdentities(data.two_identities);
   if (two) {
-    lines.push(stripLine(["wait", "Two identities"], `Two identities: ${two.variable} is set in ${two.file}. The daemon `
-      + "and the sweep load that file and the lanes do not, so "
+    lines.push(stripLine(["wait", "Two identities"], `Two identities: ${two.variable} is set in ${two.file}. The farm's `
+      + "systemd units (the daemon, the sweep and the dashboard's own) load that file and the lanes do not, so "
       + `this farm acts as two accounts. Remove line ${two.line} (${two.variable}=...) from ${two.file}.`,
     `${two.file}:${two.line}`, "two"));
   }

@@ -69,7 +69,9 @@ DID+=("fleet launcher       -> $PREFIX/bin/fleet")
 # this key is how a unit ends up running another tree's code.
 env_set FLEET_HOME "$HERE"
 DID+=("FLEET_HOME=$HERE -> $ENVFILE")
-chmod +x "$HERE"/bin/fleet "$HERE"/lib/*.py "$HERE"/dashboard/*.sh "$HERE"/dashboard/*.py 2>/dev/null || true
+# Only what is run by its path. Every Python file is run through python3, and marking the library
+# modules executable left a git checkout showing changes nobody made.
+chmod +x "$HERE"/bin/fleet "$HERE"/dashboard/*.sh 2>/dev/null || true
 
 if [ "$SKILLS" = 1 ]; then
   mkdir -p ~/.claude/skills
@@ -119,9 +121,18 @@ if [ "$LOCAL" = 1 ]; then
   echo "      reads that file, so the board is reachable from this machine only. Widen it with"
   echo "      FLEET_DASH_BIND in the same file, then 'fleet dashboard restart'."
 else
-  echo "From another machine, run fleet over ssh instead of installing it there:"
-  echo "  printf '#!/usr/bin/env bash\\nargs=(); for a in \"\$@\"; do args+=(\"\$(printf %%q \"\$a\")\"); done\\nexec ssh <FARM_HOST> \"\$HOME/.local/bin/fleet \${args[*]}\"\\n' > ~/.local/bin/fleet"
-  echo "  chmod +x ~/.local/bin/fleet     # <FARM_HOST> is an ssh host alias for this box"
+  # \$HOME stays escaped inside the shim, so it is the farm's home the command finds and not
+  # the laptop's: the two differ whenever the laptop is a Mac or the user names differ.
+  echo "From another machine, run fleet over ssh instead of installing it there. On that machine:"
+  cat <<'SHIM'
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/fleet <<'EOF'
+#!/usr/bin/env bash
+args=(); for a in "$@"; do args+=("$(printf %q "$a")"); done
+exec ssh <FARM_HOST> "\$HOME/.local/bin/fleet ${args[*]}"
+EOF
+chmod +x ~/.local/bin/fleet     # <FARM_HOST> is an ssh host alias for this box
+SHIM
 fi
 echo "next: register a project  ->  fleet add-project --name myproj --repo owner/name"
 echo "      then                ->  fleet help"

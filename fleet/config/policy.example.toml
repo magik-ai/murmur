@@ -7,7 +7,6 @@
 # the farm is busy, and take the throttle temperatures from your chips' documentation.
 [limits]
 ram_min_gb   = 6     # hard: block spawns when free RAM drops below this
-max_agents   = 20    # hard: never run more concurrent agents than this
 gpu_temp_max = 87    # hard: block if GPU hotter than this (C), a little under throttling
 cpu_temp_max = 92    # hard: block if CPU hotter than this (C), a little under throttling
 

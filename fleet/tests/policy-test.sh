@@ -67,6 +67,31 @@ printf '[hq]\nenabled = true\n' > "$FLEET_CONFIG/policy.toml"
 out=$(PATH="$PATH_WITHOUT_HQ" _hq_gate 2>/dev/null)
 is "enabled = true cannot conjure a binary" "$out" "0"
 
+echo "=== the head office push guard a lane gets ==="
+
+# The claims hook cmd_spawn writes into a lane, taken out by its heredoc marker. hq here is a fake
+# that writes down its arguments, so the case reads exactly what the hook asked it.
+sed -n "/<<'HOOK_HQ'\$/,/^HOOK_HQ\$/p" "$FLEET_BIN" | sed '1d;$d' > "$ROOT/claims-hook"
+chmod +x "$ROOT/claims-hook"
+mkdir -p "$ROOT/hookbin" "$ROOT/hookrepo"
+cat > "$ROOT/hookbin/hq" <<FAKE
+#!/bin/sh
+printf '%s|' "\$@" >> "$ROOT/hq-args"
+echo >> "$ROOT/hq-args"
+FAKE
+chmod +x "$ROOT/hookbin/hq"
+git -C "$ROOT/hookrepo" init -q
+git -C "$ROOT/hookrepo" remote add origin https://example.invalid/acme/demo.git
+printf 'refs/heads/-weird 1111 refs/heads/-weird 0000\nrefs/heads/fleet/lane-1 2222 refs/heads/fleet/lane-1 0000\n' \
+  | (cd "$ROOT/hookrepo" && PATH="$ROOT/hookbin:$PATH" "$ROOT/claims-hook")
+is "the guard lets a push through when hq allows it" "$?" "0"
+# A branch name is not the lane's to choose: `refs/heads/-weird` is a legal ref, and without the
+# separator hq reads it as an option, cannot parse its own arguments and lets the push through.
+is "a branch that starts with a dash is checked behind a separator" \
+  "$(sed -n 1p "$ROOT/hq-args" 2>/dev/null)" "check-push|--|https://example.invalid/acme/demo.git|-weird|"
+is "and so is an ordinary branch" \
+  "$(sed -n 2p "$ROOT/hq-args" 2>/dev/null)" "check-push|--|https://example.invalid/acme/demo.git|fleet/lane-1|"
+
 echo "=== the commit identity a lane pushes under ==="
 
 : > "$FLEET_CONFIG/policy.toml"
