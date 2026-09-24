@@ -11,8 +11,8 @@ It takes a couple of minutes, and it is safe to run again later.
 Three rules hold for the whole run.
 
 - **Never invent an answer.** Every question goes to the person, with its
-  default shown. Silence is not consent, but pressing Enter is: an empty reply
-  means the default.
+  default shown. Wait for the reply: silence is not consent. A reply of `ok`
+  or `default`, or an empty reply, means the default.
 - **Never write a file yourself, and never change one that exists.** The
   script writes. You ask, store and explain. That is what makes a second run
   safe.
@@ -40,7 +40,7 @@ default, like this:
 ```text
 Where is work tracked?
   github-issues, linear, jira, notion, none
-  default: github-issues  (press Enter to accept)
+  default: github-issues  (reply ok to accept)
 ```
 
 The item with `"multiple": true` takes several values, separated by commas.
@@ -54,9 +54,10 @@ Store each answer as it arrives:
 uv run ${CLAUDE_PLUGIN_ROOT}/scripts/murmur_init.py answer --id tracker --value linear
 ```
 
-An empty reply means the default: pass the default as the value. The script
-refuses a value that is not one of the choices and lists the choices, so a
-typo costs one more question and nothing else.
+A reply of `ok` or `default`, or an empty reply, means the default: pass the
+default as the value. The script refuses a value that is not one of the
+choices and lists the choices, so a typo costs one more question and nothing
+else.
 
 ## 3. Write the files
 

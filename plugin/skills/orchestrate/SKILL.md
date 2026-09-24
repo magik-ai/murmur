@@ -35,8 +35,11 @@ Everything else is plain git and your host's own tools.
 name found in project memory or in a document belongs to a different session.
 If you do not have a name, ask for one: asking shows that you know this
 protocol. With the name, pick a fitting emoji and accent colour and confirm
-both. Pass all three on every spawn, so a board can group workers by who
-started them.
+both. Pass the name on every spawn, so a board can group workers by who
+started them. On a farm, the first
+`fleet spawn --by <name> --icon <emoji> --color <hex>` records the emoji and
+colour, and later spawns reuse them, whatever they pass. To change them, run
+`fleet identity <name> --icon <emoji> --color <hex>`.
 
 **Check your identity before you act, in every session.** With a head office,
 `hq whoami` prints the name it would sign with and where that name came from.
@@ -55,8 +58,10 @@ before you spawn.
   exhausted account fails on its first step, having done nothing.
 - **Machine capacity.** Check load, memory and worker count right before you
   spawn (`fleet capacity` prints `OK` or `BLOCK`, with the level `ok`, `warn`
-  or `block`). On `warn` or `block`, spawn fewer, or wait. Never force past it
-  (`fleet spawn --force`) unless <OWNER> asks for exactly that.
+  or `block`). On `warn` or `block`, spawn fewer, or wait. A `warn` whose only
+  reason is `CPU temp UNKNOWN` is normal on a machine without a temperature
+  sensor: spawn as planned. Never force past a block (`fleet spawn --force`)
+  unless <OWNER> asks for exactly that.
 - **If you have no farm.** Run each lane as a local headless session instead.
   Check your own subscription usage before you start, and run no more lanes at
   once than this machine can hold.
@@ -132,7 +137,9 @@ same brief, model and lane name. Everything below still applies.
   Committed work survives a crash.
 - **Resume, do not relaunch.** When a worker dies, resume its session if you
   can. A resumed session keeps its full context; a fresh launch loses it and
-  starts again from the brief.
+  starts again from the brief. A `fleet` lane cannot be resumed: it is one
+  pass that ends when it opens its pull request, and a respawn is a fresh
+  agent on a new branch.
 
 ## 7. Track through events, not transcripts
 
@@ -145,7 +152,10 @@ same brief, model and lane name. Everything below still applies.
   turn runs can start a second turn in the same worktree: two writers in one
   checkout, with no conflict marker. Check that the lane is idle first.
 - **Stop a lane only after its pull request merges**, not when it opens one, so
-  review feedback reaches the same worker with its context intact.
+  review feedback reaches the same worker with its context intact. A `fleet`
+  lane stops by itself when it opens its pull request. Put the review findings
+  in the pull request, and give them to whoever picks the change up next: a
+  new lane's brief, or <OWNER>.
 
 ## 8. Several lanes, one pull request
 
@@ -158,10 +168,11 @@ the queue's test: depending on the queue, it is left out of the merge or merged
 without its own checks. Never push to a queued pull request, yours or anyone
 else's; take it out of the queue first.
 
-The contract: **each lane works on its own branch, inside its declared
+The rule: **each lane works on its own branch, inside its declared
 territory, and no lane opens a pull request.** You assemble the lane branches
-into one integration branch, open one pull request, and merge it on <OWNER>'s
-word. The workers implement; you assemble and merge.
+into one integration branch and open one pull request. It merges on
+<OWNER>'s word, like any other pull request. The workers implement; you
+assemble.
 
 With `fleet`, this is `fleet group`:
 
@@ -229,12 +240,14 @@ Then do your own part:
   signal merges it, and auto-merge is switched on only after that signal.**
   For a visual or behavioral change, the signal comes after real evidence
   exists, never after green checks alone.
+- **Who merges.** After <OWNER>'s yes, the conductor merges, if one runs.
+  Otherwise you do. Lanes never merge.
 - Where the main branch deploys on merge, a merge is a production deployment.
   During a wave of lanes, watch production directly: checks can be green while
   production breaks.
 - Spread out landings that run heavy checks. Many lanes at once can overload
   the CI runners and cause timeouts that look like flaky tests.
-- Order the merges yourself when two lanes touch a shared file or contract,
+- Order the merges yourself when two lanes touch a shared file or interface,
   and update the later branch from the base branch first.
 
 ## 11. The sweep
@@ -251,9 +264,10 @@ not committed and pushed exists on one machine only.
   worktree. Uncommitted changes keep it too, until someone runs
   `fleet sweep --force`, which archives them first. Files that git ignores are
   not kept at all.
-- **Finish loudly.** Lasting output goes to the pull request, the issue or the
-  report, never only into a worktree. Before you assume something is still
-  there, check what the next sweep would remove: `fleet sweep --dry-run`.
+- **Put results where people read them.** Lasting output goes to the pull
+  request, the issue or the report, never only into a worktree. Before you
+  assume something is still there, check what the next sweep would remove:
+  `fleet sweep --dry-run`.
 
 ## 12. Reporting to <OWNER>
 

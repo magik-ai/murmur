@@ -10,6 +10,8 @@ Or from a clone of the repository: `gh repo clone magik-ai/murmur && bash murmur
 
 It installs what the farm needs: git, tmux, curl, GitHub's `gh`, uv and Claude Code. It checks for Python 3.11 or newer. It clones murmur to `~/work/murmur` and installs the `fleet` and `hq` commands. It asks a few questions and runs the dashboard as a service. At the end it prints the Claude login and the commands for your first agent. It is safe to run again: it only does what is missing. For what it does and asks, and what a machine costs to rent, see [the machine](../docs/12-the-machine.md).
 
+Agents on a farm run with Claude Code's permission prompts switched off and Codex's sandbox switched off, so they can run any command your user can. Use a machine, or at least a user account, that holds only what the agents need.
+
 To get a farm on DigitalOcean from your laptop instead, use `/murmur:farm` from the [murmur plugin](../plugin/README.md). It creates the server and runs this installer there for you.
 
 Flags:
@@ -23,4 +25,4 @@ Flags:
 
 The farm needs systemd, because the dashboard, the sweep timer and the supervisor daemon run as systemd user services. A plain container is not a farm: in a fresh `ubuntu:24.04` container, `--yes` stops at step 1/5 with `stop: no systemd here`, before it changes anything. Run it on a machine or virtual machine that boots systemd.
 
-WSL2 works, with two settings. By default, WSL stops a distribution about 15 seconds after its last terminal closes, and systemd services do not keep it running. In `%UserProfile%\.wslconfig` on Windows, set `instanceIdleTimeout=-1` under `[general]` and `vmIdleTimeout=-1` under `[wsl2]` (the second one needs Windows 11). Then run `wsl --shutdown` once in PowerShell, and open Ubuntu again. [The machine](../docs/12-the-machine.md#what-the-machine-must-be) shows the whole file.
+WSL2 works, with two settings. By default, WSL stops a distribution soon after its last terminal closes, and systemd services do not keep it running. [The machine](../docs/12-the-machine.md#what-the-machine-must-be) shows the two settings that keep it on.

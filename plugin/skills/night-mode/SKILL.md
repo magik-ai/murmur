@@ -35,8 +35,13 @@ something that blocks a finish inside the frozen scope.
    preview), and what stands in the way. Do not wait for a reply.
 3. Start the heartbeat (section 3), and tell <OWNER> in one sentence how it
    could stop.
-4. Open the night journal at `<scratchpad>/night-<date>.md`. Write one line per
-   heartbeat: the time, what happened, what is next.
+4. Open the night journal where the team and the next session can read it:
+   a comment on the parent issue in <TRACKER> that you extend on every
+   heartbeat, or a file on a branch of its own that you push on every
+   heartbeat. Never keep it only in this session's scratch folder: nobody else
+   can read that, and the next session cannot find it. Write one line per
+   heartbeat: the time, what happened, what is next. Tell <OWNER> where it
+   is.
 5. Open a memory note for the run: the mandate, the scope, the targets, and an
    empty list headed "contested decisions" that you add to all night.
 

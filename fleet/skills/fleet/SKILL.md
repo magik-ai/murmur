@@ -65,8 +65,10 @@ Never spawn without an explicit go from the user.
 3. **Check capacity.** Run `fleet capacity` right before you spawn
    (`fleet metrics` has the detail). It prints `OK` or `BLOCK`, the level in
    brackets (`ok`, `warn` or `block`) and the reasons. On `BLOCK` or `[warn]`,
-   tell the user and either hold or spawn fewer agents. Never overload the
-   farm, and never pass `--force` unless the user asks for it.
+   tell the user and either hold or spawn fewer agents. A `warn` whose only
+   reason is `CPU temp UNKNOWN` is normal on a machine without a temperature
+   sensor: spawn as planned. Never overload the farm, and never pass `--force`
+   unless the user asks for it.
 4. **Spawn**, one call per approved lane:
 
    ```bash
@@ -124,9 +126,13 @@ Never spawn without an explicit go from the user.
    a pull request and stopped. Other end states are `done_no_pr` (finished
    without a pull request), `failed`, `ended` and `killed`, and the daemon
    writes `delivered` and `gave_up`. Review each pull request on GitHub (for
-   example `gh pr view <N>` and `gh pr checks <N>`), get its checks green, and
-   **merge only on the user's explicit signal**. Never merge just because the
-   checks are green.
+   example `gh pr view <N>` and `gh pr checks <N>`) and get its checks green.
+   A lane is one pass: its agent has exited, so review comments never reach
+   it. To act on a review, spawn a new lane with the findings in its brief (it
+   starts on a new branch and opens a new pull request), or ask the user.
+   **The user decides what merges.** After the user's explicit yes, the
+   conductor merges it if one runs; otherwise you do. Lanes never merge, and
+   green checks alone are never a yes.
 
 ## Engines and tiers
 
@@ -152,7 +158,7 @@ depend on other lanes. Those are yours:
   project's migration tool can detect two migrations that collide, have CI run
   that check.
 - **Merge order.** Disjoint lanes can merge in any order. When two lanes touch
-  a shared file or contract, decide the order yourself, and bring the later
+  a shared file or interface, decide the order yourself, and bring the later
   one up to date with the base branch before you merge it.
 
 ## Grouped lanes: one integration pull request (`fleet group`)
@@ -164,11 +170,11 @@ tell whose commit is whose. A lane must never push to a pull request someone
 else is driving, least of all one that is in the merge queue: take it out of
 the queue first.
 
-The contract: each lane works on its own branch, inside a declared set of
+The rule: each lane works on its own branch, inside a declared set of
 files (its territory), and no lane opens a pull request. You assemble the lane
-branches into one integration branch and one pull request, and merge it on
-the user's word. The lanes run on the farm; assembly and the merge stay with
-you.
+branches into one integration branch and one pull request. It merges like any
+other pull request: after the user's yes, by the conductor if one runs,
+otherwise by you. The lanes run on the farm; assembly stays with you.
 
 - **Territories must not overlap.** `fleet group start` reads a TOML spec and
   refuses overlapping globs before a single agent spawns.
@@ -247,7 +253,7 @@ fleet dashboard start|stop|restart|status|token|enable
 ```
 
 If the farm is another machine, `fleet` on your side is usually a small ssh
-shim that runs the same command on the farm (see `fleet/docs/QUICKSTART.md`).
+shim that runs the same command on the farm (see `fleet/README.md`).
 It behaves the same, but paths in its output are paths on the farm, and a `~`
 you type is expanded on your side before the shim sends it.
 
@@ -274,7 +280,7 @@ When the farm uses the head office, you as the orchestrator also:
 
 ## The sweep
 
-The farm's janitor, `fleet sweep`, runs every 10 minutes. It removes the
+The sweep, `fleet sweep`, runs every 10 minutes. It removes the
 worktrees of merged branches. It archives the cards of finished lanes about 15
 minutes after they end, and removes their worktrees too. Only pushed work and
 open pull requests are truly safe. A worktree with uncommitted changes, tracked

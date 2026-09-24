@@ -89,25 +89,25 @@ python3 bin/hq --help
 
 This takes about five minutes. You need a clone of a project repository whose
 `origin` remote is on GitHub. The examples call the project
-`your-org/storefront` and the head office `your-org/hq-office`. Use your own
-names.
+`your-org/storefront` and the head office `your-org/agent-hq-office`, the name
+murmur's farm installer gives a new head office. Use your own names.
 
 1. Create the head office. Keep it private: anyone who can read it can read
    all the mail.
 
    ```bash
-   gh repo create your-org/hq-office --private
+   gh repo create your-org/agent-hq-office --private
    ```
 
 2. Point hq at it, and name yourself as the owner:
 
    ```bash
-   hq init --repo your-org/hq-office --owner alice
+   hq init --repo your-org/agent-hq-office --owner alice
    ```
 
    ```text
    hq configured: /home/you/.config/hq/config.toml
-     repo  your-org/hq-office
+     repo  your-org/agent-hq-office
      owner alice
    ```
 
@@ -383,7 +383,7 @@ file again on every command. Keys can sit at the top level or in an `[hq]`
 table.
 
 ```toml
-repo = "your-org/hq-office"
+repo = "your-org/agent-hq-office"
 owner = "alice"
 bot_name = "hq"
 bot_email = "hq@example.invalid"
@@ -410,9 +410,9 @@ empty `HQ_OWNER=` means nobody is the owner for that command.
 GitHub, and GitHub links a commit to the account that owns its author email.
 The default address uses `.invalid`, a reserved domain name that can never be
 registered, so GitHub links these commits to nobody. Set your own address if
-you want them linked to your account. hq also reads
-`hq@users.noreply.github.com`, which older config files may contain, as the
-default: that address belongs to another GitHub login.
+you want them linked to your account. If `bot_email` is
+`hq@users.noreply.github.com`, hq uses the default instead, because that
+address belongs to another GitHub login.
 
 **Keep the head office private.** Mailboxes are issues, and messages are issue
 comments. Anyone who can read the repository can read all the mail, the
@@ -613,8 +613,8 @@ not installed, hq says so, and you need to install the GitHub CLI and run
 ### git cannot reach the head office
 
 ```text
-hq: cannot reach your-org/hq-office (...) - try again
-hq: WARNING - cannot reach your-org/hq-office and the local cache holds no live claim by another agent for your-org/storefront#feature/signup; pushing unverified (fail-open)
+hq: cannot reach your-org/agent-hq-office (...) - try again
+hq: WARNING - cannot reach your-org/agent-hq-office and the local cache holds no live claim by another agent for your-org/storefront#feature/signup; pushing unverified (fail-open)
 ```
 
 Claims travel over git, not `gh`. hq fetches them from the URL that
@@ -684,8 +684,9 @@ So does `hq hello` with the same name.
 
 ```bash
 cd hq
-python3 -m pip install -e ".[test]"
-python3 -m pytest -q
+python3 -m venv .venv
+.venv/bin/pip install -e ".[test]"
+.venv/bin/python -m pytest -q
 python3 bin/hq-selftest
 ```
 

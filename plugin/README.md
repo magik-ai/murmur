@@ -15,7 +15,8 @@ two hooks that keep every session inside the team's rules. The words used here
 
 You need Claude Code, git and [uv](https://docs.astral.sh/uv/): the commands
 run their scripts with `uv run`. GitHub's command-line tool, `gh`, is needed
-for pull requests.
+for pull requests. The session-start hook runs your own `python3`, which must
+be Python 3.11 or newer to read `.murmur/config.toml`.
 
 Inside Claude Code, add this repository as a plugin marketplace and install the
 plugin:
@@ -58,18 +59,31 @@ Start a new session afterwards, so the new version loads.
 
 | Command | What it does |
 | --- | --- |
-| `/murmur:init` | Sets up the repository you are in. It asks seven questions, one at a time, each with a default, and then writes the files listed in [What init writes](#what-init-writes). Run it again later and it asks only questions that are new. |
-| `/murmur:doctor` | Checks the setup. It prints a table and one word for where the setup stands: `current`, `warnings`, `setup-required` or `repaired`. It names the optional pieces that are not set up yet: a head office (a private GitHub repository the agents use for names, branch claims and messages) and a separate machine for agents. `--fix` repairs two safe things only: it makes the plugin's hook scripts executable, and it creates `.murmur/config.toml` from the defaults when there is none. |
-| `/murmur:farm` | Gets you a farm on DigitalOcean from your laptop. It checks doctl, your ssh key and GitHub, asks a few questions, and shows the plan and the monthly price. It buys the droplet only after you type the price back. Then it installs murmur on it and opens the farm's dashboard through an ssh tunnel or Tailscale. Every login is a command you run in your own terminal. What a farm is and what it costs: [the machine](../docs/12-the-machine.md). |
+| `/murmur:init` | Sets up the repository you are in: seven questions, then the files in [What init writes](#what-init-writes). |
+| `/murmur:doctor` | Checks the setup, and prints a table and one word for where it stands. |
+| `/murmur:farm` | Gets you a farm, a DigitalOcean Droplet with murmur installed, from your laptop. |
 
 Each command runs the skill of the same name (`init`, `doctor`, `farm`). The
 skills also load by themselves when you ask for the same thing in your own
 words, for example "set up murmur" or "check my setup".
 
-The plugin also ships a command file for each of the three, in `commands/`.
-Each is a short entry point that hands over to its skill, for older versions
-of Claude Code. Current versions run the skill when a skill and a command
-share a name, so every instruction lives in the skill.
+**init** asks its questions one at a time, each with a default. Answer `ok` to
+keep a default. Run it again later, and it asks only the questions that are
+new.
+
+**doctor** ends with one of four words: `current`, `warnings`,
+`setup-required` or `repaired`. It also names the optional pieces that are not
+set up yet: a head office (a private GitHub repository the agents use for
+names, branch claims and messages) and a separate machine for agents. `--fix`
+repairs two safe things only. It makes the plugin's hook scripts executable,
+and it creates `.murmur/config.toml` from the defaults when there is none.
+
+**farm** checks doctl, your ssh key and GitHub, asks a few questions, and
+shows the plan and the monthly price. It buys the Droplet only after you type
+the price back. Then it installs murmur on it, and opens the farm's dashboard
+through an ssh tunnel or Tailscale. Every login is a command you run in your
+own terminal. What a farm is and what it costs:
+[the machine](../docs/12-the-machine.md).
 
 ## Role skills
 
@@ -78,9 +92,21 @@ them by name.
 
 | Skill | Loads when you say | What it does |
 | --- | --- | --- |
-| `orchestrate` | "fan this out", "spawn lanes", "run this as a team", "split this across agents" | The orchestrator splits a batch of work into lanes (one agent on one task, on its own branch) whose files do not overlap. It checks identity and capacity before spawning, waits for your explicit go, follows workers through events rather than transcripts, assembles lanes into one pull request, and merges only when you say so. |
-| `conductor` | "release manager", "keep the queue moving", "conductor", "ride this to production" | The conductor owns the way from a green pull request to production: it watches the merge queue without using up the shared GitHub API budget, investigates every ejection, lands trains of changes, runs freezes, respects the `hold` label, and watches production after a wave of merges. |
-| `night-mode` | "night mode", "unattended run", "have it done by morning", "finish this while I sleep" | Night mode is an unattended run: it drives the current scope to a defined finish with nobody watching. The scope is frozen, a heartbeat checklist runs on a timer, the agent decides alone and logs every contested decision, every item ends in one of three states, and you get one report in the morning. |
+| `orchestrate` | "fan this out", "spawn lanes", "run this as a team", "split this across agents" | Splits work into lanes whose files do not overlap, and starts them after your go. |
+| `conductor` | "release manager", "keep the queue moving", "conductor", "ride this to production" | Takes a green pull request to production. It watches the merge queue, finds out why a change was thrown out of it, and respects the `hold` label. |
+| `night-mode` | "night mode", "unattended run", "have it done by morning", "finish this while I sleep" | Finishes a fixed list of work while nobody watches, and reports in the morning. |
+
+A lane is one agent on one task, on its own branch. The orchestrator checks
+identity and capacity before it starts lanes, and follows them through events
+rather than transcripts. When several lanes build one change, it assembles
+them into one pull request.
+
+You decide what merges. After your yes, the conductor (or the orchestrator, if
+you run no conductor) merges it. Lanes never merge.
+
+Night mode wakes on a timer and runs the same checklist each time. It decides
+alone, and writes down every decision someone could dispute. Each item ends in
+production, on a preview, or blocked with a stated reason.
 
 The role skills say `<OWNER>` for the person whose product it is, `<TRACKER>`
 for wherever work is tracked, and `<FARM>` for a machine that runs agents
@@ -98,9 +124,9 @@ the rules at the start of every session. The full text is the handbook in
 
 This hook blocks edits to generated files, and tells the agent which command
 regenerates the file instead. It runs before each call to Claude Code's
-editing tools: `Edit`, `Write` and `NotebookEdit` (and `MultiEdit`, which older
-versions have). It does not see shell commands. When the target path matches,
-it exits with code 2, which blocks the edit, and prints the reason.
+editing tools: `Edit`, `Write` and `NotebookEdit`. It does not see shell
+commands. When the target path matches, it exits with code 2, which blocks the
+edit, and prints the reason.
 
 It is off until the repository has `.claude/generated-files.txt`, with one
 glob per line:
@@ -125,13 +151,18 @@ alone never blocks an edit.
 ### `session-context.sh` (session start)
 
 At startup, on resume, in a forked session, after `/clear` and after
-compaction, this hook adds the short version of the team's rules to the
-session: one batch, one branch, one
-pull request; nothing lands on the main branch directly; claim a branch before
-you touch it; your name belongs to this session; never bypass a required check
-with admin rights; never merge red; never switch off a shipped feature as a
-fix; the twice rule (a mistake made twice is written into the rules or the
-lessons file); and write for a person.
+compaction, this hook adds a short version of the team's rules to the session:
+
+- one batch, one branch, one pull request;
+- nothing lands on the main branch directly;
+- claim a branch before you touch it;
+- your name belongs to this session;
+- never bypass a required check with admin rights;
+- never merge red;
+- never switch off a shipped feature as a fix;
+- the twice rule: a mistake made twice is written into the rules or the
+  lessons file;
+- write for a person.
 
 To use your own rules instead, write a short version to `.claude/team-laws.md`.
 The hook then adds that file word for word. Keep it short: it is read at the
@@ -167,9 +198,7 @@ read both and keep one.
 
 ```text
 .claude-plugin/plugin.json   name, description, version
-commands/init.md             entry point to skills/init, for older Claude Code
-commands/doctor.md           entry point to skills/doctor, for older Claude Code
-commands/farm.md             entry point to skills/farm, for older Claude Code
+commands/                    init.md, doctor.md, farm.md: hand-overs to the skills of the same name
 skills/init/SKILL.md
 skills/doctor/SKILL.md
 skills/farm/SKILL.md

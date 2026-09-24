@@ -136,8 +136,9 @@ leave a worktree, a branch and hooks that no card describes.
 **The guard.** `fleet spawn` never pastes the brief into generated code. It writes the brief to a
 file, and the lane's launcher reads the prompt from a file when it starts. If a spawn fails after
 it has created anything, it undoes all of it: the worktree, the branch, the hook directory, the
-state record and the head office claim. The ssh shim in the setup guides quotes every argument
-with `printf %q` for the same reason.
+state record and the head office claim. The
+[ssh shim](../README.md#optional-drive-the-farm-from-your-laptop) quotes every argument with
+`printf %q` for the same reason.
 
 **Where the guard stops.** Quoting on your own command line is still yours to get right. For
 anything long, structured or full of punctuation, do not fight it. Put the brief in a file on the
@@ -190,7 +191,7 @@ nothing when the dashboard is already up, and every `fleet spawn` starts it if i
 in `fleet` stops it by a pattern match. `fleet dashboard status` reports the address the server
 is really listening on, not the one your shell would have used.
 
-**Where the guard stops.** Nothing stops your shell. Never stop the dashboard with a pattern kill,
+**Where the guard stops.** Nothing stops your shell. Never stop the dashboard with `pkill -f`,
 and never start a second copy by hand on the same port. When the page does not load, run
 `fleet dashboard status` before you assume anything about the farm. A systemd unit you write
 yourself is outside these commands: `fleet dashboard restart` does not reach it, and it does not
@@ -244,7 +245,7 @@ usage. On a loopback bind the token guards only the routes that change something
 it guards every data route too.
 
 **The guard.** `fleet dashboard token` prints the token. Open the page once as
-`http://<address>:7878/?token=<token>` and the browser tab keeps it. A write that the browser
+`http://<address>:7878/#token=<token>` and the browser tab keeps it. A write that the browser
 marks as coming from another site is refused, whatever token it carries. Only the page itself and
 a few routes that describe the dashboard, not the farm, stay open, so the page can load and ask
 for the token.
@@ -355,21 +356,22 @@ page, reopen it and read the job instead of pressing the button again.
 
 ---
 
-## 16. Switching on or testing a model sends a real request
+## 16. A passed model test does not prove the login works
 
 **Mechanism.** In the Models section of the Machine tab, **Switch on** does what
-`fleet models enable <id>` does, and **Test** does what `fleet models test <id>` does. Both send
-one real request to the provider, because the only way to know that the login works and the
-account has room is to ask. That request comes out of the same subscription a lane would use. On
-an account near its limit, it can be the request that trips it.
+`fleet models enable <id>` does, and **Test** does what `fleet models test <id>` does. For Claude
+Code and Codex, the two engines murmur ships, both only check that the CLI is installed and, for
+Codex, that `~/.codex/auth.json` exists. They send no request. So a Claude row can pass while its
+login has expired, and the first lane on it then fails. Only an engine added as a contribution
+gets a real test prompt, which comes out of that engine's account.
 
-**The guard.** Each button's tooltip says so before you press it. The table shows when each model
-was last tested, so you do not test again to learn what the page already shows. A model whose command is
-not installed gets no button at all, only a note to install it. A model with no key yet gets a
-button that copies the `fleet models auth <id>` command.
+**The guard.** The table shows when each model was last tested. A model whose command is not
+installed gets no Test or Switch button, and a note says how to install it. A model with no key
+yet gets a button that copies the `fleet models auth <id>` command.
 
-**Where the guard stops.** There is no dry run. Testing four models is four requests. A pass means
-only that the provider answered once, a minute ago, not that it will answer all night.
+**Where the guard stops.** A pass does not show that a login still works, or that the account has
+room left. Before a night of lanes, run `fleet accounts`: it reads each Claude account's usage and
+names an account whose login is missing or expired.
 
 ---
 
@@ -382,9 +384,11 @@ like a credential. `fleet models auth <id>` reads the key from standard input, n
 command line, so it stays out of your shell history too. It writes the key to
 `~/.fleet/secrets/<id>.key` with mode 600.
 
+Only an engine added as a contribution needs a key. Claude Code and Codex use their own logins.
+
 ```bash
 fleet models auth <id> < ~/keys/<id>.key   # the key never appears on a command line
-fleet models enable <id>                   # now the live check can run
+fleet models enable <id>                   # now the test can run
 ```
 
 **The guard.** The same line is drawn around spawning: a lane starts when a person or an
@@ -408,7 +412,7 @@ page refusing a key protects the page, not the operator.
 4. Duplicate pull requests come from a daemon that guessed. If you see them, stop the daemon.
 5. Long or punctuation-heavy briefs go in a file, not on a command line.
 6. Over 120 KB the prompt moves to a file. A brief that large is probably two lanes.
-7. Never stop the dashboard with a pattern kill.
+7. Never stop the dashboard with `pkill -f`.
 8. Dashboard mail arrives under one fixed name, never the name of the person who typed it.
 9. The Mail tab never marks anything read; `hq inbox` at a terminal does.
 10. Widen the dashboard's bind and the token guards reads too, not only writes.
@@ -418,5 +422,5 @@ page refusing a key protects the page, not the operator.
 13. Drain salvages and kills every live lane; Resume respawns lanes and spends subscription.
 14. Throttle slows the running agents too, not only new spawns.
 15. A long action returns a job, not a result, and refuses a second press while it runs.
-16. Switching on or testing a model spends one real request.
+16. For Claude Code and Codex, a model test only checks the CLI. `fleet accounts` checks the logins.
 17. Provider keys go in over standard input at a terminal, never through the page.

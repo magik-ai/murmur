@@ -46,7 +46,8 @@ Four rules hold for the whole run.
   access, Codex, head office, cloud-init file). If an answer changes after
   `plan`, run `plan` again.
 - **Never invent an answer.** Every question goes to the person with its
-  default shown. An empty reply means the default.
+  default shown. A reply of `ok` or `default`, or an empty reply, means the
+  default.
 - **Never write a file the script should write.** Never switch the person's
   doctl context, and never edit `~/.ssh/config` yourself.
 
@@ -103,8 +104,11 @@ order, with its default and its choices. Store each answer as it arrives:
 uv run ${CLAUDE_PLUGIN_ROOT}/scripts/murmur_farm.py answer --id size --value s-4vcpu-8gb
 ```
 
-- `size`: say each size's price and note. The 2 vCPU size runs one or two
-  agents at a time.
+- `size`: say each size's price. Do not promise how many agents a size runs.
+  The 2 vCPU size has 4 GB of memory, and with the default limits a spawn
+  needs 6 GB free. If `fleet capacity` on the farm then blocks on free memory,
+  the person lowers `ram_min_gb` and `warn_ram_gb` in
+  `~/.config/fleet/policy.toml` there.
 - `access`: the choices are only the ones this laptop can use. Tailscale is
   offered only when this laptop is on a tailnet, and never under WSL.
 - `name`: the script refuses a name that the person's ssh config or the
@@ -113,9 +117,10 @@ uv run ${CLAUDE_PLUGIN_ROOT}/scripts/murmur_farm.py answer --id size --value s-4
   and ask for another name.
 - `accounts`: the Claude subscriptions **after the first**. The first one is
   the farm's default login.
-- `hq_repo`: empty for a new head office of their own, or `owner/name` to join
-  an existing one. (The head office is a private GitHub repository the agents
-  use for names, branch claims and messages.)
+- `hq_repo`: empty for a new head office of their own, named
+  `<their GitHub login>/agent-hq-office`, or `owner/name` to join an existing
+  one. (The head office is a private GitHub repository the agents use for
+  names, branch claims and messages.)
 
 ## 3. Plan
 

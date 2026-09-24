@@ -10,16 +10,16 @@ Words this guide uses:
 
 - **lane**: one agent doing one task on its own branch, in its own git worktree. Each run of a
   lane has a **slug**, a unique id that `fleet spawn` prints.
-- **orchestrator**: whoever splits the work into lanes and spawns them. That is you, or a Claude
-  Code session you talk to.
+- **orchestrator**: the agent (or the person) that splits the work into lanes and spawns them.
+- **conductor**: the agent that takes approved pull requests through the merge queue.
 - **head office**: a private GitHub repository that agents use for names, branch claims and
   messages, through the `hq` command. It is optional.
-- **sweep**: the janitor that removes finished worktrees on a timer.
+- **sweep**: the clean-up job that removes finished worktrees on a timer.
 - **supervisor daemon**: the service that starts a lane again when it ends before it delivered.
-  It only acts on lanes that have a restart policy.
+  It only acts on lanes that have a restart policy. The dashboard calls it the agent runner.
 
 The handbook's [glossary](../../docs/00-start-here.md#words-this-handbook-uses) has the rest.
-Replace `<FARM_HOST>` (the farm's ssh host alias), `<PROJECT>`, `<OWNER>/<REPO>`, `<LANE>` and
+Replace `<FARM_HOST>` (the farm's ssh host alias), `<PROJECT>`, `<ORG>/<REPO>`, `<LANE>` and
 `<CODENAME>` with your own values.
 
 murmur runs two engines, **Claude Code** and **Codex**. A farm is **your own Linux machine** or a
@@ -65,7 +65,7 @@ Contents:
 | Linux with **systemd** and a running **user manager** | lanes, the supervisor daemon, the sweep timer and the dashboard service are systemd user units | `systemctl --user is-system-running` answers `running` or `degraded` |
 | **linger** on for your user | user units keep running when nobody is logged in | `loginctl show-user "$USER" -p Linger --value` prints `yes` |
 | the **cpu** and **memory** controllers delegated to your user manager | the power modes cap the agents' CPU and memory without root | `cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers` lists `cpu` and `memory` |
-| **Python 3.11** or newer | fleet reads its config files with `tomllib`. Ubuntu 22.04 ships 3.10: see [quickstart step 1](QUICKSTART.md#1-get-a-box-with-systemd) | `python3 -V` |
+| **Python 3.11** or newer | fleet reads its config files with `tomllib`. Ubuntu 22.04 ships 3.10: see [quickstart step 1](QUICKSTART.md#1-get-a-machine-with-systemd) | `python3 -V` |
 | **git** | each lane works in its own git worktree | `git --version` |
 | **gh** 2.40 or newer, logged in | lanes open pull requests, the sweep asks GitHub whether a branch merged, and the dashboard checks the login with `gh auth status --active` (install it as in [quickstart step 3](QUICKSTART.md#3-install-githubs-cli-and-log-in)) | `gh --version`, `gh auth status` |
 | **claude** and/or **codex**, logged in on a subscription | the engines the lanes run | `claude --version`, `codex --version` |
@@ -94,7 +94,9 @@ sudo systemctl daemon-reload
   then type `/login`. For Codex, tunnel the login callback back to the farm:
   `ssh -L 1455:localhost:1455 -t <FARM_HOST> codex login`.
 - fleet starts Claude Code from `~/.local/bin/claude` and Codex from `/usr/bin/codex`. The
-  `CLAUDE_BIN` environment variable and the `FLEET_CODEX_BIN` setting change these paths. A lane
+  `CLAUDE_BIN` environment variable and the `FLEET_CODEX_BIN` setting change these paths. If
+  `command -v codex` prints another path, set `FLEET_CODEX_BIN` to it, as in
+  [quickstart step 4](QUICKSTART.md#4-install-an-agent-cli-and-log-in-on-a-subscription). A lane
   whose engine is not there fails at once (see [troubleshooting](#lanes)).
 
 ### Where it runs
@@ -102,22 +104,17 @@ sudo systemctl daemon-reload
 - Any Linux with systemd runs fleet. The one-command installer knows Ubuntu 22.04 or newer and
   Debian 12 or newer, because it installs packages with apt.
 - On Windows, use WSL2 with Ubuntu, with systemd running inside it. By default, WSL stops the
-  distribution about 15 seconds after its last terminal closes, and systemd services do not keep
-  it running. To keep the farm on, add these lines to `%UserProfile%\.wslconfig` on Windows (the
-  second setting needs Windows 11):
-
-  ```ini
-  [general]
-  instanceIdleTimeout=-1
-
-  [wsl2]
-  vmIdleTimeout=-1
-  ```
-
-  Then run `wsl --shutdown` once in PowerShell, and open Ubuntu again.
+  distribution soon after its last terminal closes, and systemd services do not keep it running.
+  [The machine](../../docs/12-the-machine.md#what-the-machine-must-be) shows the two settings that
+  keep the farm on.
 - macOS cannot be a farm, because it has no systemd. Use a Mac to drive a Linux farm over ssh.
 - Optional, and worth it for a remote farm: a private network between your laptop and the farm
   (a tailnet or a VPN), so the dashboard and ssh are not open to the internet.
+- Lanes run with no permission prompts, because nobody is at their keyboard. Claude Code runs with
+  `--dangerously-skip-permissions`, and Codex with `--dangerously-bypass-approvals-and-sandbox`,
+  which switches off its approvals and its sandbox. A lane can run any command the farm's user can
+  run, with that user's files and logins. Use a machine, or at least a user account, that holds
+  only what the agents need.
 
 ---
 
@@ -135,9 +132,11 @@ It installs the system packages and `gh`, turns on linger, and installs `uv` and
 clones murmur to `~/work/murmur` and installs fleet and the head office CLI from that clone. It
 asks a few questions: the head office repository, your code name, the farm's ssh alias, and
 whether this is your only machine. When it is not, it offers Tailscale. It writes the answers into
-the config and runs the dashboard as a user service. On a machine with less than 12 GB of memory,
-it also writes smaller capacity limits into `policy.toml`. `~/work/murmur/farm/install.sh --help`
-lists its flags, and [chapter 12 of the handbook](../../docs/12-the-machine.md) walks through it.
+the config and runs the dashboard as a user service. `~/work/murmur/farm/install.sh --help` lists
+its flags, and [chapter 12 of the handbook](../../docs/12-the-machine.md) walks through it.
+
+If `fleet capacity` blocks on free memory on a small machine, lower `ram_min_gb` and `warn_ram_gb`
+in `~/.config/fleet/policy.toml` (see [capacity](#capacity)).
 
 ### Installing fleet by hand
 
@@ -183,35 +182,23 @@ After you change it, restart what reads it: `fleet dashboard restart` for the da
 
 ### Driving the farm from a laptop
 
-If the farm is a separate machine, do not install fleet on your laptop too. Put this shim on the
-laptop, so that `fleet ...` runs on the farm over ssh:
-
-```bash
-mkdir -p ~/.local/bin
-cat > ~/.local/bin/fleet <<'EOF'
-#!/usr/bin/env bash
-args=(); for a in "$@"; do args+=("$(printf %q "$a")"); done
-exec ssh <FARM_HOST> "\$HOME/.local/bin/fleet ${args[*]}"
-EOF
-chmod +x ~/.local/bin/fleet
-```
-
-The shim quotes every argument, which matters because briefs contain quotes and line breaks. It
-calls fleet by its full path, because a non-interactive ssh session usually has no `~/.local/bin`
-on its `PATH`. `$HOME` is escaped so that the farm, not the laptop, fills it in.
+If the farm is a separate machine, do not install fleet on your laptop too. Put the small ssh
+shim from the [fleet README](../README.md#optional-drive-the-farm-from-your-laptop) on the laptop
+instead, so that `fleet ...` runs on the farm. It quotes every argument, because briefs contain
+quotes and line breaks.
 
 ---
 
 ## 3. Register a project
 
 ```bash
-fleet add-project --name <PROJECT> --repo <OWNER>/<REPO>        # clones to ~/work/<PROJECT>
-fleet add-project --name <PROJECT> --repo <OWNER>/<REPO> \
+fleet add-project --name <PROJECT> --repo <ORG>/<REPO>          # clones to ~/work/<PROJECT>
+fleet add-project --name <PROJECT> --repo <ORG>/<REPO> \
                   --path /srv/checkouts/<PROJECT> --branch main --port-base 5200
 fleet projects                                                   # the registered names
 ```
 
-- `add-project` clones `https://github.com/<OWNER>/<REPO>.git` when the path holds no checkout
+- `add-project` clones `https://github.com/<ORG>/<REPO>.git` when the path holds no checkout
   yet, then adds a table to `~/.config/fleet/projects.toml`.
 - Registering a name again with the same settings changes nothing. With different settings it is
   refused, so the file never holds two tables for one project.
@@ -221,8 +208,9 @@ fleet projects                                                   # the registere
 **Ports.** Each lane gets three ports: one for a dev server (`vite`), one for an API (`uvicorn`)
 and one for an end-to-end runner (`e2e`). The lane's instructions name them. Each port is a base
 plus the number of agents running when the lane starts. `--port-base` (default 5200) sets the dev
-server base. The API and end-to-end bases default to 8100 and 6100. Set all three per project in
-a `[<PROJECT>.ports]` table with `vite_base`, `api_base` and `e2e_base`. Give each project its own
+server base, which `add-project` writes as `port_base`. The API and end-to-end bases default to
+8100 and 6100. Set all three per project in a `[<PROJECT>.ports]` table with `vite_base`,
+`api_base` and `e2e_base`; `vite_base` there wins over `port_base`. Give each project its own
 bases. The dashboard's Machine tab can add a project too, and it picks the next free base, 100
 above the highest one registered.
 
@@ -255,7 +243,8 @@ fleet spawn --project <PROJECT> --lane <LANE> --model sonnet --by <CODENAME> \
 8. It sets the worktree's commit author and installs its pre-push hooks. With head office on, it
    also claims the branch.
 9. It saves the brief, adds the lane instructions from `lib/brief_template.md`, and starts the
-   engine as the systemd user unit `fleet-<slug>` in `fleet.slice`.
+   engine as the systemd user unit `fleet-<slug>` in `fleet.slice`, with no permission prompts
+   (see [where it runs](#where-it-runs)).
 
 If a step fails once the worktree exists, the spawn removes everything it created.
 
@@ -269,9 +258,10 @@ of punctuation (see [`sharp-edges.md`](sharp-edges.md)). A brief over 120,000 by
 lane name without one. The default is `{agent} (agent)` with the address `{agent}@agents.local`.
 
 **Code names and marks.** `--by <CODENAME>` tags who spawned the lane, and the dashboard groups
-lanes by it. Each code name has one mark, a glyph and a colour. The first spawn registers it in
-`~/.config/fleet/codenames.json`, and the registry wins after that, so all of one orchestrator's
-lanes look alike. `fleet identity` shows the marks, and this changes one:
+lanes by it. Each code name has one mark, a glyph and a colour. The first spawn records it in
+`~/.config/fleet/codenames.json`, from `--icon` and `--color`, or picked from the name without
+them. After that the registry wins, whatever a spawn passes, so all of one orchestrator's lanes
+look alike. `fleet identity` shows the marks, and this changes one:
 `fleet identity <name> --icon <glyph> --color <hex>`.
 
 ### Engines, models and tiers
@@ -310,10 +300,14 @@ fleet models off claude haiku
   seconds".
 - `off` refuses the provider's default model, the one a spawn gets without `--model`.
 - A model with a cost note needs `--confirm-cost <model>` when you switch it on.
-- `fleet models enable <id>` and `fleet models test <id>` send a real request to the provider.
-  `fleet models disable <id>` switches a provider off.
-- `fleet models auth <id>` stores a key for a provider that needs one, read from standard input,
-  in `~/.fleet/secrets/<id>.key` (mode 600). Claude Code and Codex use their own logins instead.
+- `fleet models enable <id>` switches a provider on and tests it, `fleet models test <id>` tests
+  it again, and `fleet models disable <id>` switches it off. For Claude Code and Codex, the test
+  only checks that the CLI is installed and, for Codex, logged in (`~/.codex/auth.json` exists).
+  It sends no request, so a pass does not prove that a Claude login works: `fleet accounts` shows
+  that. Only an engine added as a contribution gets a real test prompt.
+- `fleet models auth <id>` stores a key for an added engine that needs one, read from standard
+  input, in `~/.fleet/secrets/<id>.key` (mode 600). Claude Code and Codex use their own logins
+  instead.
 - fleet reads the shipped `config/models.example.toml` until your first change creates
   `~/.config/fleet/models.toml`. On/off state and health go to `~/.fleet/models-state.json`.
 - A table in your own `models.toml` for an engine murmur does not ship stays usable. `fleet models`
@@ -341,7 +335,10 @@ fleet kill --retire <slug>           # stop it, and stop the daemon from respawn
 - The status of a lane is `starting`, `running`, `pr_open` (it opened a pull request and
   stopped), `done_no_pr`, `ended`, `failed`, `killed` or `gave_up`.
 
-A lane ends by opening a pull request and stopping. Merging is a human decision.
+A lane is one pass. It ends when it opens a pull request, and it does not wait for review. To act
+on a review, fix the branch yourself, or spawn a new lane with the findings in its brief; a new
+lane always starts on a new branch. Lanes never merge. You decide what merges, and after your yes
+the conductor (or the orchestrator, if you run no conductor) merges it.
 
 ---
 
@@ -364,10 +361,9 @@ Until you run `fleet dashboard enable`, the dashboard runs in a detached tmux se
 `restart` drive the unit, and with linger on it starts at boot. `farm/install.sh` runs `enable`
 for you.
 
-Stop the dashboard with `fleet dashboard stop`, never with a pattern kill such as
-`pkill -f server.py`. Its process is a plain `python3 server.py`, and a pattern kill takes the
-board down while every lane keeps working. The farm then looks dead from outside (see
-[`sharp-edges.md`](sharp-edges.md)).
+Stop the dashboard with `fleet dashboard stop`, never with `pkill -f server.py`. Its process is a
+plain `python3 server.py`, and `pkill -f` takes the board down while every lane keeps working.
+The farm then looks dead from outside (see [`sharp-edges.md`](sharp-edges.md)).
 
 ### Reach it
 
@@ -397,9 +393,9 @@ board down while every lane keeps working. The farm then looks dead from outside
   load it and hand it the token.
 - The dashboard creates the token on its first start, in `~/.config/fleet/dash-token` (mode 600),
   unless `FLEET_DASH_TOKEN` is set. `fleet dashboard token` prints it.
-- Open the page once as `http://<address>:7878/?token=<token>`. `#token=<token>` works as well,
-  and never reaches the server. The page keeps the token for that browser tab, and removes it
-  from the address bar.
+- Open the page once as `http://<address>:7878/#token=<token>`. The part after `#` never reaches
+  the server or its log. `?token=<token>` works as well, but it does reach the server. The page
+  keeps the token for that browser tab, and removes it from the address bar.
 - A request whose `Origin` or `Sec-Fetch-Site` header says it came from another site is refused,
   whatever token it carries.
 - To replace the token, delete `~/.config/fleet/dash-token` (or set a new `FLEET_DASH_TOKEN`) and
@@ -436,8 +432,9 @@ or with no head office configured, the tab says so and shows the command that fi
   (`fleet mode balanced`), **Drain** (`fleet game-mode on`) and **Resume**
   (`fleet game-mode off`). Each one shows what it will do before you confirm. See
   [section 9](#9-power-modes-and-capacity).
-- **Services**: the agent runner (the supervisor daemon) and the sweep timer, with start, stop
-  and restart. The dashboard's own row is read-only: restart it from a terminal.
+- **Services**: the agent runner (the supervisor daemon, which restarts only the lanes that have
+  a restart policy) and the sweep timer, with start, stop and restart. Stopping the agent runner
+  stops no running lane. The dashboard's own row is read-only: restart it from a terminal.
 - **Hosting**: your machines and the hosting providers (see
   [section 10](#10-machines-and-hosting)).
 - **Accounts**: the subscriptions and their login state. Add and remove them, or refresh their
@@ -473,7 +470,7 @@ stay at a terminal:
 
 A lane is one pass: the engine reads its brief once and exits. If it exits before it delivered,
 something has to notice and start it again. That is the supervisor daemon. The dashboard calls
-it the **agent runner**.
+it the **agent runner**. Stopping it stops no running lane: each lane is its own unit.
 
 ```bash
 fleet daemon start        # install and start the user unit fleet-daemon.service
@@ -494,7 +491,8 @@ fleet spawn ... --after <LANE>:pr-merged                    # start when that la
 - `--restart until-pr | until-merged | until-file:<path> | never` says when to stop respawning.
   `--done-when pr-open | pr-merged | file:<path> | issue-closed:#N` says what delivered means.
   With `--restart` alone, fleet picks the matching `--done-when`.
-- A respawn runs the saved brief again, under a new slug.
+- A respawn is a new agent. It runs the saved brief again, under a new slug, in a new worktree on
+  a new branch. It does not resume the old session, so it starts without that session's context.
 - Respawns are limited: at most `FLEET_RESPAWN_MAX` per lane (default 10), and at least
   `FLEET_RESPAWN_COOLDOWN` seconds apart (default 600). After that the lane is marked `gave_up`.
 - A lane with several `--issues` is not delivered while any issue is unaccounted for. The missing
@@ -525,8 +523,8 @@ fleet salvage <slug>                     # commit and push a lane's work before 
 
 ### The sweep
 
-`fleet sweep` is the janitor. `install.sh` sets up a timer that runs it every 10 minutes, always
-without `--force`. In each pass, for each project, it:
+`install.sh` sets up a timer that runs `fleet sweep` every 10 minutes, always without `--force`.
+In each pass, for each project, it:
 
 1. removes the worktree, and deletes the local branch, of each fleet lane whose pull request
    GitHub reports as merged, or whose branch is already in the base branch;
@@ -687,7 +685,8 @@ hardware blocks a spawn:
   `~/.config/fleet/policy.toml` overrides them (the example file sets `warn_agents = 15`).
   `fleet metrics` prints every number in force, and where it came from.
 - The CPU temperature comes from a LibreHardwareMonitor web server, named by `FLEET_LHM_URL`.
-  Without it, the temperature is unknown. That adds a warning and never blocks.
+  Without it, the temperature is unknown. That adds a warning and never blocks. A `warn` whose
+  only reason is `CPU temp UNKNOWN` is normal on a machine without that sensor: spawn as usual.
 - `fleet spawn --force` skips the capacity check.
 
 ---
@@ -716,7 +715,8 @@ fleet machines list                       # run again until it prints the finish
 fleet machines destroy <NAME> --confirm <NAME>
 ```
 
-- `--size` and `--region` default to `s-4vcpu-8gb` and `fra1`.
+- `--size` and `--region` default to `s-4vcpu-8gb` and `fra1`. `/murmur:farm` instead suggests
+  the region nearest your laptop's time zone.
 - `plan` shows the commands, the cloud-init file and today's price from DigitalOcean. It buys
   nothing.
 - `create` buys the Droplet only when `--confirm-usd` matches the live monthly price. If the price
@@ -778,7 +778,7 @@ Every setting below is optional and has a working default. Put it in `~/.config/
 | `FLEET_FARM_ALIAS` | the machine's hostname | the ssh host name in account login commands. Set it to the name you actually reach the farm by |
 | `FLEET_NVIDIA_SMI` | `nvidia-smi` on `PATH` | the GPU sensor that `fleet mode auto` and the capacity check read |
 | `FLEET_LHM_URL` | unset | a LibreHardwareMonitor web server for the CPU temperature. Unset, the temperature is unknown and never blocks a spawn |
-| `FLEET_CODEX_BIN` | `/usr/bin/codex` | the Codex CLI that lanes run. A newer CLI unlocks newer models. To update it without root, install it for your user (`npm i -g --prefix ~/.local/share/codex-cli @openai/codex@latest`) and point this at it |
+| `FLEET_CODEX_BIN` | `/usr/bin/codex` | the Codex CLI that lanes run. Set it to the path `command -v codex` prints when Codex is installed anywhere else. A newer CLI unlocks newer models |
 | `FLEET_CODEX_MODEL` | `gpt-5.6-sol` | the model a Codex lane runs when `fleet spawn` gets no `--model` |
 | `FLEET_DAEMON_INTERVAL` | `60` | seconds between two passes of the supervisor daemon |
 | `FLEET_RESPAWN_MAX` | `10` | the most respawns per lane before it is marked `gave_up` |
@@ -825,7 +825,8 @@ Each entry starts with what you see, then says what to do.
 **The sweep, the daemon or the lanes stop when you log out.** Linger is off. Run
 `loginctl enable-linger "$USER"` (with `sudo` if it asks), then check it with
 `loginctl show-user "$USER" -p Linger --value`. On WSL2, WSL also stops the distribution soon
-after its last terminal closes: set the idle timeouts in [where it runs](#where-it-runs).
+after its last terminal closes: set the two idle settings in
+[the machine](../../docs/12-the-machine.md#what-the-machine-must-be).
 
 **`install.sh` says autosweep "could not enable".** No systemd user manager answered. Check
 `systemctl --user is-system-running`. On WSL2, make sure systemd is running inside the
@@ -868,7 +869,7 @@ an `[hq]` table with `enabled = true` or `enabled = false` to `policy.toml` (see
 
 **A lane is `failed` seconds after it started, with "exited before its first turn - the lane never
 started".** Read `~/.fleet/logs/<slug>.err`. Usually the engine CLI is not where fleet looks
-(`~/.local/bin/claude`, `/usr/bin/codex`), or it is not logged in.
+(`~/.local/bin/claude`, `/usr/bin/codex`), or it is not logged in. See [logins](#logins).
 
 **`fleet status` shows `running?` and "dead?".** The card says running, but the lane's unit has
 been gone for over 15 minutes, usually after a reboot. The lane is gone; its worktree is not.
@@ -919,7 +920,7 @@ yet. Run `sudo tailscale up`, and check with `tailscale ip -4`. As a user unit, 
 tries again every 5 seconds; `journalctl --user -u fleet-dashboard.service` says why it stopped.
 
 **Buttons are greyed out, or a change fails with `a bearer token is required`.** Open the page
-again with `/?token=` and the output of `fleet dashboard token`. A new browser tab needs the token
+again with `/#token=` and the output of `fleet dashboard token`. A new browser tab needs the token
 again.
 
 **`this dashboard is bound to ..., so reading needs the bearer token too`.** The address is not
@@ -932,11 +933,11 @@ site, or its `Origin` does not match its `Host`. Use the page itself. A proxy th
 **The dashboard log says `READ-ONLY: no write token could be stored`.** `~/.config/fleet` is not
 writable. Make it writable, or set `FLEET_DASH_TOKEN` yourself, then run `fleet dashboard restart`.
 
-**The board is down, but the lanes are working.** Someone probably killed the dashboard with a
-pattern kill. Run `fleet dashboard start`.
+**The board is down, but the lanes are working.** Someone probably stopped the dashboard with
+`pkill -f`. Run `fleet dashboard start`.
 
 **The Mail tab says `hq` is missing, or points at no head office.** Install the head office CLI
-(see [`hq/`](../../hq)), or point it at an office with `hq init --repo <OWNER>/<OFFICE>`.
+(see [`hq/`](../../hq)), or point it at an office with `hq init --repo <ORG>/<OFFICE>`.
 
 **The header says `Stale since <time>`.** A request from the page is failing, or a background read
 failed, so a panel shows its last good answer. Hover over the label to see which one.
@@ -1053,7 +1054,7 @@ answers with one sentence a person can act on, never a traceback.
 | `/api/accounts/add` | `{name, engine}` | creates the account folder, and answers the login command and its steps |
 | `/api/accounts/remove` | `{name}` | moves the account folder to `~/.fleet/dead-account-backups/` |
 | `/api/accounts/refresh` | | reads every account's usage now; refused within 60 seconds of the last refresh |
-| `/api/models` | `{action, id}` | `enable`, `disable` or `test` one provider. Enable and test send a real request |
+| `/api/models` | `{action, id}` | `enable`, `disable` or `test` one provider. Enable and test run the check described in [switching models on and off](#switching-models-on-and-off) |
 | `/api/models/add` | `{preset, id, variant?, label?, bin?, run?, auth_env?}` | writes one provider into `~/.config/fleet/models.toml`. It runs nothing |
 | `/api/models/remove` | `{id}` | removes a provider this farm added. A shipped one can only be switched off |
 | `/api/models/discover` | `{id}` | `fleet models discover <id> --json`, one at a time per provider. Answers `{source, models, error}`, where `source` is `account` or `docs` |

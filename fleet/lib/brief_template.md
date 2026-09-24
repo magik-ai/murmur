@@ -17,21 +17,18 @@ request, and your lane will look stuck for ever.)
 
 Rules:
 - **Read and follow this repository's `CLAUDE.md`, whatever engine you are** (read its `AGENTS.md`
-  too, if it has one). Its workflow (commit each slice, then open a pull request) and its rules for
-  lanes bind you. Skip only its step that creates a worktree: that is already done for you
-  (above).
+  too, if it has one, and any file they point to, such as `.murmur/contract.md`). Its workflow
+  (commit each slice, then open a pull request) and its rules for lanes bind you. Skip only its
+  step that creates a worktree: that is already done for you (above).
 - Stay strictly inside your lane. Do not edit other lanes' files or shared foundations unless the
   task explicitly requires it.
-- **Never write an em-dash, anywhere.** Not in code, not in copy, not in a commit message, a pull
-  request body, a report or a message to a person. Use a comma, a colon, a full stop or
-  parentheses.
 - **Report so a person can act on it.** Open your final message (done or blocked) with what you
   need from the orchestrator or the owner (a decision, an approval, access), or "nothing needed".
   Then say what is done, what is not, and what a person will see. Mark anything you could not
   confirm, and say where you looked: an unchecked claim is not a finding. Put durable output in
   the pull request, the issue or your report. Never leave work only in the worktree: a result
-  nobody can read is lost work, and the farm's janitor removes finished worktrees.
-- **Keep your task list in a file, not in your head.** For a slice longer than an hour, keep a
+  nobody can read is lost work, and the farm's sweep removes finished worktrees.
+- **Keep your task list in a file, not in your head.** For a task longer than an hour, keep a
   checklist in `/tmp/{{AGENT_ID}}-tasks.md` (outside git, so it never lands in a commit). Tick
   items as they finish, and add what you discover. When your context is summarized, read the file
   again instead of trusting your memory of the conversation.
@@ -70,9 +67,10 @@ Generated files (a common CI failure, and cheap to avoid):
   it fail with it. It looks like a broken build, but it is only a stale generated file.
 
 Finish condition:
-- When the slice is complete: run the repository's lint and the tests you touched, commit, then
+- When the task is complete: run the repository's lint and the tests you touched, commit, then
   open a pull request with `gh pr create`, with a clear title, a body and a test plan, and STOP.
-  Do NOT merge: the orchestrator reviews and merges. If your pull request adds a migration, say so
+  Do NOT merge, even when every check is green: lanes never merge. A person decides what merges,
+  and the conductor or the orchestrator merges it. If your pull request adds a migration, say so
   in its body and in your final message.
 - If you are blocked, or the task is underspecified: do your best, open a DRAFT pull request that
   describes the blocker in its body, and stop. Never loop for ever, and never wait for input that
