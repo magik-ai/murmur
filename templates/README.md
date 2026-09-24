@@ -13,7 +13,7 @@ If you use the murmur plugin, `/murmur:init` copies the main files for you. See
 |---|---|---|
 | [`CLAUDE.md`](CLAUDE.md) | The law file: how work happens in your repository. Read order, the ten workflow steps, commit format, hard rules. | Day one. Copy it to your repository root. |
 | [`personal-CLAUDE.md`](personal-CLAUDE.md) | Your own rules for every agent session, in every repository: names, branch claims, mail, production access, how to write to you. | When you run agents in more than one repository, or more than one agent at a time. Copy it to `~/.claude/CLAUDE.md`. |
-| [`AGENTS.md`](AGENTS.md) | A product briefing for agents: vocabulary, the main user journey, customers. It gives the headings; you write the content. | When agents keep misreading the product. |
+| [`AGENTS.md`](AGENTS.md) | A product briefing for agents: vocabulary, the main user journey, customers. It gives the headings; you write the content. Codex reads this file, so it also points to the law file. | When agents keep misreading the product, or when you use Codex. |
 | [`PULL_REQUEST_TEMPLATE.md`](PULL_REQUEST_TEMPLATE.md) | The pull request body: summary, how to check the change, a checklist. | Day one. Copy it to `.github/PULL_REQUEST_TEMPLATE.md`. |
 | [`GOTCHAS.md`](GOTCHAS.md) | The lessons file. One entry per surprise: symptom, cause, prevention. | Day one. Copy it to `docs/GOTCHAS.md`. |
 | [`knowledge/README.md`](knowledge/README.md), [`knowledge/_domain.md`](knowledge/_domain.md) | One knowledge file per domain: how a subsystem really behaves, measured numbers, how to debug it. | When the same subsystem keeps costing you time. |
@@ -24,13 +24,15 @@ If you use the murmur plugin, `/murmur:init` copies the main files for you. See
 | [`briefs/review.md`](briefs/review.md) | The brief for an adversarial reviewer: a second agent whose only job is to find what is wrong with one exact commit. | Before every merge. |
 | [`briefs/night-mode.md`](briefs/night-mode.md) | The brief for an unattended run: the scope, the target for each item, the limits. | When agents work while nobody watches. |
 | [`trackers/`](trackers/README.md) | How agents take a task, link a pull request and post evidence in your tracker: GitHub Issues, Linear, Jira, Notion, or no tracker. | Day one. Copy the one you use to `.claude/tracker.md`. |
-| [`hooks/`](hooks/block-generated-edits.sh) | A guard that stops agents from editing generated files by hand, with its path list and its registration. | When a generated file (a client, a schema, a lock file) gets edited by hand. |
+| [`hooks/`](hooks/) | A guard that stops agents from editing generated files by hand, with its path list and its registration. | When a generated file (a client, a schema, a lock file) gets edited by hand. |
 | [`scripts/next_number.sh`](scripts/next_number.sh) | Prints the next free number for decision records and migrations, checking `main` and every open pull request. | When two lanes might create numbered files at the same time. |
+| [`github/hold-check.yml`](github/hold-check.yml) | A GitHub Actions check that fails while a pull request has the `hold` label. | When you start using the `hold` label. Copy it to `.github/workflows/` and make its check required. |
 
 ## What /murmur:init copies
 
-`/murmur:init` asks seven questions, then writes these files. It never
-overwrites a file you already have.
+`/murmur:init` asks seven questions, stores your answers in
+`.murmur/config.toml`, then writes these files. It never replaces any other
+file you already have: the last column says what it does instead.
 
 | Template | Written to | If that file already exists |
 |---|---|---|
@@ -51,7 +53,9 @@ Most placeholders are blanks for you to fill. Three of them name roles instead:
 and `<FARM>` (an always-on machine that runs agents, if you have one). You can
 leave these in. With the plugin installed, a hook tells every agent at the start
 of each session what they mean in your repository. It reads your answers from
-`.murmur/config.toml`.
+`.murmur/config.toml`. Before `/murmur:init` has run, `<OWNER>` is the person
+who gave the agent its name, `<TRACKER>` is the pull request itself, and there
+is no `<FARM>`.
 
 ## The generated-file guard without the plugin
 

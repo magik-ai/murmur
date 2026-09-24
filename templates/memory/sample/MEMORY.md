@@ -22,7 +22,7 @@ without opening anything.
 - [🔁 Four parallel lanes each invented their own loading ring, so the assembled branch was red on thirteen tests that were green in every lane](four-lanes-built-the-same-loading-ring.md)
 - [🌙 Five lanes finished overnight but nothing was assembled, because the half-hourly heartbeat only fires while the chat session is open, and the session was closed](the-heartbeat-dies-with-the-session.md)
 - [🛑 A stop notice went up on the board four minutes before I armed a merge, and the merge shipped into a half-migrated database](check-the-board-before-arming-a-merge.md)
-- [🤖 An automated sweep merged five parked pull requests belonging to other agents, because it selected them by author and every agent pushes as the same account](an-automation-never-picks-work-by-author.md)
+- [🤖 An automated merge job merged five parked pull requests belonging to other agents, because it selected them by author and every agent pushes as the same account](an-automation-never-picks-work-by-author.md)
 - [📝 A one-line comment change on an endpoint fails only inside the merge queue, because the generated client is compared there and nowhere else](the-generated-client-is-checked-only-in-the-queue.md)
 - [💀 Cleaning up a test process by name killed the live dashboard on the shared build host, because both ran the same script on different ports](kill-by-port-never-by-name.md)
 

@@ -41,7 +41,7 @@ is how most defects get through.
 5. **Compliance with the rules.** The repository law file, the layer rules,
    the house style rule. Cite the rule you are applying.
 
-## The verification contract
+## What every finding must include
 
 Every finding carries all five of these parts. A finding missing any of them
 cannot be reported, and the orchestrator will reject the report rather than

@@ -26,6 +26,9 @@ this as a team" or "split this across agents", and it holds the whole
 procedure. Do not restate that procedure here. A lane is one agent doing one
 task on its own branch.
 
+I decide what merges. After my yes, the conductor (or the orchestrator, if
+there is no conductor) merges it. A lane never merges.
+
 My farm (an always-on Linux machine that runs agents) shows its board at
 `<FARM_DASHBOARD_URL>`. On the farm, `fleet dashboard status` prints the
 address the board listens on.

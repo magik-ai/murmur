@@ -1,11 +1,12 @@
 # Orchestration
 
 Once more than two agents work in one repository, someone has to hold the whole
-picture. That is the orchestrator: an agent that splits a batch of work into
-lanes (one agent, one task, one branch each), starts them, checks what they
-report and assembles the result. It is a coordination role, not a
-senior-engineer role. Its value is knowing what every lane is touching, not
-writing the best code in the room.
+picture. That is the orchestrator: the agent (or the person) that splits a goal
+into lanes (one agent, one task, one branch each), starts them, checks what
+they report and assembles the result. If you run no conductor, it also merges
+each change after you say yes. It is a coordination role, not a senior-engineer
+role. Its value is knowing what every lane is touching, not writing the best
+code in the room.
 
 The procedure an agent follows is the plugin's `orchestrate` skill,
 [`plugin/skills/orchestrate/SKILL.md`](../plugin/skills/orchestrate/SKILL.md).
@@ -25,9 +26,9 @@ This chapter explains why the role works the way it does.
 3. **Verify before reporting.** The orchestrator is the last check between a
    worker's claim and the owner's decision. An unverified claim that reaches
    the owner is worse than none, because the owner will act on it.
-4. **Keep the record accurate.** The lane registry and the tracker are the
-   only lasting memory in the system. The orchestrator's context ends with its
-   session.
+4. **Keep the record accurate.** The lane list (each lane and its paths) and
+   the tracker are the only lasting memory in the system. The orchestrator's
+   context ends with its session.
 
 ## It never writes product code
 
@@ -62,12 +63,23 @@ request. Review feedback has to reach the worker that wrote the code while its
 context is still loaded. Otherwise the fix is made by a stranger reading a
 diff.
 
-## Subagents, and the verification contract
+**On a farm, a lane is one pass.** A fleet lane stops by itself when it opens
+its pull request (a draft one if it is blocked). So "resume, never relaunch"
+and "stop a lane only after its change has merged" apply to lanes you can
+resume, such as local sessions. With `--restart until-pr` or
+`--restart until-merged`, and the farm's agent runner on (`fleet daemon start`),
+fleet starts a lane again if it ends before it delivers. That is a relaunch:
+the saved brief runs again on a new branch, with a fresh context. Review fixes
+are then made by another agent, which lacks the first lane's context, so write
+the review findings on the pull request.
+
+## Subagents, and the report checklist
 
 Sending work to many subagents at once is where an orchestrator saves the most
 time, and it is only useful if their output can be trusted. So every
-investigation prompt carries the same contract, and a report that misses it
-goes back. For each finding, the report gives:
+investigation prompt carries the same report checklist, and a report that
+misses any part goes back. It has five parts. For each finding, the report
+gives:
 
 - its severity;
 - the file and line;
@@ -75,9 +87,11 @@ goes back. For each finding, the report gives:
 - whether it is **confirmed** (the code path was traced) or **plausible** (it
   still needs proof at runtime).
 
-It also says what was checked and found correct. A report that lists only
-defects has usually stopped reading halfway, and the owner needs to know what
-is sound as much as what is broken.
+And for the whole report:
+
+- what was checked and found correct. A report that lists only defects has
+  usually stopped reading halfway, and the owner needs to know what is sound as
+  much as what is broken.
 
 Then the orchestrator does its own part.
 
@@ -119,7 +133,9 @@ picks an account with headroom unless you name one with `--account`.
 **Machine capacity.** Check the machine right before you spawn, not at the
 start of the session, and spawn fewer or wait if it says so. On a farm,
 `fleet capacity` checks free memory, free disk, temperatures and the number of
-running agents, and prints `OK` or `BLOCK` with its reasons.
+running agents, and prints `OK` or `BLOCK` with its reasons. A warning whose
+only reason is `CPU temp UNKNOWN` means no temperature sensor answered. On a
+machine without one, that is normal and no reason to spawn fewer.
 
 ## Never spawn without an explicit go
 
@@ -133,10 +149,10 @@ Never act on an implied yes.
 
 ## Adopt it in a day
 
-1. Name the role out loud before your next multi-agent batch, and write down
-   which session holds it.
-2. Add the verification contract, all five parts, to your standard
-   investigation prompt.
+1. Before your next multi-agent goal, decide which session is the
+   orchestrator, and write it down.
+2. Add the report checklist, all five parts, to your standard investigation
+   prompt.
 3. Write your three model tiers into your law file, so choosing a model stops
    being a new decision in every session.
 4. Make one sentence a habit: a proposal is not approved until the owner says a

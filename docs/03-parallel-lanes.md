@@ -7,10 +7,10 @@ agent that coordinates them.
 
 ## The failure this chapter prevents
 
-Two lanes editing the same file is the failure that costs a rebuild. In its
+The worst failure in parallel work is two lanes editing the same file. In its
 worst form there is no conflict at all: the merge is clean, the checks are
 green, and one lane's work is quietly gone. Careful reading does not catch it,
-so every rule here prevents it by structure.
+so the rules below make it impossible, instead of relying on care.
 
 ## A lane owns paths, not a topic
 
@@ -18,9 +18,11 @@ Before a lane starts, write down the paths it may touch. That list is its
 manifest, and it goes in the lane's brief
 ([`templates/briefs/lane.md`](../templates/briefs/lane.md)).
 
-Keep every manifest in one registry that the orchestrator owns. Copies kept per
-lane drift; the registry does not. To decide whether a path is free, read the
-registry, not a lane's memory of it.
+Keep every manifest in one lane list that the orchestrator owns: a file such as
+`docs/process/TEAM_LANES.md` (the name the law file template uses). On a farm,
+the group spec that `fleet group start` reads can serve as that list. Copies
+kept per lane drift; one list does not. To decide whether a path is free, read
+the list, not a lane's memory of it.
 
 A lane whose paths overlap a live lane is refused, not warned about. If your
 tooling offers an override, treat using it as an incident. On a farm (an
@@ -141,15 +143,15 @@ you nothing.
 These cost lanes whole days, and none of them looks like an environment problem
 at first.
 
-- **One environment per worktree.** An install that points at a source
-  directory is pinned to that path, so with a shared environment a test can
-  import a different checkout from the one under test.
-- **An activated environment beats the working directory.** A variable exported
-  in a shell profile wins over where you are standing, so an install in one
-  worktree can land in another's environment. Unset it and pass an explicit
+- **One environment per worktree.** An editable install (`pip install -e .`)
+  points at one worktree's files. With a shared environment, a test can import
+  a different checkout from the one under test.
+- **An activated environment beats the working directory.** If your shell
+  profile activates a virtual environment (it exports `VIRTUAL_ENV`), installs
+  can go there, whichever worktree you are in. Unset it and pass an explicit
   interpreter path.
-- **Never run another worktree's scripts.** Their first line pins that
-  checkout.
+- **Never run another worktree's scripts.** A script's first line (the `#!`
+  line) can name that worktree's Python.
 - **Fixed dates in fixtures are time bombs.** A test pinned to one day passes
   until the calendar moves past it, and then every branch goes red at once on
   unrelated code. When many lanes fail together, suspect the calendar first.

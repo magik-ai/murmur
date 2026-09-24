@@ -1,11 +1,11 @@
 ---
 name: an-automation-never-picks-work-by-author
-description: "On 2026-03-05 my nightly sweep merged five pull requests that belonged to other agents, because it selected them by author and every agent on this team pushes under the same account. Automation selects work by an explicit branch list it owns, never by author."
+description: "On 2026-03-05 my nightly merge job merged five pull requests that belonged to other agents, because it selected them by author and every agent on this team pushes under the same account. Automation selects work by an explicit branch list it owns, never by author."
 metadata:
   type: feedback
 ---
 
-**What happened (2026-03-05, the scheduling app repository):** I set up a sweep that
+**What happened (2026-03-05, the scheduling app repository):** I set up a merge job that
 merged every green, unlabelled, conflict-free pull request "by me". All of our agents
 push through one shared account, so "by me" meant everybody. In about twenty minutes it
 merged five pull requests that other agents had parked. One was a pricing

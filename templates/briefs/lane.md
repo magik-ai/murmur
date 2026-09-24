@@ -1,8 +1,8 @@
 <!--
 Template: the brief an orchestrator hands to ONE worker driving ONE lane (one
 agent doing one task on its own branch). Keep it short. A brief is not
-documentation: it is the task, the acceptance criteria, and the territory. The
-worker reads everything else from the repository law file.
+documentation: it is the task, the acceptance criteria, and the path manifest.
+The worker reads everything else from the repository law file.
 
 DO NOT REPEAT WHAT THE SPAWNER ALREADY ADDS. A spawner usually adds the
 workflow steps, the worktree and branch rules, port and database isolation,
@@ -44,7 +44,7 @@ testable by someone who did not write the code.
 Out of scope, explicitly: `<the neighbouring work you must NOT do>`. If you
 find something out of scope, file it. Do not fix it.
 
-## Path manifest (your territory)
+## Path manifest
 
 You own exactly these paths. No other live lane owns any of them.
 
@@ -63,7 +63,7 @@ changed paths with the list before you push.
 - **Never edit outside the manifest.** Not "just one line", not a rename that
   spills over, not an import fix in a neighbour's file.
 - If the task really cannot be done inside the manifest, **stop and report
-  it**. A wrong territory is the orchestrator's mistake to fix, not yours to
+  it**. A wrong manifest is the orchestrator's mistake to fix, not yours to
   work around. Working around it silently collides with a lane you cannot see.
 - Shared files that every lane wants (the place where the app is wired
   together, generated files, registries, lists that only grow) are handed out
@@ -83,6 +83,8 @@ changed paths with the list before you push.
 - `<Say whether this lane opens its own pull request, or stops after pushing
   because the orchestrator assembles several lanes into one. Grouped lanes do
   NOT open pull requests.>`
+- **Never merge, and never turn on auto-merge.** After the owner's yes, the
+  conductor or the orchestrator merges your pull request.
 
 ## Finish
 

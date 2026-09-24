@@ -1,14 +1,16 @@
 <!-- Template: copy to .github/PULL_REQUEST_TEMPLATE.md. Keep one template, with
-     no variants. The workflow it belongs to is in CLAUDE.md. -->
+     no variants. The workflow it belongs to is in CLAUDE.md, or in
+     .murmur/contract.md if the murmur plugin set up this repository. -->
 
 ## Summary
 <!-- One or two sentences: what changed and why. This becomes the body of the
      squash-merge commit, so write it for someone reading the history in six
      months. -->
 
-## Slice
-<!-- Which thin vertical slice is this? Link the parent task or issue.
-     If this pull request is too big to review in one sitting, split it in two. -->
+## Parent task
+<!-- Link the parent task or issue, and say which part of it this pull request
+     delivers. If this pull request is too big to review in one sitting, split
+     it in two. -->
 
 ## Acceptance guide
 <!-- Required when the owner will click through this change. Fill every

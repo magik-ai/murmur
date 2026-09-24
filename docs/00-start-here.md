@@ -3,8 +3,8 @@
 This handbook describes a way to run several coding agents on one repository as
 a team. It gives every agent a role, keeps the rules in one file, and adds a few
 small tools that enforce those rules. murmur ships the tools: a Claude Code
-plugin, a runner for a farm of agents, and a coordination command called `hq`.
-You can follow the method without them.
+plugin, `fleet` for running agents on an always-on machine, and a coordination
+command called `hq`. You can follow the method without them.
 
 ## Why a team of agents needs rules
 
@@ -12,12 +12,13 @@ One coding agent is easy to manage: you give it a task, watch it work and read
 the diff. Ten agents at once is a different job. You are now running a team, and
 a team needs what human teams have always needed:
 
-- **Ownership.** Each piece of work has one owner, so two agents never edit the
-  same file at once and silently erase each other's changes.
+- **One agent per piece of work.** Each piece of work belongs to one agent, so
+  two agents never edit the same file at once and silently erase each other's
+  changes.
 - **A shared record.** The state of the work lives outside any one agent's
   context or any one person's head, because nobody can hold the whole picture.
-- **Review by a different mind.** A writer checking its own work misses what it
-  was already blind to.
+- **Review by someone else.** Another agent or a person reads every change
+  before it merges.
 - **A merge process that tests changes together.** Two branches that each pass
   their own checks can still break each other when they land.
 
@@ -38,31 +39,38 @@ have to read every diff, or open a pull request to find out what changed. A
 decision that needs you should reach you as a plain question with a
 recommendation.
 
-**Orchestrator.** An agent that splits a batch of work into lanes and writes no
-product code. It keeps two lanes from editing the same file, and sets the order
-for the few shared files every lane wants. It checks what lanes report before
-passing it on to you, and keeps the shared board up to date. See
-[orchestration](04-orchestration.md).
+**Orchestrator.** The agent (or the person) that splits a goal into lanes and
+starts them. It writes no product code. It keeps two lanes from editing the
+same file, and sets the order for the few shared files every lane wants. It
+checks what lanes report before passing it on to you, and keeps the board up to
+date. See [orchestration](04-orchestration.md).
 
-**Lane.** One agent doing one task on its own branch, from start to finish: it
-writes the change, reviews it, opens the pull request, answers the review and
-sees the change merged. It owns a fixed set of paths and touches nothing else.
-The urge to "fix something nearby while I am here" is a reason to stop.
+**Lane.** One agent doing one task on its own branch: it writes the change,
+gets it reviewed and opens the pull request. It owns a fixed set of paths and
+touches nothing else. The urge to "fix something nearby while I am here" is a
+reason to stop.
 
-**Conductor (release manager).** Owns the merge queue: what merges, in what
-order, and what waits. It can stop any merge, however green the checks are. It
-does not build features or decide product questions.
+**Conductor (release manager).** Runs the merge queue: the order in which
+changes merge, and what waits. It can stop any merge, however green the checks
+are. It does not build features or decide product questions.
+
+**Who merges.** You decide what merges. After your yes, the conductor (or the
+orchestrator, if you run no conductor) merges it. Lanes never merge.
 
 A team may add approvers, such as a technical owner who signs off on
 architecture. They approve on top of the four roles; they are not a fifth role.
 
 ## Rules live in one file
 
-Each repository has one file that says how work happens: what a change must
-include before it merges, how review works, and what is forbidden. This handbook
-calls it the law file. Every other document links to it instead of repeating
-it, because a copied rule drifts and people follow the stale copy.
-[Repo law](01-repo-law.md) explains how to write one.
+Each repository keeps its rules in one place: what a change must include before
+it merges, how review works, and what is forbidden. This handbook calls it the
+law file. Every other document links to it instead of repeating it, because a
+copied rule drifts and people follow the stale copy.
+
+With the murmur plugin, the core rules live in `.murmur/contract.md`, and
+`CLAUDE.md` (and `AGENTS.md`, if you keep one) points to it. Without the
+plugin, `CLAUDE.md` holds the rules. [Repo law](01-repo-law.md) explains how to
+write them.
 
 ## Week one, in order
 
@@ -76,9 +84,10 @@ of rules that nobody follows.
 2. **Day 2: worktrees and a tracker.** One task gets one isolated working copy
    (a git worktree) and one branch. Every task is a ticket in a shared tracker
    before work starts, so "what is everyone doing?" has an answer.
-3. **Day 3: review by someone who did not write the change.** Every change is
-   read by a different mind, human or agent, before it merges. No other rule in
-   the method does as much good.
+3. **Day 3: review by someone who did not write the change.** Another agent or
+   a person reads every change before it merges. Gate 8 of
+   [the golden workflow](02-golden-workflow.md) explains why this rule matters
+   most.
 4. **Day 4: a lessons file and the twice rule.** The first time something goes
    wrong, fix it. The second time, the fix also adds an entry to the lessons
    file or a line to the law file, so a third time is harder. `/murmur:init`
@@ -102,21 +111,27 @@ them. If you start with only a few, read these:
 ## Words this handbook uses
 
 Other chapters use these words as defined here. The four roles (owner,
-orchestrator, lane, conductor) are described [above](#the-four-roles).
+orchestrator, lane, conductor) are described [above](#the-four-roles). The
+plugin's skills and some templates also use three placeholders, `<OWNER>`,
+`<TRACKER>` and `<FARM>`. The
+[templates README](../templates/README.md#placeholders-that-can-stay) explains
+them.
 
-Three placeholders appear in angle brackets in the plugin's skills and some
-templates. `<OWNER>` is the person who runs the repository and names the
-agents. `<TRACKER>` is where the team tracks work. `<FARM>` is the machine that
-runs agents, if there is one. `/murmur:init` stores which tracker you use and
-whether you have a farm in `.murmur/config.toml`. At the start of every
-session, the plugin's session hook reads that file and tells the agent what
-`<TRACKER>` and `<FARM>` mean here. It also tells the agent that `<OWNER>` is
-the person who gave it its name. Before `/murmur:init` has run, `<TRACKER>`
-means the pull request itself, and there is no `<FARM>`.
+**Batch.** One coherent change: one branch and one pull request, committed in
+slices a reviewer can read one at a time. The larger piece of work that an
+orchestrator splits into lanes is a goal.
+
+**Board.** The shared view of who is working on what. On a farm, it is the
+dashboard's Board tab. Without a farm, keep a short written list of what each
+lane is doing and what it is waiting for.
 
 **Farm.** An always-on Linux machine that runs agents for you, with nobody at
 the screen. It is optional: every rule here also works on a laptop.
 [The machine](12-the-machine.md) explains how to get one.
+
+**fleet.** The command that runs a farm: it starts agents, watches them and
+serves the dashboard. Its code is in the `fleet/` folder. The `farm/` folder
+holds only the installer.
 
 **Gate.** One numbered step that a change passes between a new branch and a
 merge. The ten gates are in [the golden workflow](02-golden-workflow.md).
@@ -124,6 +139,10 @@ merge. The ten gates are in [the golden workflow](02-golden-workflow.md).
 **Head office.** A private GitHub repository that agents use to register their
 names, claim branches and send each other messages. murmur's `hq` command reads
 and writes it. See [coordination and identity](05-coordination-and-identity.md).
+
+**Manifest.** The list of paths one lane may change, written down before it
+starts. A fleet group spec calls this list the lane's `territory`. See
+[parallel lanes](03-parallel-lanes.md).
 
 **Night mode.** An unattended run: an agent drives a fixed scope of work to a
 defined finish while nobody watches, then reports. See
@@ -139,8 +158,9 @@ the application is wired together, a generated interface or a shared registry.
 One lane holds it at a time.
 
 **Sweep.** The clean-up job that removes the worktrees and board entries of
-finished lanes. On a farm, `fleet sweep` runs every ten minutes by default. Only
-committed and pushed work is safe from it.
+finished lanes. On a farm, `fleet sweep` runs every ten minutes by default.
+[Coordination and identity](05-coordination-and-identity.md) says what it
+keeps.
 
 **Turnstile.** A check in front of the merge queue that refuses a change whose
 own branch checks have not passed on that exact commit.

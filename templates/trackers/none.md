@@ -87,7 +87,8 @@ A CI check on the pull request body does the tracker's job of keeping
 discipline. It fails a pull request that is not a draft when its body has no
 "Taken by" line or no `## Acceptance` section, or when it has the `hold`
 label. It is about twenty lines of script, and it is the only enforcement this
-mode has.
+mode has. The `hold` part is ready to copy from murmur's
+[`templates/github/hold-check.yml`](https://github.com/magik-ai/murmur/blob/main/templates/github/hold-check.yml).
 
 ## Read-only access for headless workers
 

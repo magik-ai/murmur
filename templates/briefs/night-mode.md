@@ -12,6 +12,7 @@ When the skill changes, update this copy.
 # Unattended run: `<date>`
 
 Heartbeat mode: <alarm | lane | schedule | none>  (the night-mode skill says what each means)
+Night journal: <a comment on the parent issue, or a file on its own branch>  (never only in this session)
 
 ## Mandate
 

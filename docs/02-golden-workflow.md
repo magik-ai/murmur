@@ -13,7 +13,9 @@ each one exists, then shows the commands for one change on GitHub.
 
 ### 1. Branch from fresh main, in a worktree of its own
 
-Fetch first, branch from the current tip of `main`, and work in a worktree (a
+If your team records branch claims, claim the branch first
+([coordination and identity](05-coordination-and-identity.md#branch-claims)).
+Fetch, branch from the current tip of `main`, and work in a worktree (a
 separate working copy) that nothing else touches. Never reuse a merged branch.
 
 **What goes wrong without it.** A lane pushes a review fix to a branch whose
@@ -85,13 +87,14 @@ decide it.
 
 ### 10. Arm auto-merge only after every gate has passed
 
-Green checks make a change eligible to merge. Only the owner's explicit signal
-merges it, and auto-merge (the host merging the change by itself once checks
-pass) is armed only after that signal. Arm it last, confirm that the host
-reports the change as merged, and only then remove the worktree.
+Green checks make a change eligible to merge. You decide what merges. After
+your yes, the conductor (or the orchestrator, if you run no conductor) arms
+auto-merge: the host then merges the change by itself once its checks pass.
+Lanes never merge. Arm it last, confirm that the host reports the change as
+merged, and only then remove the worktree.
 
-**What goes wrong without it.** A lane arms auto-merge as soon as it opens the
-pull request, out of habit, while the adversarial review is still running. The
+**What goes wrong without it.** An agent arms auto-merge as soon as the pull
+request opens, out of habit, while the adversarial review is still running. The
 checks finish first and the change lands two minutes before the findings
 arrive, which then have to chase the merged code in a follow-up. While a review
 is running, auto-merge stays off.
@@ -106,7 +109,9 @@ This is one change on GitHub at a terminal. Start in your main checkout, called
 `<repo>` here, and replace the other names in angle brackets.
 
 ```bash
-# Gate 1: fetch, then branch from the current tip of main in a new worktree.
+# Gate 1: claim the branch (skip this line if you use no head office), fetch,
+# then branch from the current tip of main in a new worktree.
+hq claim <branch>
 git fetch origin
 git worktree add ../<name> -b <branch> origin/main
 cd ../<name>
@@ -131,7 +136,7 @@ git rev-parse HEAD
 
 # Gate 9: fix every in-scope finding here, then push again.
 
-# Gate 10: wait for the owner's signal, then arm auto-merge.
+# Gate 10: after your yes, the conductor or the orchestrator arms auto-merge.
 gh pr merge <N> --auto --squash
 
 # After the host reports the merge: back to the main checkout, then remove the
@@ -155,8 +160,8 @@ copy it to `.github/PULL_REQUEST_TEMPLATE.md`. It has five sections.
 the squash commit. Write it for whoever reads the history in six months, not
 for the reviewer who has the diff open today.
 
-**Slice.** Which thin vertical slice of the work this is, with a link to the
-parent task in the tracker.
+**Parent task.** A link to the task in the tracker, and which part of it this
+pull request delivers.
 
 **Acceptance guide.** This decides whether someone who did not write the change
 can act on it. It answers four questions:
@@ -195,9 +200,8 @@ ten carefully and skims the rest, and nobody learns which ten.
    to `.github/PULL_REQUEST_TEMPLATE.md` (`/murmur:init` does this), and delete
    any section you will not fill in properly.
 2. Put the ten gates in your law file as a plain numbered list.
-3. If you adopt only one gate, adopt gate 8. A review by a mind that did not
-   write the code pays for itself immediately.
+3. If you adopt only one gate, adopt gate 8.
 4. Stop arming auto-merge when the pull request opens. Arm it last, after the
-   review verdict and the owner's signal.
+   review verdict and your yes.
 5. Write the acceptance guide for your last merged change, after the fact. If
    you cannot say how you derived its blast radius, close that gap first.

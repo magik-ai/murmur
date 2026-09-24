@@ -3,9 +3,8 @@
 This chapter answers three questions. Where should each test go? What must a
 bug fix include? Where does the proof of finished work go?
 
-Two placeholders appear below. `<OWNER>` is the person whose product it is.
-`<TRACKER>` is wherever your team tracks work. The law file is the file in
-your repository that says how work happens ([chapter 01](01-repo-law.md)).
+The owner, below, is the person whose product it is. The law file is the file
+in your repository that says how work happens ([chapter 01](01-repo-law.md)).
 
 ## Put each check at the lowest tier that proves it
 
@@ -83,12 +82,12 @@ fixed yet.
 ## Never switch off a working feature as a fix
 
 Hiding or removing a feature that users have is not a bug fix. It is a product
-decision, and product decisions belong to `<OWNER>`. Three rules follow.
+decision, and product decisions belong to the owner. Three rules follow.
 
 1. Prove the diagnosis against the live flow before you change any code.
    Reproduce the failure, then trace the real path from end to end. A premise
    you have not checked is a guess, not a diagnosis.
-2. Turning off something users already have needs `<OWNER>`'s approval of that
+2. Turning off something users already have needs the owner's approval of that
    exact outcome. A general go-ahead for the task is not enough.
 3. A test rewritten to expect the new behaviour must cite, in a comment, the
    decision that allowed it. A decision the agent wrote for itself is a reason
@@ -111,13 +110,13 @@ suite could no longer see that a working feature had just broken.
 The person who owned the product found it by using the product. The fix was a
 full revert. Two lessons stayed:
 
-- A suite rewritten by the same mind that made the wrong diagnosis cannot
-  catch that diagnosis.
+- A suite rewritten by the agent that made the wrong diagnosis cannot catch
+  that diagnosis.
 - Freedom to change the code is not authority over the product.
 
 ## Put the evidence in the tracker
 
-When work lands, post the proof as a comment on the ticket in `<TRACKER>`:
+When work lands, post the proof as a comment on the ticket in your tracker:
 
 - the root cause, in one sentence;
 - what the fix does;

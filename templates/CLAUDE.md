@@ -9,23 +9,25 @@ that rules are optional.
 You are working in `<ORG>/<REPO>`. The product is called **`<PRODUCT>`**.
 Write the name exactly that way in anything a user reads.
 
-This file is the only source of truth for **how work happens** here. Every
-other document named below is optional:
+This file says **how work happens** here. If the murmur plugin set up this
+repository, the core rules are in `.murmur/contract.md`, and this file points
+to it at the end. Every other document named below is optional:
 
 - `ARCHITECTURE.md`, if you keep one, describes what is live on `main`.
 - `AGENTS.md`, if you keep one, explains the product and its users to agents.
 - `docs/adr/`, if you keep it, holds the technical decisions (ADRs,
   architecture decision records).
 
-## Boot contract
+## Reading list
 
 <!-- Only item 1 is required. DELETE every line whose document you do not keep.
-     A read list that names a missing file fails on the first read, and an
-     agent that cannot find item 2 stops trusting items 3 to 5. -->
+     A reading list that names a missing file teaches the agent to skip the
+     list. -->
 
 At the start of a task, read these in order, and nothing else:
 
-1. [`CLAUDE.md`](CLAUDE.md): the process law (this file).
+1. [`CLAUDE.md`](CLAUDE.md): the process law (this file), and
+   `.murmur/contract.md` if the murmur plugin wrote one.
 2. `ARCHITECTURE.md`, if you keep one: the architecture as it is deployed now.
 3. `AGENTS.md`, if you keep one: the product, the customers, and orientation
    for agents.
@@ -34,8 +36,8 @@ At the start of a task, read these in order, and nothing else:
 5. `<DOC>` before `<KIND OF WORK>`: one or two entries at most.
 
 Load everything else only when you need it, through the index if you keep one.
-Do not load old plans or archived design records at the start of a task. A read
-list that grows stops being read.
+Do not load old plans or archived design records at the start of a task. A
+reading list that grows stops being read.
 
 **Knowledge base:** `docs/knowledge/`, if you keep it, has one file per domain:
 where the truth lives, the rules that must hold, measured numbers, how to
@@ -44,8 +46,7 @@ read that file.
 
 ## Team
 
-The rules live in this one file. The people live in this table. Keep it short
-and current.
+The people live in this table. Keep it short and current.
 
 | Name | Role | Owns | Reviews |
 |---|---|---|---|
@@ -169,9 +170,11 @@ and not in another document. Never assume a freeze because a plan mentions one.
   A batch is one coherent change. A worktree is a separate working copy of the
   repository, made with `git worktree add`.
 - Nothing lands directly on `main`.
-- The agent drives the batch from start to finish. Stop only for a real
-  blocker, for red CI that the batch did not cause, or for an action that needs
-  explicit approval.
+- The lane (the agent doing the task) drives the batch until its pull request
+  is ready to merge. Stop before that only for a real blocker, for red CI that
+  the batch did not cause, or for an action that needs explicit approval.
+- The owner decides what merges. After the owner's yes, the conductor (or the
+  orchestrator, if there is no conductor) merges it. A lane never merges.
 - The `hold` label is the veto: it always blocks a merge. Anyone may add the
   `hold` label. Only the owner removes it.
 
@@ -258,7 +261,8 @@ repository may stay in its GitHub issues.
 
 ## 2. Golden Workflow: 10 gates
 
-1. Branch from a fresh `main` in a new worktree. Never reuse a merged branch.
+1. If the team records branch claims, claim the branch first. Branch from a
+   fresh `main` in a new worktree. Never reuse a merged branch.
 2. Build one coherent batch, and commit each reviewable slice.
 3. Keep the docs current in the same pull request, for whichever of these you
    keep. A change to a key API or data contract, or a major architecture
@@ -282,10 +286,11 @@ repository may stay in its GitHub issues.
    content.
 9. Fix every in-scope finding in the same pull request. File a scoped issue for
    real out-of-scope work.
-10. Green checks make a change eligible to merge. Only the owner's explicit
-    word merges it, and auto-merge is turned on only after that word. Never
-    bypass a required check with an admin override. Before cleanup, confirm
-    that GitHub reports the pull request as merged.
+10. Green checks make a change eligible to merge. Only the owner's yes decides
+    it. After that yes, the conductor (or the orchestrator, if there is no
+    conductor) turns on auto-merge. A lane never does. Never bypass a required
+    check with an admin override. Before cleanup, confirm that GitHub reports
+    the pull request as merged.
 
 ## 3. Commits
 
@@ -405,6 +410,6 @@ are in `docs/process/NAMING.md`, if you keep one.
 
 ## 9. Gotchas
 
-Debugging stories are kept out of the boot read list. When a symptom surprises
+Debugging stories are kept out of the reading list. When a symptom surprises
 you, read `docs/GOTCHAS.md` and add to it. Each entry reads
 **symptom -> cause -> prevention**.

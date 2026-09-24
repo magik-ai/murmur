@@ -21,7 +21,7 @@ queue exists.
 
 A merge queue takes `main`, adds a candidate change on top, and checks the
 result. The change lands only if the combination passes. Candidates go one at
-a time or in small batches, so what was tested is what will exist on `main`.
+a time or in small groups, so what was tested is what will exist on `main`.
 
 GitHub's merge queue is a setting in the branch protection for `main`. The
 workflows it runs need the `merge_group` event as a trigger.
@@ -83,9 +83,12 @@ automation. Keep it simple: a veto with conditions is one that people argue
 their way around.
 
 GitHub does not block a merge because of a label, so make the veto real with a
-small required check that fails while the `hold` label is present.
+small check that fails while the `hold` label is present.
+[`templates/github/hold-check.yml`](../templates/github/hold-check.yml) is one.
+Copy it to `.github/workflows/`, then add its check, `hold`, to the required
+status checks for `main`. The check stops nothing until it is required.
 
-## Your own CI machines: faster, never the authority
+## Running checks on your own machines
 
 Hosted runners queue up, and waiting a quarter of an hour per change is a real
 cost. Running checks on machines you own is a fair answer. murmur does not
@@ -137,9 +140,9 @@ document: only the live settings are certain to be current.
 
 ## When main goes red
 
-The repair is mechanical, not investigative, and it moves forward. Never
-rewrite history, never force-push a shared branch, and never switch off the
-deploy checks to make the red go away.
+Repair first, investigate later, and always move forward. Never rewrite
+history, never force-push a shared branch, and never switch off the deploy
+checks to make the red go away.
 
 1. **Confirm it is real.** Read the failing job. A dead runner, a registry
    timeout or a known flaky browser test calls for a rerun, not an incident.

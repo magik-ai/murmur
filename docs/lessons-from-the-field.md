@@ -50,7 +50,7 @@ touches unrelated lines.
 
 ## A clean merge deleted the branch's own work
 
-**What happened.** A batch of merges brought main into several branches. On
+**What happened.** A round of merges brought main into several branches. On
 one branch, the conflict step settled every conflicted file by taking one side
 whole, then committed and pushed. The working copy was clean and the diff
 looked plausible. About two thousand lines of the branch's own tests and code

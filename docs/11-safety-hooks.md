@@ -1,11 +1,10 @@
 # Safety hooks
 
-A rule that an agent must remember holds until the session gets long, the
-task gets urgent, or the instruction scrolls out of view. A hook is the same
-rule enforced by a script: a small program that the tool the agent runs in,
-such as Claude Code, starts at a set moment, for example before every file
-edit. It runs whether or not anybody remembered the rule, in the first hour of
-a session and the ninth alike.
+A rule that an agent must remember holds only until the session gets long or
+the task gets urgent. A hook enforces the rule with a script. Claude Code runs
+the hook at a set moment, for example before every file edit. It runs whether
+or not anybody remembered the rule, in the first hour of a session and the
+ninth alike.
 
 This chapter covers the two hooks the murmur plugin ships, and three rules
 that no hook can fully enforce: secrets, production, and what to do when a

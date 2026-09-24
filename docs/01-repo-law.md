@@ -1,9 +1,14 @@
 # Repo law
 
-Every repository that uses this method has one file that says how work happens.
-This handbook calls it the law file. It sits at the repository root and is the
-first thing every agent reads. Name it `CLAUDE.md`: Claude Code reads that file
-at the start of every session.
+Every repository that uses this method has one law file: the file that says how
+work happens. It is the first thing every agent reads.
+
+- **With the murmur plugin**, the core rules live in `.murmur/contract.md`.
+  `/murmur:init` writes it from your answers. It also makes `CLAUDE.md` point to
+  it, and `AGENTS.md` too if you keep one. Your other rules stay in `CLAUDE.md`.
+- **Without the plugin**, write the rules in `CLAUDE.md` at the repository root.
+  Claude Code reads that file at the start of every session. If you also use
+  Codex, which reads `AGENTS.md`, make `AGENTS.md` point to `CLAUDE.md`.
 
 The law file does not document the code. It says what a change must be before it
 may land: what it contains, who checks it, and what is forbidden. A complete
@@ -12,9 +17,9 @@ explains the choices in it.
 
 ## Keep the reading list short
 
-The template opens with a numbered list of what to read at the start of every
-task, and nothing else. It calls this the boot contract. Keep it to five
-entries or fewer, each with one line saying what it is for:
+The template opens with a numbered reading list: what to read at the start of
+every task, and nothing else. Keep it to five entries or fewer, each with one
+line saying what it is for:
 
 1. the law file itself;
 2. the architecture as it is deployed;
@@ -23,9 +28,9 @@ entries or fewer, each with one line saying what it is for:
 5. one or two documents for the kind of work that keeps going wrong.
 
 Only the law file is required. Delete any line whose document you do not keep:
-an agent that cannot find item 2 stops trusting items 3 to 5. Then say plainly
-that everything else is read only when needed, through the index. Old plans and
-archived design records are never read at the start.
+a list that names a missing file teaches the agent to skip the list. Then say
+plainly that everything else is read only when needed, through the index. Old
+plans and archived design records are never read at the start.
 
 **What goes wrong without it.** A reading list that grows stops being read.
 Once it runs past a screen, agents skim it, and the rules near the bottom stop
@@ -50,19 +55,23 @@ file before it follows any link.
 Put this at the top of the process section, as sentences an agent can check
 itself against:
 
-- One batch of work, one worktree (a separate working copy), one branch, a
-  commit per reviewable slice, one pull request, green checks, a squash merge
-  through the merge queue, then the worktree is removed.
+- One batch (one coherent change), one worktree (a separate working copy), one
+  branch, a commit per reviewable slice, one pull request, green checks, a
+  squash merge through the merge queue, then the worktree is removed.
 - Nothing lands on `main` directly.
-- The lane (the agent doing the task) drives the batch from start to end. It
-  stops for three things only: a real blocker, a check failing for a reason
-  its own change did not cause, and an action that needs explicit approval.
+- The lane (the agent doing the task) drives the batch until its pull request
+  is ready to merge. It stops before that for three things only: a real
+  blocker, a check failing for a reason its own change did not cause, and an
+  action that needs explicit approval.
+- The owner decides what merges. After the owner's yes, the conductor (or the
+  orchestrator, if there is no conductor) merges it. Lanes never merge.
 - The `hold` label is the veto: a pull request with it never merges, however
   green its checks. Anyone may add the label. Only the owner removes it.
 
 GitHub does not stop a merge because of a label, so enforce the veto with a
-small required check that fails while the label is present. See
-[CI and merge](06-ci-and-merge.md#the-hold-label-is-the-veto).
+small required check that fails while the label is present.
+[`templates/github/hold-check.yml`](../templates/github/hold-check.yml) is one;
+[CI and merge](06-ci-and-merge.md#the-hold-label-is-the-veto) explains it.
 
 ## Commits
 
@@ -155,7 +164,8 @@ kebab-case, and code follows its language. Link out for anything longer.
    don'ts) filled in from your answers. If you have no `CLAUDE.md`, it also
    writes one from the template. If you have one, it adds a four-line pointer
    to the contract at its end. It adds the same pointer to `AGENTS.md`, if you
-   keep one. If a rule now appears in two files, keep it in one.
+   keep one. If a rule then appears in both files, keep it in the contract and
+   delete it from `CLAUDE.md`.
 2. Replace every placeholder that is left.
 3. Cut the reading list to five entries or fewer, and add the sentence saying
    everything else is read on demand.

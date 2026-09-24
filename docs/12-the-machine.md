@@ -14,7 +14,7 @@ or two agents in Claude Code windows. A farm solves two problems:
   make a laptop unusable. Past three or four agents at once, move them to a farm.
 - **Work must go on when you close the lid.** Night mode (an agent finishing work while you
   sleep, [chapter 10](10-unattended-runs.md)) needs a machine that does not sleep. So does the
-  sweep, a job that clears away the working copies of merged branches every ten minutes.
+  sweep, a job that clears away the working copies of finished lanes every ten minutes.
 
 If neither is true yet, skip this chapter and come back when it is.
 
@@ -22,7 +22,7 @@ If neither is true yet, skip this chapter and come back when it is.
 
 | It needs | Why |
 | --- | --- |
-| Linux with systemd: Ubuntu 22.04 or newer, or Debian 12 or newer | The agent runner, the sweep and the dashboard run as systemd user services |
+| Linux with systemd: Ubuntu 22.04 or newer, or Debian 12 or newer | Each agent, the sweep and the dashboard run as systemd user services |
 | Python 3.11 or newer | murmur's tools need it |
 | CPU and memory, not a graphics card | Agents read, write and run tests; nothing here trains a model |
 | Always on, and reachable over ssh | You drive it from your laptop |
@@ -56,14 +56,18 @@ over ssh.
 
 ### 1. A computer you already own
 
-A desktop PC at home works, even one you also use for games. Install Ubuntu on it, or use WSL2
-on Windows with the settings described above. It costs only electricity. Then run
+A desktop PC at home works. Install Ubuntu on it, or use WSL2 on Windows with the settings
+described above. It costs only electricity. Then run
 [the install command](#set-it-up-with-one-command) on it.
+
+Farm agents run with their permission prompts switched off, so they can run any command your
+user can. On a computer you also use yourself, give the farm a user account of its own, or use
+another machine. [Security](#security) explains why, and what that means under WSL2.
 
 The farm can share the machine with you. `fleet mode` caps the share of the processor that the
 agents may use. In `auto` mode, the default, the farm steps back to about half the processor
-while an NVIDIA graphics card is busy, for example during a game. To see the card it needs the
-`nvidia-smi` tool; without it, `auto` stays on full power.
+while an NVIDIA graphics card is busy, which usually means you are using the machine. To see
+the card it needs the `nvidia-smi` tool; without it, `auto` stays on full power.
 
 ### 2. A DigitalOcean Droplet, set up from your laptop
 
@@ -83,12 +87,15 @@ Before you start, you need on your laptop:
 
 Then run `/murmur:farm` in Claude Code. It goes through these steps:
 
-1. **Questions**, each with a default: the farm's name (`farm`), its size (4 vCPU, 8 GB), the
-   region (the nearest one by your time zone), how you reach the dashboard (an ssh tunnel, or
-   Tailscale if your laptop is already on Tailscale), whether to also run Codex agents, any
-   further Claude subscriptions, and the head office repository to join. The head office is a
-   private GitHub repository your agents use for names, branch claims and messages. Leave it
-   empty to get a new one.
+1. **Questions**, each with a default:
+   - the farm's name (`farm`);
+   - its size (4 vCPU, 8 GB);
+   - the region (the nearest one by your time zone);
+   - how you reach the dashboard: an ssh tunnel, or Tailscale if your laptop is already on it;
+   - whether to also run Codex agents;
+   - any further Claude subscriptions;
+   - the head office repository to join. The head office is a private GitHub repository your
+     agents use for names, branch claims and messages. Leave it empty to get a new one.
 2. **The plan and the price.** Nothing is created yet. You see a sentence such as "Create farm,
    $48 a month until you destroy it". Type the price back to buy.
 3. **The Droplet.** It runs Ubuntu 24.04 behind a DigitalOcean firewall that lets in only ssh.
@@ -130,7 +137,7 @@ and shows you that one.
 
 | Size | Disk | Price a month | Good for |
 | --- | --- | --- | --- |
-| 2 vCPU, 4 GB | 80 GB | $24 | One or two agents at a time |
+| 2 vCPU, 4 GB | 80 GB | $24 | Light work; check the memory limits below |
 | 4 vCPU, 8 GB | 160 GB | $48 | The default, and the place to start |
 | 8 vCPU, 16 GB | 320 GB | $96 | More agents at once, heavier builds |
 
@@ -138,14 +145,28 @@ Start with 4 vCPU and 8 GB. An agent needs little while it thinks, and a lot in 
 such as a front-end build or a test run. Two bursts at once on a 4 GB machine can run it out of
 memory.
 
-The fleet's default limits assume a large machine: it starts no new agent while less than 6 GB
-of memory is free. On a smaller machine, open `~/.config/fleet/policy.toml` and lower
-`ram_min_gb` and `warn_ram_gb` in the `[limits]` table to fit. If `fleet capacity` says `BLOCK`
-with a free RAM reason, this is the setting to change.
+The default limits in fleet suit a large machine: no new agent starts while less than 6 GB of
+memory is free. On a smaller machine, if `fleet capacity` says `BLOCK` because of free RAM, open
+`~/.config/fleet/policy.toml` and lower `ram_min_gb` and `warn_ram_gb` in its `[limits]` table.
 
 ## Set it up with one command
 
-On the new machine, log in as an ordinary user (not root) and run:
+The installer runs as an ordinary user, not root, and the agents will run as that user.
+
+If the provider gave you only root, create such a user first, with sudo rights and your ssh key.
+As root, with your own user name in place of `alice`:
+
+```bash
+adduser alice
+usermod -aG sudo alice
+mkdir -p /home/alice/.ssh
+cp /root/.ssh/authorized_keys /home/alice/.ssh/
+chown -R alice:alice /home/alice/.ssh
+```
+
+Then log out, and log in over ssh as `alice`.
+
+On the new machine, as your ordinary user, run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash
@@ -162,9 +183,9 @@ reports each one:
    installs `uv` (a Python tool runner) and the Claude Code command-line tool in your home
    folder.
 3. **The tools.** It logs you into GitHub if needed (you follow a browser link). It clones
-   murmur into `~/work/murmur` and installs the fleet (the farm's agent runner) and `hq` (the
-   head office tool). It asks whether this is your only machine and you work on it directly. If
-   yes, the dashboard can be reached from this machine only.
+   murmur into `~/work/murmur` and installs `fleet` (the command that runs the farm) and `hq`
+   (the head office tool). It asks whether this is your only machine and you work on it
+   directly. If yes, the dashboard can be reached from this machine only.
 4. **Configuration.** A few questions, each with a default you accept by pressing Enter:
    - the head office repository. The default is `<your GitHub login>/agent-hq-office`, and the
      script creates it as a private repository if it does not exist;
@@ -189,7 +210,21 @@ curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.s
 | `--hq-repo OWNER/NAME` | Joins this head office repository instead of the default |
 | `--no-tailscale` | Never offers Tailscale |
 | `--remote` | For a machine you drive from your laptop: the dashboard stays local, and the script prints the ssh tunnel command |
-| `--help` | Lists every flag |
+
+The comment at the top of [`farm/install.sh`](../farm/install.sh) lists every flag.
+
+### Reach the farm by name
+
+This chapter reaches the farm as `farm`, for example with `ssh farm`. `/murmur:farm` adds that
+name to your laptop for you. The installer only records the name, so that the commands it and
+the dashboard print use it. For any other machine, add this block once to `~/.ssh/config` on
+your laptop:
+
+```text
+Host farm
+  HostName <the farm's address>
+  User <your user on the farm>
+```
 
 ### The two logins
 
@@ -206,7 +241,7 @@ Both are your own accounts. Every branch an agent pushes and every pull request 
 your GitHub login. That is why the head office exists: it tells the agents apart when GitHub
 cannot.
 
-The Claude login must be a subscription, not an API key. Whenever the fleet starts a Claude Code
+The Claude login must be a subscription, not an API key. Whenever fleet starts a Claude Code
 or Codex agent, it removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`,
 `CODEX_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` and `CLAUDE_CODE_USE_FOUNDRY`
 from its environment, so an agent does not switch to paid API use by accident. Do not set up other
@@ -247,50 +282,57 @@ The page has three tabs.
 
 - **Board** is the screen to leave open. Until the farm is fully set up, it starts with a
   checklist of what is missing. Until the first agent runs, it shows the commands that start
-  one. After that it shows the machine's load, memory, disk and temperature, each subscription's
-  usage, and every agent as a card with its status, its GitHub checks and its engine.
+  one. After that it shows the machine's load, memory and disk, each subscription's usage, and
+  every agent as a card with its status, its GitHub checks and its engine. It shows a
+  temperature only when a temperature sensor is set up.
 - **Mail** shows the messages between agents. It reads the same head office the agents use, not
   a separate copy.
 - **Machine** is where you change the farm after setup:
   - **Power**: throttle the farm to give the machine back to you, drain it (save every agent's
     work to git and stop them all), or resume it (start the agent runner again, which restarts
     the agents that have a restart policy). Each action says what it will do before it does it.
-  - **Services**: start and stop the agent runner and the sweep.
+  - **Services**: start and stop the agent runner (`fleet daemon`) and the sweep timer. The
+    agent runner only restarts lanes that have a restart policy. Stopping it stops those
+    restarts, not the agents that are running.
   - **Accounts**: add a subscription. You pick the engine and a name, and the page gives you the
     exact command to run in a terminal. Then it notices the login by itself.
   - Models, machines, projects, and a list of anything still missing.
 
 Three things the page never does:
 
-- It never starts an agent. That stays a command a person types, with a code name behind it,
+- It never starts a new agent. That stays a command a person types, with a code name behind it,
   because it spends money under that name.
 - It never stops or restarts itself. A page cannot take down the server that draws it, so it
   shows you `fleet dashboard restart` instead.
-- It never takes a provider key. There is no field for one. Keys go in at a terminal, through
-  standard input, so they never appear on a command line:
-
-```bash
-fleet models auth <id> < ~/keys/<id>.key
-fleet models enable <id>
-```
+- It never takes a provider key. There is no field for one. Claude Code and Codex need no key.
+  Only an engine added as a contribution may use one, and its key goes in at a terminal, through
+  standard input: `fleet models auth <id> < <key file>`.
 
 ## Security
 
+- **Agents run without permission prompts.** Each lane runs Claude Code with
+  `--dangerously-skip-permissions`, or Codex with `--dangerously-bypass-approvals-and-sandbox`.
+  So an agent can run any command, and read any file, that its user can. If that user can use
+  sudo without a password, so can the agents.
+- **Keep the farm apart from your own things.** On a computer you also use yourself, give the
+  farm a user account of its own, and keep your own files, keys and other logins out of it.
+  Under WSL2 that is not enough, because every Linux user can reach your Windows files under
+  `/mnt/c`. There, use a machine of its own.
+- **Agents use the farm user's logins.** On a machine you set up yourself, agents run as the user
+  that ran the installer, with its GitHub login and subscriptions. On `/murmur:farm` Droplets,
+  they run as a user called `farm`, without sudo rights.
 - Open only ssh to the internet, and log in with a key, never a password. In your provider's
-  firewall, allow port 22 and nothing else. `/murmur:farm` sets this up on DigitalOcean. On its
-  Droplets the agents run as a user called `farm`, which has no sudo rights.
-- Agents run as your user, with your logins. Use a GitHub account and a machine that you are
-  comfortable seeing push to your repositories, because that is what the agents do.
+  firewall, allow port 22 and nothing else. `/murmur:farm` sets this up on DigitalOcean.
 - The head office repository is private. Anyone who can read it can read every message your
   agents ever sent.
-- Only pushed work is safe. Push anything worth keeping, or put it in a pull request. The sweep
-  removes the working copies of merged branches.
+- The sweep removes the working copies of finished lanes, so push anything worth keeping
+  ([coordination and identity](05-coordination-and-identity.md)).
 
 ## When something is off
 
 ```bash
 fleet capacity          # can the farm take another agent, and if not, why not
-fleet status            # every agent, plus load, memory and temperature
+fleet status            # every agent, plus the machine's load and memory
 fleet dashboard status  # is the dashboard running, and where it listens
 hq whoami               # the name this session would sign with
 gh auth status          # the GitHub login

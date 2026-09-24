@@ -1,7 +1,10 @@
 <!-- Template: copy to the root of your repository as AGENTS.md. This file gives
      the SHAPE, not the content: each heading says what belongs under it.
      Delete these comments and write about your own product. Keep it under
-     three screens. If it grows past that, move the detail to docs/knowledge/. -->
+     three screens. If it grows past that, move the detail to docs/knowledge/.
+     Codex reads AGENTS.md at the start of every session, so the pointer to the
+     rules in the first paragraph matters: without it, a Codex agent never sees
+     the law file. /murmur:init adds such a pointer at the end of this file. -->
 
 # AGENTS.md: domain and orientation
 

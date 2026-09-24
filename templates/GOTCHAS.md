@@ -6,9 +6,9 @@
 
 **Status:** current debugging history, read when needed.
 
-This file is **not in the boot read list**. Nobody reads it at the start of a
-task. An agent opens it when a symptom is surprising, and adds to it when a
-symptom surprised them.
+This file is **not in the reading list** of the law file. Nobody reads it at
+the start of a task. An agent opens it when a symptom is surprising, and adds
+to it when a symptom surprised them.
 
 ## The format
 

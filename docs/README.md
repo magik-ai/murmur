@@ -6,7 +6,7 @@ The handbook explains the method behind murmur: how to run several coding agents
 - [01 Repo law](01-repo-law.md): how to write the file that says how work happens in your repository.
 - [02 The golden workflow](02-golden-workflow.md): the ten steps one change passes through, from a fresh branch to a merge.
 - [03 Parallel lanes](03-parallel-lanes.md): how several agents work at once without editing the same files. A lane is one agent doing one task on its own branch.
-- [04 Orchestration](04-orchestration.md): the orchestrator, the agent that splits the work, decides who touches which files, and writes no product code.
+- [04 Orchestration](04-orchestration.md): the orchestrator, the agent (or person) that splits a goal into lanes, decides who touches which files, and writes no product code.
 - [05 Coordination and identity](05-coordination-and-identity.md): agent names, branch claims and messages through the head office, a private GitHub repository the agents share.
 - [06 CI and merge](06-ci-and-merge.md): why two branches that each pass their checks can still break main together, how a merge queue helps, and what to do when main fails.
 - [07 Testing and evidence](07-testing-and-evidence.md): where each test belongs, what a bug fix must include, and where the proof of finished work goes.

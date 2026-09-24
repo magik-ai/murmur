@@ -19,26 +19,26 @@ agents. murmur's `hq` command reads and writes it; see
 [`hq/README.md`](../hq/README.md) for setup. Without it, follow the same rules
 in any channel your team agrees on.
 
-Two more words from [the glossary](00-start-here.md#words-this-handbook-uses)
-appear below. A lane is one agent doing one task on its own branch. A farm is
-an always-on machine that runs agents with murmur's `fleet` tool.
+A lane is one agent doing one task on its own branch. A farm is an always-on
+machine that runs agents with murmur's `fleet` tool.
+[The glossary](00-start-here.md#words-this-handbook-uses) has the other words.
 
 ## Naming agents
 
 **You assign the name.** An agent never invents a name and never borrows one. A
 code name found in project memory, a document or an old transcript belongs to
 another session: memory is shared, names are not. An agent without a name asks
-you for one. Asking is the handshake that shows the session knows the protocol.
+you for one. Asking shows that the session knows the rules.
 
 **What goes wrong without it.** A new session reads a code name from shared
 project memory and adopts it. Now two agents answer to one name, and mail for
 either can reach the wrong one. `hq hello <name>` warns when a session with the
 same name was active in the last three hours.
 
-**One name, one mark.** Pick an emoji and an accent colour with the name,
-confirm both, and pass all three on every spawn. A board of identical grey rows
-cannot be read at a glance. On a farm, a name's mark is recorded the first time
-it is spawned and stays fixed. To change it, run
+**One name, one mark.** Pick an emoji and an accent colour with the name, and
+confirm both. A board of identical grey rows cannot be read at a glance. On a
+farm, the first `fleet spawn --by <name> --icon <emoji> --color <hex>` records
+them, and later spawns reuse them. To change them, run
 `fleet identity <name> --icon <emoji> --color <hex>`.
 
 ## A name belongs to a session, not a machine
@@ -157,7 +157,7 @@ Two consequences follow. A public head office makes every message public, so
 keep it private. And if GitHub is down, coordination is down too: agents commit
 locally and wait, rather than inventing a side channel.
 
-## Finish loudly, because the sweep is coming
+## Push your work before the sweep removes it
 
 A team of agents leaves dead worktrees and stale board entries behind, so
 something sweeps them away on a timer. On a farm, `fleet sweep` runs every ten
@@ -169,10 +169,10 @@ finished, its worktree is removed, unless it holds uncommitted changes. Those
 keep it only until someone runs `fleet sweep --force`, which saves a snapshot
 and then removes it.
 
-So finish loudly: put lasting output in the pull request, the issue or the
-report, never only in a worktree. Before you trust that last night's work is
-still there, ask what the next pass would remove with `fleet sweep --dry-run`.
-The full rules are in [`fleet/docs/SWEEP.md`](../fleet/docs/SWEEP.md).
+So put lasting output in the pull request, the issue or the report, never only
+in a worktree. Before you trust that last night's work is still there, ask
+what the next pass would remove with `fleet sweep --dry-run`. The full rules
+are in [`fleet/docs/SWEEP.md`](../fleet/docs/SWEEP.md).
 
 ## Adopt it in a day
 
@@ -182,8 +182,7 @@ The full rules are in [`fleet/docs/SWEEP.md`](../fleet/docs/SWEEP.md).
    append to by hand.
 3. With the head office, install the claims guard (`hq hook <dir>`), so a
    script enforces claims instead of everyone remembering them. Without it,
-   write the claim as the first line of the pull request body, where everyone
-   can see it.
+   record each claim where everyone can see it, before the first push.
 4. Set the per-agent git author in every worktree, and confirm squash-merge is
    turned on.
 5. For the rules your agents follow in every repository, start from
