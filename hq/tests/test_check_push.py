@@ -2,8 +2,8 @@
 
 Fail-open is for NOT KNOWING. A claim already sitting in the local cache is
 knowing: it is positive evidence that the branch belongs to somebody else, and
-an outage does not make it less true. The guard used to wave those pushes
-through, which is precisely the case it exists for.
+an outage does not make it less true. Waving those pushes through would miss
+precisely the case the guard exists for.
 
 Nothing here touches the network: `fetch_claims` returns False (unreachable)
 and `claims_tree` is the cache.
@@ -141,6 +141,8 @@ def test_a_reachable_office_blocks_on_a_live_claim(monkeypatch, capsys):
     error = capsys.readouterr().err
     assert "PUSH BLOCKED" in error
     assert "cache" not in error  # the office answered; this is not a stale read
+    # The way out names the claim holder, not the configured owner.
+    assert "have bob run: hq release feature/x" in error
 
 
 def write_config(text):
@@ -242,12 +244,12 @@ def conf_path():
 def test_an_unforeseen_crash_in_the_gate_fails_open(monkeypatch, capsys):
     """The general case behind the three config fixes above.
 
-    Every one of them was the same shape: an exception nobody expected reached
-    the top of `check-push`, the command exited 1 with a traceback, and the
-    pre-push hook read that as a blocked push - so every push on the machine
-    froze until somebody read the stack trace. The gate now treats anything
-    unforeseen the way it treats an unreachable office: one warning line, and
-    out of the way. A crash is not evidence of a claim.
+    Each is the same shape: an exception nobody expected reaches the top of
+    `check-push`, the command exits 1 with a traceback, and the pre-push hook
+    reads that as a blocked push - so every push on the machine would freeze
+    until somebody read the stack trace. The gate treats anything unforeseen
+    the way it treats an unreachable office: one warning line, and out of the
+    way. A crash is not evidence of a claim.
     """
     monkeypatch.setenv("HQ_REPO", "acme/office")
     monkeypatch.setenv("HQ_AGENT", "alice")
@@ -295,14 +297,14 @@ def run_cli(monkeypatch, *argv):
 
 def test_a_branch_argparse_reads_as_an_option_does_not_block_the_push(
         offline, monkeypatch, capsys):
-    """Exit 2 from the parser was a blocked push.
+    """Exit 2 from the parser would be a blocked push.
 
     The hook turns any non-zero exit from `check-push` into a refused push, and
-    argparse answers a usage error with 2. So pushing `refs/heads/-weird` was
-    refused on a machine where nothing was claimed at all, and no message named
-    a claim, because there was none: the gate never ran. A gate that cannot read
-    its own arguments knows nothing, and not knowing is never evidence of a
-    claim.
+    argparse answers a usage error with 2. So pushing `refs/heads/-weird` would
+    be refused on a machine where nothing is claimed at all, and no message
+    would name a claim, because there is none: the gate never ran. A gate that
+    cannot read its own arguments knows nothing, and not knowing is never
+    evidence of a claim.
     """
     monkeypatch.setenv("HQ_AGENT", "alice")
     with pytest.raises(SystemExit) as stop:
@@ -315,9 +317,9 @@ def test_a_branch_argparse_reads_as_an_option_does_not_block_the_push(
 
 def test_the_separator_lets_the_gate_check_that_branch_properly(
         offline, monkeypatch, capsys):
-    """Fail-open is the safety net, not the answer. With `--`, which is what the
-    hook now passes, the same branch is gated like any other and a live claim on
-    it still blocks."""
+    """Fail-open is the safety net, not the answer. With `--`, which is what
+    hq's hook passes, the same branch is gated like any other and a live claim
+    on it still blocks."""
     offline["claims/acme-office/weird.json"] = dict(claim("bob"), branch="-weird")
     monkeypatch.setenv("HQ_AGENT", "alice")
     with pytest.raises(SystemExit) as stop:
@@ -350,9 +352,9 @@ def test_check_push_help_still_exits_zero(monkeypatch, capsys):
 
 # A config file hq cannot read is a gap in what hq knows about the OFFICE. The
 # local claims cache lives under HQ_HOME or the default state dir, so it is
-# usually still readable. The gate used to stop at the warning, so appending one
-# stray character to config.toml turned a blocked push into an allowed one on
-# the very same machine, with the very same claim still on disk.
+# usually still readable. If the gate stopped at the warning, appending one
+# stray character to config.toml would turn a blocked push into an allowed one
+# on the very same machine, with the very same claim still on disk.
 #
 # "Usually" is the case below it: `home` IS a config file key, so a machine set
 # up with `hq init --home` has its state dir named in the unreadable file too.
@@ -361,7 +363,7 @@ def test_check_push_help_still_exits_zero(monkeypatch, capsys):
 
 
 def test_a_malformed_config_still_blocks_on_a_cached_claim(monkeypatch, capsys):
-    """The finding, exactly: same cache, same claim, one broken config file."""
+    """Same cache, same claim, one broken config file: still blocked."""
     monkeypatch.delenv("HQ_REPO", raising=False)
     path = write_config('repo = "acme/office"\n[[[\n')
     monkeypatch.setenv("HQ_AGENT", "alice")
@@ -450,9 +452,9 @@ def test_a_broken_config_says_the_state_dir_it_searched_may_be_wrong(
     """The cache fallback above reads `cfg.state`, and `home` is a config file
     key. On a machine set up with `hq init --home`, the state dir is named in
     the very file hq cannot read, so `cfg.state` falls back to `~/.agent-hq`:
-    hq searches a cache that is not this machine's, finds nothing, and used to
-    report that as `holds no live claim` - a claim two directories away waved
-    through by the branch that exists to catch exactly that."""
+    hq searches a cache that is not this machine's and finds nothing. Reporting
+    that as `holds no live claim` would wave through a claim two directories
+    away, in the branch that exists to catch exactly that."""
     monkeypatch.delenv("HQ_REPO", raising=False)
     monkeypatch.delenv("HQ_HOME", raising=False)   # the sandbox sets it; a real machine need not
     write_config('repo = "acme/office"\nhome = "/moved/elsewhere"\n[[[\n')
@@ -506,15 +508,15 @@ def test_a_cached_claim_is_evidence_whatever_the_state_dir_was(
 
 # HQ_REPO alone is a complete answer to "where is the office": the environment
 # is read whatever the config file does, and with the file merely ABSENT the
-# gate asks the office and blocks on what it finds. A file hq cannot READ was
-# worse than no file at all - it stopped the gate at the local cache - so a
-# stray character downgraded a machine a spawner had configured correctly to a
-# guess, on every push, while the office would have answered.
+# gate asks the office and blocks on what it finds. A file hq cannot READ must
+# not be worse than no file at all: if it stopped the gate at the local cache, a
+# stray character would downgrade a machine a spawner had configured correctly
+# to a guess, on every push, while the office would have answered.
 
 
 def test_a_broken_config_still_asks_the_office_when_the_environment_names_it(
         monkeypatch, capsys):
-    """The finding: same environment, same office, one broken file."""
+    """Same environment, same office, one broken file: the office is asked."""
     monkeypatch.setenv("HQ_REPO", "acme/office")
     monkeypatch.setenv("HQ_AGENT", "alice")
     write_config('repo = "acme/office"\n[[[\n')
@@ -631,7 +633,7 @@ def test_a_state_dir_named_only_in_the_broken_file_is_not_the_one_hq_reads(
     """The reproduction, end to end: bob's claim is in a cache under a moved
     state dir, and the office is down, so the cache is what decides. Readable
     file, `home` honoured, push blocked. One stray character later the same
-    push goes through - and the line no longer offers the empty default
+    push goes through - and the line does not offer the empty default
     directory's silence as an answer about this branch."""
     monkeypatch.delenv("HQ_REPO", raising=False)
     monkeypatch.delenv("HQ_HOME", raising=False)   # the file is the only source

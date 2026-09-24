@@ -30,17 +30,15 @@ def cmd_inbox(args):
     lastread = {}
     if cfg.lastread_file.exists():
         lastread = json.loads(cfg.lastread_file.read_text() or "{}")
-    # A name nobody has read as before is a NEW session, and it has no backlog to catch up on: an
-    # unbounded `since` handed it every broadcast ever sent. That was 191 KB the night the office
-    # got chatty - past the 128 KB a single argv string can hold, so spawners that inline mail into
-    # a prompt were refusing to start lanes. Yesterday's announcements are context, not orders.
+    # A name nobody has read as before is a NEW session, and it has no backlog to catch up on.
+    # An unbounded `since` would hand it every broadcast ever sent, which can be more than a
+    # spawner can paste into one prompt. Yesterday's announcements are context, not orders.
     default_since = iso(now() - timedelta(hours=FIRST_READ_WINDOW_HOURS))
     since = lastread.get(me) or default_since
     # The cursor is per NAME per machine and moves on every plain read: a watcher that
     # polls `hq inbox`, or a second call in the same step, consumes the mail for every
-    # process signing as this name here (2026-09-14: six mails read by a monitor's
-    # header-check call and never shown to anyone). `--peek` reads without moving it;
-    # `--recent H` re-shows the last H hours regardless of it; neither writes.
+    # process signing as this name here. `--peek` reads without moving it; `--recent H`
+    # re-shows the last H hours regardless of it; neither writes.
     peek = bool(getattr(args, "peek", False))
     recent_hours = getattr(args, "recent", None)
     if recent_hours is not None:

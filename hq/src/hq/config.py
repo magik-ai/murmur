@@ -1,18 +1,15 @@
 """Where hq is pointed, and by whom.
 
-Everything that used to be a constant naming one person's organisation lives
-here: the head office repo, the owner who may override a claim, the author of
-claims commits, where state is cached, how the repo is cloned. A stranger
-configures hq with `hq init`; nobody has to edit the source.
+Every setting lives here: the head office repo, the owner who may override a
+claim, the author of claims commits, where state is kept, how the repo is
+cloned. You configure hq with `hq init`; nobody has to edit the source.
 
 Precedence is file, then environment: the file is the durable setup, the
 environment is how a spawner configures one lane or one command inline.
 
 The file is TOML, read by the standard library's `tomllib`, which is why hq
-requires python 3.11. hq used to carry a hand-written fallback parser for 3.9
-and 3.10, and the two disagreed about five malformed inputs: the same config
-file then failed open on one python and blocked pushes on another. One parser
-is worth more than two supported versions.
+requires python 3.11. One parser means one verdict about a malformed file on
+every machine, so the push gate cannot pass on one python and block on another.
 """
 
 import os
@@ -24,11 +21,21 @@ DEFAULTS = {
     "repo": "",                  # owner/name of the head office repo. No default.
     "owner": "",                 # the sovereign; empty means nobody is sovereign.
     "bot_name": "hq",            # author name on claims commits
-    "bot_email": "hq@users.noreply.github.com",
+    # Author email on claims commits. `.invalid` is a reserved domain, so no
+    # GitHub account can ever own this address, and GitHub links these
+    # commits to nobody.
+    "bot_email": "hq@example.invalid",
     "home": "",                  # state dir; empty means ~/.agent-hq
     "bin_dir": "",               # where `hq install` links; empty means ~/.local/bin
     "clone_url_template": "https://github.com/{repo}.git",
 }
+
+# GitHub's no-reply address for the login "hq", which belongs to an unrelated
+# GitHub account. GitHub can link a commit that carries a no-reply address to
+# the account with that login. Config files written by earlier versions of
+# `hq init` contain this address, so it is read as the default instead of
+# being put on more commits.
+FOREIGN_BOT_EMAIL = "hq@users.noreply.github.com"
 
 # Environment overrides the file, for spawners that configure a lane inline.
 ENV_OVERRIDES = {
@@ -62,9 +69,9 @@ def toml_string(value):
     """`value` as a TOML basic string, escapes and all.
 
     The config file is written from user input (`hq init --owner 'al"ice'`, a
-    Windows-style `--home`), and interpolating that input straight into
-    `key = "..."` produced a file hq itself could not parse - while `hq init`
-    still exited 0, so the damage only surfaced at the next command.
+    Windows-style `--home`). Pasted unescaped into `key = "..."`, that input
+    makes a file hq itself cannot parse, and the damage would only show at the
+    next command.
     """
     out = ['"']
     for character in str(value):
@@ -97,9 +104,9 @@ def read_config_file(path):
         raise ConfigError(f"cannot read the config file {path} ({error})")
     try:
         # Decoded explicitly, because `read_text` raises UnicodeDecodeError -
-        # a ValueError, not an OSError - and that escaped every caller that
+        # a ValueError, not an OSError - which would escape every caller that
         # catches ConfigError, the push gate included. One accented name saved
-        # by an editor in latin-1 then froze every push on the machine.
+        # by an editor in latin-1 would then freeze every push on the machine.
         text = raw.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ConfigError(f"cannot read the config file {path} (not UTF-8: {error})")
@@ -124,6 +131,8 @@ class Config:
         self.owner = str(values.get("owner") or "")
         self.bot_name = str(values.get("bot_name") or DEFAULTS["bot_name"])
         self.bot_email = str(values.get("bot_email") or DEFAULTS["bot_email"])
+        if self.bot_email == FOREIGN_BOT_EMAIL:
+            self.bot_email = DEFAULTS["bot_email"]
         self.clone_url_template = str(
             values.get("clone_url_template") or DEFAULTS["clone_url_template"])
         home = str(values.get("home") or "")

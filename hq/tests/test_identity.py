@@ -1,10 +1,9 @@
 """hq must never sign one agent's work with another agent's name.
 
-This is bin/hq-selftest, the script that grew out of the incident, rewritten as
-pytest. Two sessions share a machine: alice registers, bob then registers, and a
-third session never registers at all. Before the session-scoped identity files,
-alice's mail went out headed `from bob`, because the last `hq hello` won and
-there was one identity file per machine.
+The checks bin/hq-selftest runs, and more, as pytest. Two sessions share a
+machine: alice registers, bob then registers, and a third session never
+registers at all. With one identity file per machine, the last `hq hello` would
+win, and alice's mail would go out headed `from bob`.
 """
 
 import pytest
@@ -65,12 +64,12 @@ def test_a_worktree_name_is_trusted_only_with_the_extension_on(as_session, git_c
 
 
 def test_shared_state_can_be_read_but_never_acted_on(as_session, register, git_checkout):
-    """Third shape, found on 2026-09-16.
+    """Third shape of the same mistake.
 
     A session that said `hq bye` has no file of its own any more, so the next
     command falls through to shared state. Reading under a stale name is
-    harmless; ACTING under it is not, and a second `hq bye` signed a different
-    live agent off the board.
+    harmless; ACTING under it is not: it could sign a different, live agent's
+    name.
     """
     as_session("alice-session")
     register("alice", "alice-session")
@@ -132,11 +131,11 @@ def test_a_sovereign_is_only_whoever_the_config_names(monkeypatch):
 
 def test_bye_clears_this_session_before_it_needs_the_office(monkeypatch, capsys,
                                                             as_session, register):
-    """`hq bye` used to require the head office repo first. On a machine that
-    was never configured - or whose `gh` was down - it exited before the local
-    cleanup, so the name stayed on disk after its session had left, ready for
-    the next session to inherit. The local half needs nothing but this machine,
-    so it happens first."""
+    """If `hq bye` required the head office repo first, a machine that was
+    never configured - or whose `gh` was down - would exit before the local
+    cleanup, and the name would stay on disk after its session had left, ready
+    for the next session to inherit. The local half needs nothing but this
+    machine, so it happens first."""
     import argparse
 
     from hq.config import load_config
@@ -162,10 +161,9 @@ def test_bye_leaves_no_file_that_still_answers_with_this_name(monkeypatch, as_se
     """The other half of the same cleanup.
 
     `hq hello` writes TWO local files: the session file and the machine-wide
-    one. A bye that removed only the session file left a file that still
-    answered `hq whoami` with a name whose session had ended. Nothing was signed
-    with it, because `require_identity` refuses a machine file, but the goodbye
-    said `identity cleared on this machine` while the name was still on disk.
+    one. A bye that removed only the session file would leave a file that still
+    answers `hq whoami` with a name whose session has ended, while the goodbye
+    says `identity cleared on this machine`.
     """
     import argparse
 
@@ -236,15 +234,14 @@ def test_bye_reports_a_cleanup_only_when_there_was_one(monkeypatch, capsys, as_s
 
 def test_bye_clears_the_identity_on_a_machine_with_no_session_id(monkeypatch, capsys,
                                                                  as_session, register):
-    """The keyless machine could say hello and never say goodbye.
+    """A keyless machine must be able to say goodbye too.
 
     `hq hello` supports a session that exports no session id: it writes the
     machine-wide file and warns that every command needs HQ_AGENT. `hq bye` in
-    that same session resolved that same file, and then refused to ACT under it
-    - a refusal that came BEFORE the local cleanup, so the name stayed on disk,
-    and no later run of `hq bye` could remove it either, because each one hit
-    the same refusal. The half that needs nothing but this machine now happens
-    first, whatever source the name came from.
+    that same session resolves that same file, and refuses to ACT under it. If
+    that refusal came before the local cleanup, the name would stay on disk, and
+    no later `hq bye` could remove it either. So the half that needs nothing but
+    this machine happens first, whatever source the name came from.
     """
     import argparse
 
@@ -322,10 +319,10 @@ def test_bye_does_not_take_a_keyless_agents_identity(monkeypatch, as_session, re
     assert cfg.identity_file.read_text().strip() == "alice"
 
 
-# A config file hq cannot read is the third way `hq bye` used to keep a name on
-# a machine, after the missing repo and the refusal to act under shared state.
-# It was the worst of the three: every later `hq bye` stopped in the same place,
-# so the identity stayed until somebody fixed the file by hand.
+# A config file hq cannot read is a third way `hq bye` could keep a name on a
+# machine, after the missing repo and the refusal to act under shared state. If
+# it stopped `hq bye`, every later `hq bye` would stop in the same place, and the
+# identity would stay until somebody fixed the file by hand.
 
 
 def broken_config(text=b'repo = "acme/office\n[[[\n'):
@@ -409,9 +406,9 @@ def test_a_machine_without_git_still_knows_who_this_session_is(as_session, regis
                                                                without_git):
     """git is one of five places a name can come from, and hq asks it first.
 
-    A missing git raised FileNotFoundError out of the first question, so the
-    four sources that need no git were never reached: `hq whoami` could not
-    answer a question about a file on this disk.
+    A missing git must not raise FileNotFoundError out of the first question:
+    the sources that need no git would never be reached, and `hq whoami` could
+    not answer a question about a file on this disk.
     """
     as_session("alice-session")
     register("alice", "alice-session")
@@ -428,9 +425,9 @@ def test_bye_clears_the_identity_on_a_machine_without_git(monkeypatch, capsys,
 
     `hq bye` does its local cleanup before anything that can stop it, because a
     machine that cannot reach its office must still be able to drop its name.
-    Resolving that name went through git, so on a machine without git the
-    command died before removing anything - and so did every later `hq bye`,
-    which is the for-ever stale identity of finding 7 in a second disguise.
+    Resolving that name goes through git, so if a missing git crashed it, the
+    command would die before removing anything - and so would every later
+    `hq bye`, leaving a stale identity for ever.
     """
     import argparse
 
@@ -454,7 +451,7 @@ def test_bye_clears_the_identity_on_a_machine_without_git(monkeypatch, capsys,
 
 def test_a_bye_that_fails_at_the_office_says_how_to_finish(monkeypatch, capsys,
                                                            as_session, register):
-    """The local cleanup happens first, on purpose, and that has a cost.
+    """The local cleanup happens first, and that has a cost.
 
     Once the local files are gone this session has no name to resolve, so if the
     office half then fails - an expired token, a head office `gh` cannot see,
@@ -509,3 +506,17 @@ def test_a_goodbye_that_works_closes_the_issue_and_says_so(monkeypatch, capsys,
 
     assert closed and closed[0][:2] == ["issue", "close"]
     assert "bye alice" in capsys.readouterr().out
+
+
+def test_the_standalone_selftest_passes():
+    """bin/hq-selftest runs the core checks above with no pytest at all. Run it
+    here so it cannot silently fall behind the package."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parent.parent / "bin" / "hq-selftest"
+    result = subprocess.run([sys.executable, str(script)], capture_output=True,
+                            text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.startswith("ok:")

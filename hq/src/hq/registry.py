@@ -68,13 +68,11 @@ def clear_local_identity(cfg, name):
     """Remove every local file that would still answer "you are `name`". True
     when something was removed.
 
-    The session file is the easy half. The machine-wide file is the half that
-    was missed: `hq hello` writes BOTH, so a bye that removed only the session
-    file left a file that still named this agent, and `hq whoami` went on
-    answering with it after the session had said goodbye. `require_identity`
-    refuses to act on a machine file, so nothing was signed wrongly, but a
-    goodbye that reports "identity cleared on this machine" has to be telling
-    the truth.
+    `hq hello` writes BOTH the session file and the machine-wide file, so a bye
+    that removed only the session file would leave a file that still names this
+    agent, and `hq whoami` would go on answering with it after the session had
+    said goodbye. A goodbye that reports "identity cleared on this machine" must
+    have cleared both.
 
     Only this session's own name is removed. The machine-wide file is shared
     state: when it holds another name, or was written by another session, it is
@@ -104,9 +102,9 @@ def clear_local_identity(cfg, name):
 
 
 def cmd_bye(_):
-    # `strict=False` for the same reason the local cleanup comes first: a config
-    # file hq cannot read used to stop `hq bye` before it removed anything, and
-    # every later `hq bye` stopped in exactly the same place, so the name lived
+    # `strict=False` for the same reason the local cleanup comes first: if a
+    # config file hq cannot read stopped `hq bye` before it removed anything,
+    # every later `hq bye` would stop in the same place, and the name would live
     # on that machine until somebody fixed the file by hand. The local half
     # needs no value out of that file: where the state dir is comes from HQ_HOME
     # or the default, and removing a local file signs nothing. The office half
@@ -114,16 +112,14 @@ def cmd_bye(_):
     cfg = load_config(strict=False)
     # Local cleanup FIRST, before ANYTHING that can stop the command - and the
     # name it works on is the one hq resolves, not the narrower one hq may sign
-    # with. Two requirements used to come first and each left the identity on
-    # disk: the head office repo (an unconfigured machine, or one whose `gh` was
-    # down, said bye and kept the file), and `require_identity`, which refuses a
-    # name from shared state. The second one locked a whole kind of machine out:
-    # a session that exports no session id has nowhere to write but the shared
-    # machine file, `hq hello` supports that and warns about it, and then every
-    # `hq bye` there hit the refusal before the cleanup, so the name could never
-    # be removed at all. Clearing a local file signs nothing, so it does not
-    # need a name hq may act under - only a name that is this session's to take,
-    # which `clear_local_identity` decides file by file.
+    # with. Anything that ran first could leave the identity on disk: a missing
+    # head office repo, a `gh` that is down, or the refusal to act under a name
+    # from shared state. That refusal would lock out a whole kind of machine: a
+    # session that exports no session id has nowhere to write but the shared
+    # machine file, so its `hq bye` could never remove the name at all.
+    # Clearing a local file signs nothing, so it does not need a name hq may act
+    # under - only a name that is this session's to take, which
+    # `clear_local_identity` decides file by file.
     name, source = identity_source(cfg)
     cleared = clear_local_identity(cfg, name) if name else False
     # Say what the local half did, or the one-line exits below read as "hq bye
@@ -135,8 +131,8 @@ def cmd_bye(_):
     if cfg.error or not cfg.repo or source not in SESSION_SCOPED_SOURCES:
         print(report, file=sys.stderr)
     if cfg.error:
-        # One line, and honest about which half did not happen. The state dir
-        # was resolved without that file, so say where the cleanup looked.
+        # One line that says which half did not happen. The state dir was
+        # resolved without that file, so say where the cleanup looked.
         sys.exit(f"hq: {cfg.error}; the local cleanup above used {cfg.state}, "
                  "and no registry issue was closed - fix the config file and "
                  "run `hq bye` again")
@@ -206,8 +202,11 @@ def cmd_whoami(_):
 
 
 def cmd_who(_):
+    # An explicit limit, as in `find_issue`: without one `gh` returns 30 issues,
+    # and every session past the thirtieth would silently not be listed.
     items = gh_json(["issue", "list", "--repo", require_repo(), "--state", "open",
-                     "--label", "session", "--json", "title,updatedAt,body"])
+                     "--label", "session", "--limit", "1000",
+                     "--json", "title,updatedAt,body"])
     if not items:
         print("no live sessions")
         return
@@ -221,7 +220,7 @@ def cmd_who(_):
 
 def cmd_feed(args):
     """One human timeline of the whole office: messages, claims, sessions.
-    Built for the owner - ask any agent to run it, or run it yourself; no
+    For a person catching up - ask any agent to run it, or run it yourself; no
     channels to watch, no links to chase."""
     cfg = load_config()
     repo = require_repo(cfg)

@@ -72,7 +72,35 @@ def test_defaults_fill_what_neither_source_sets(monkeypatch):
     cfg = conf.load_config()
     assert cfg.owner == ""  # nobody is sovereign until somebody is named
     assert cfg.bot_name == conf.DEFAULTS["bot_name"]
+    assert cfg.bot_email == conf.DEFAULTS["bot_email"]
     assert cfg.clone_url() == "https://github.com/acme/office.git"
+
+
+def test_the_default_author_email_belongs_to_nobody():
+    """Claims commits are pushed to GitHub, and GitHub links a commit to the
+    account that owns its author address. The default must be an address no
+    account can own: `.invalid` is a reserved top-level domain, and GitHub's
+    no-reply domain names somebody's login."""
+    email = conf.DEFAULTS["bot_email"]
+    assert email.endswith(".invalid")
+    assert "users.noreply.github.com" not in email
+
+
+@pytest.mark.parametrize("where", ["file", "environment"])
+def test_the_foreign_address_earlier_configs_carry_reads_as_the_default(
+        monkeypatch, where):
+    """Earlier versions of `hq init` wrote GitHub's no-reply address for the
+    login `hq`, which belongs to an unrelated account. Those files keep working,
+    and their claims commits stop carrying that address."""
+    if where == "file":
+        write_config('repo = "acme/office"\n'
+                     'bot_email = "hq@users.noreply.github.com"\n')
+    else:
+        monkeypatch.setenv("HQ_REPO", "acme/office")
+        monkeypatch.setenv("HQ_BOT_EMAIL", "hq@users.noreply.github.com")
+    cfg = conf.load_config()
+    assert cfg.repo == "acme/office"
+    assert cfg.bot_email == conf.DEFAULTS["bot_email"]
 
 
 def test_home_moves_every_state_path(monkeypatch, tmp_path):
@@ -86,7 +114,7 @@ def test_home_moves_every_state_path(monkeypatch, tmp_path):
 
 
 def test_the_file_is_re_read_every_time(monkeypatch):
-    """No caching, on purpose: `HQ_REPO=... hq who` has to work, and a lane may
+    """No caching: `HQ_REPO=... hq who` has to work, and a lane may
     be reconfigured between two calls in one shell."""
     write_config('repo = "acme/office"\n')
     assert conf.load_config().repo == "acme/office"
@@ -116,9 +144,9 @@ SAMPLE = (
     'bot_name = "office-bot"\n'
 )
 
-# Malformed input the old hand-written fallback parser and tomllib disagreed
-# about. On 3.9 and 3.10 the fallback accepted some of these, so the same config
-# file failed open on one python and blocked every push on another.
+# Malformed input that a more forgiving parser might accept and tomllib
+# rejects. Two parsers that disagree would make the same config file fail open
+# on one python and block every push on another.
 MALFORMED = (
     'repo = "acme/office',            # unterminated string
     "repo = acme/office\n",           # bare value
@@ -129,8 +157,8 @@ MALFORMED = (
 
 
 def test_there_is_exactly_one_config_parser():
-    """The fallback parser is gone, with the pythons that needed it. Two
-    parsers that disagree about a broken file are worse than one floor."""
+    """No fallback parser: two parsers that disagree about a broken file
+    would give the push gate two verdicts."""
     assert not hasattr(conf, "parse_simple_toml")
 
 
@@ -180,10 +208,16 @@ def init(**overrides):
     cmd_init(argparse.Namespace(**fields))
 
 
+def test_hq_init_writes_the_default_author_email():
+    init()
+    written = conf.read_config_file(conf.config_path())
+    assert written["bot_email"] == conf.DEFAULTS["bot_email"]
+
+
 def test_a_quote_in_a_value_is_escaped_not_pasted():
-    """`--owner 'al"ice'` used to write `owner = "al"ice"`: a file hq could not
-    parse, from a command that exited 0. The breakage only showed up at the
-    next command, on a machine nobody was watching any more."""
+    """Pasted unescaped, `--owner 'al"ice'` would write `owner = "al"ice"`: a
+    file hq cannot parse, from a command that exited 0. The breakage would only
+    show at the next command, on a machine nobody is watching any more."""
     init(owner='al"ice')
     assert conf.load_config().owner == 'al"ice'
 
@@ -222,9 +256,9 @@ def test_init_refuses_to_leave_a_config_it_cannot_read_back(monkeypatch, capsys)
 
 def test_bytes_that_are_not_utf8_are_a_config_error_not_a_decode_crash():
     """`read_config_file` promises one exception type for "there is a file and
-    hq cannot use it". A non-UTF-8 file used to break that promise with a
+    hq cannot use it". A non-UTF-8 file must not break that promise with a
     `UnicodeDecodeError`, which is a `ValueError`: every caller catching
-    `ConfigError` missed it, including the push gate.
+    `ConfigError` would miss it, including the push gate.
     """
     path = conf.config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,9 +280,9 @@ def test_a_non_utf8_file_still_stops_every_other_command_with_one_line():
 
 def test_init_reports_an_unwritable_config_dir_as_one_line(monkeypatch):
     """A config directory hq may not write is an ordinary first-run accident on
-    a locked-down machine. It used to come out as a PermissionError traceback,
-    which tells a person setting up a new machine nothing about what to do
-    next. Every other failure in init is one line; so is this one."""
+    a locked-down machine. A PermissionError traceback would tell a person
+    setting up a new machine nothing about what to do next. Every other failure
+    in init is one line; so is this one."""
     import os
 
     if os.geteuid() == 0:
@@ -295,10 +329,10 @@ def test_init_writes_utf8_whatever_the_machine_locale_is(tmp_path):
 
     `write_text` without an encoding uses the machine's locale, which under
     `LC_ALL=C` is ASCII: `hq init --bot-name José` - an ordinary git author
-    name - died with a UnicodeEncodeError traceback and left a zero-byte
-    config.toml behind, which the next `hq init` refused to overwrite. On a
-    latin-1 locale it was quieter and no better: the file written was not the
-    file hq reads.
+    name - would die with a UnicodeEncodeError traceback and leave a zero-byte
+    config.toml behind, which the next `hq init` refuses to overwrite. On a
+    latin-1 locale it would be quieter and no better: the file written would not
+    be the file hq reads.
 
     Run as a subprocess because a locale is a property of the process, not
     something a test can monkeypatch.

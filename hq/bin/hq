@@ -7,32 +7,30 @@ that command symlinks THIS path, in THIS clone, into the bin dir, and `git
 pull` here is then the upgrade with no reinstall step. `Path.resolve()` follows
 the symlink, so `src/` is found beside the real file, not beside the link.
 
-What it is NOT is the head office's cache clone. hq used to link
-`<cache>/bin/hq`, which assumed every head office repo was a copy of hq's own
-source; the cache is now made lazily by the commands that read the office and
-holds no CLI to run.
+It is not the head office's cache clone: the head office holds claims and
+mailboxes, not a copy of hq.
 
-An installed copy (`uv tool install .`, `pipx install .`, `pip install .`) gets
-the same `main()` through the `hq` console script and does not need this file.
+An installed copy (`uv tool install --from . hq-cli`, `pipx install .`,
+`pip install .`) gets the same `main()` through the `hq` console script and
+does not need this file.
 """
 
 import sys
 from pathlib import Path
 
 # The python floor, checked BEFORE the package is imported, because the failure
-# it replaces happens at import time: `hq.config` imports `tomllib`, which
-# arrived in 3.11, so on an older interpreter this documented no-install path
-# printed a ModuleNotFoundError traceback that never named the real
-# requirement. `requires-python` guards an install; nothing guards
-# `python3 bin/hq`, and the interpreter here is whatever `python3` happens to be
-# on that machine.
+# it prevents happens at import time: `hq.config` imports `tomllib`, which
+# arrived in 3.11, so on an older interpreter this no-install path would print a
+# ModuleNotFoundError traceback that never names the real requirement.
+# `requires-python` guards an install; nothing guards `python3 bin/hq`, and the
+# interpreter here is whatever `python3` happens to be on that machine.
 #
 # The push gate is the reason this is more than a nicer message. The pre-push
-# hook reads any non-zero exit from `check-push` as a blocked push, so a machine
-# whose `python3` was older froze EVERY push behind a stack trace about a
-# missing module. An hq that cannot start knows nothing about any claim, and not
-# knowing is never evidence of one, so the gate warns and lets the push through,
-# exactly as it does for a config file it cannot read.
+# hook reads any non-zero exit from `check-push` as a blocked push, so on a
+# machine whose `python3` is older, a stack trace about a missing module would
+# freeze EVERY push. An hq that cannot start knows nothing about any claim, and
+# not knowing is never evidence of one, so the gate warns and lets the push
+# through, exactly as it does for a config file it cannot read.
 NEEDS = (3, 11)
 if sys.version_info < NEEDS:
     detail = ("needs python %d.%d or newer, this is python %s (%s); run it with a "

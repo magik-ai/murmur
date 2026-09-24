@@ -1,10 +1,10 @@
 """`gh` fails for ordinary reasons, and none of them is worth a stack trace.
 
 An expired token, a head office repo this login cannot see, GitHub down, `gh`
-not installed at all: every one of those used to come out of hq as a
-`CalledProcessError` traceback ending in the full argv. The sentence `gh` itself
-printed about the cause was buried in it, and an agent reading the trace could
-not tell whether hq was broken or its own auth was.
+not installed at all: none of those may come out of hq as a
+`CalledProcessError` traceback ending in the full argv. That would bury the
+sentence `gh` itself printed about the cause, and an agent reading the trace
+could not tell whether hq was broken or its own auth was.
 """
 
 import argparse
@@ -90,8 +90,8 @@ def test_a_gh_that_works_still_works(monkeypatch):
 
 def test_bye_clears_the_identity_before_gh_can_fail(monkeypatch, capsys,
                                                     as_session, register):
-    """The ordering finding 7 asked for, held against this failure too: the
-    local cleanup is done by the time `gh` is called, so a login that cannot
+    """Local cleanup first, held against this failure too: the local cleanup
+    is done by the time `gh` is called, so a login that cannot
     reach the office does not leave the name on the machine."""
     from hq.config import load_config
     from hq.registry import cmd_bye
@@ -138,3 +138,30 @@ def test_a_failed_bye_says_what_the_local_half_did(monkeypatch, capsys,
     assert "bye alice: identity cleared on this machine" in error
     assert "HQ_AGENT=alice hq bye" in error
     assert not cfg.identity_file.exists()
+
+
+def test_who_lists_every_session_not_just_the_first_page(monkeypatch, capsys):
+    """`gh issue list` returns 30 issues unless told otherwise, so a busy office
+    would lose sessions from `hq who` without a word. The line format is kept
+    too: murmur's dashboard parses it with the pattern below."""
+    import re
+
+    from hq import registry
+    from hq.util import iso, now
+
+    monkeypatch.setenv("HQ_REPO", "acme/office")
+    asked = []
+
+    def listing(args):
+        asked.append(args)
+        return [{"title": "session: alice", "updatedAt": iso(now()),
+                 "body": "machine: box (alice)\ntask: -"}]
+
+    monkeypatch.setattr(registry, "gh_json", listing)
+    registry.cmd_who(argparse.Namespace())
+
+    assert int(asked[0][asked[0].index("--limit") + 1]) >= 1000
+    line = capsys.readouterr().out.splitlines()[0]
+    match = re.match(r"^(?P<name>\S+)\s+(?P<state>live|STALE)\s+updated\s+"
+                     r"(?P<age>[\d.]+)h ago\s*(?P<task>.*)$", line)
+    assert match and match["name"] == "alice" and match["state"] == "live"

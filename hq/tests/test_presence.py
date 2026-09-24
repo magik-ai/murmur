@@ -1,10 +1,9 @@
 """Presence: any command that acts under a name keeps that name live.
 
 `hq who` and the dashboard call a session live while its session issue was
-updated in the last three hours, and only `hq hello` used to touch that issue.
-On 2026-09-24 the owner had four agents working and the Mail tab showed two:
-the other two had said hello in the morning and then only sent mail, claimed
-branches and read their inbox, none of which counted.
+updated in the last three hours. If only `hq hello` touched that issue, an
+agent that said hello in the morning and then only sent mail, claimed branches
+and read its inbox would look gone by the afternoon.
 
 No GitHub here: the office is a dict, and every `gh` call is recorded. The
 heartbeat's detached child runs in-process (see conftest), except in the tests
@@ -84,8 +83,8 @@ def inbox(**flags):
 
 
 def test_a_stale_stamp_posts_one_heartbeat_and_moves_the_stamp(office):
-    """The regression: alice said hello hours ago and has been sending mail
-    since. Without the fix, nothing but hello ever touched issue #7."""
+    """alice said hello hours ago and has been sending mail since: that mail
+    keeps issue #7 fresh."""
     stamp(hours_ago=2)
     send()
     assert len(office["heartbeats"]) == 1
@@ -120,11 +119,10 @@ def test_a_busy_hour_posts_one_heartbeat_not_one_per_command(office):
 
 
 def test_two_commands_at_once_start_one_child(office, monkeypatch):
-    """The review's schedule: two commands for the same name both read a stale
-    stamp, and wait for each other there before either writes it. Without the
-    lock both went on to post. With it, the second cannot re-read the stamp
-    until the first has rewritten it, so the rendezvous times out and only one
-    child starts."""
+    """Two commands for the same name both read a stale stamp, and wait for
+    each other there before either writes it. Without the lock both would go
+    on to post. With it, the second cannot re-read the stamp until the first
+    has rewritten it, so the rendezvous times out and only one child starts."""
     stamp(hours_ago=2)
     rendezvous = threading.Barrier(2, timeout=0.5)
     due = presence.heartbeat_due
@@ -249,9 +247,9 @@ def wait_for(path, timeout=10):
 
 
 def test_a_slow_failing_office_does_not_slow_the_command(office, monkeypatch, tmp_path):
-    """The review's blocker: each `gh` call may take 30 seconds to time out,
-    and the heartbeat used to make them before the command could go on. Here
-    the office takes 3 seconds to fail; the command must not wait for it."""
+    """Each `gh` call may take 30 seconds to time out, so the heartbeat must
+    not make them before the command can go on. Here the office takes 3
+    seconds to fail; the command must not wait for it."""
     log = fake_gh(tmp_path, monkeypatch, seconds=3)
     started = []
 

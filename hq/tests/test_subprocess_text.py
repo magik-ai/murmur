@@ -23,13 +23,11 @@ SRC = str(Path(__file__).resolve().parent.parent / "src")
 def emits(data):
     """A command that writes exactly `data` to stdout, on any platform.
 
-    These two tests used to shell out to `printf 'Jos\\xe9'`. That is a GNU
-    printf feature: BSD printf, which is the `printf` on macOS, does not expand
-    \\xHH at all and prints the characters. So the suite was red on a fresh mac
-    clone on every python version, and the sibling test below was worse than
-    red: `startswith("Jos")` is satisfied by the literal "Josxe9", so the stray
-    byte the test is named after was never produced and the test passed while
-    proving nothing. CI is ubuntu-only and could not catch either.
+    Not `printf 'Jos\\xe9'`: \\xHH is a GNU printf feature, and BSD printf,
+    which is the `printf` on macOS, prints the characters instead. The stray
+    byte a test is named after would then never be produced, and a check like
+    `startswith("Jos")` would still pass on the literal "Josxe9". CI runs on
+    ubuntu only and could not catch that.
 
     python writes the bytes the same way everywhere, and it is the interpreter
     already running the test.
@@ -78,12 +76,13 @@ def ascii_locale_env(home):
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 def test_the_push_gate_survives_an_accented_agent_name_under_an_ascii_locale(tmp_path):
-    """The reported failure, end to end, through the real CLI.
+    """End to end, through the real CLI.
 
     `git config hq.agent José`-style names are ordinary, and under LC_ALL=C
-    reading one raised UnicodeDecodeError inside `check-push`. The gate exited 1
-    with a traceback, and the hook turns that into a refused push - for every
-    push on that machine, not just this one.
+    reading one with the locale's decoder raises UnicodeDecodeError inside
+    `check-push`. The gate would exit 1 with a traceback, and the hook turns
+    that into a refused push - for every push on that machine, not just this
+    one.
     """
     home = tmp_path / "home"
     (home / ".config" / "hq").mkdir(parents=True)

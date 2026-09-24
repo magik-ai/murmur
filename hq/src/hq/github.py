@@ -3,10 +3,10 @@
 Every call goes through `gh()`, which has one job beyond running the command:
 a failure here is one line, never a stack trace. `gh` fails for ordinary
 reasons - an expired token, a head office repo that does not exist yet or that
-this login cannot see, GitHub being down, `gh` not installed at all - and each
-of those used to surface as a `CalledProcessError` traceback ending in the full
-argv. That tells an agent nothing about what to do next, and it buries the one
-sentence `gh` itself printed about the cause.
+this login cannot see, GitHub being down, `gh` not installed at all. A
+`CalledProcessError` traceback ending in the full argv would tell an agent
+nothing about what to do next, and bury the one sentence `gh` itself printed
+about the cause.
 """
 
 import json
@@ -51,10 +51,10 @@ def gh_json(args):
 
 def find_issue(title):
     # Plain list + exact match, NOT --search: the search index lags behind a
-    # just-created issue, which made a fresh mailbox invisible to its reader.
-    # The office keeps every mailbox and session issue open (450+ on 2026-09-14): a
-    # 200-item page silently hid whichever mailbox fell off it, and the caller read
-    # "inbox empty". List enough to see them all.
+    # just-created issue, which would make a fresh mailbox invisible to its reader.
+    # The office keeps every mailbox and session issue open, so a busy one holds
+    # hundreds. A short page would silently hide whichever mailbox fell off it, and
+    # the caller would read "inbox empty". List enough to see them all.
     items = gh_json(["issue", "list", "--repo", require_repo(), "--state", "open",
                      "--limit", "1000", "--json", "number,title"])
     for item in items:

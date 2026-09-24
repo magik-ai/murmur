@@ -1,10 +1,9 @@
 """Presence: a busy agent must not look gone.
 
 `hq who` and the dashboard count a session as live while its session issue was
-updated in the last few hours, and only `hq hello` used to comment on it. An
-agent that said hello once in the morning and then worked all day, sending mail,
-claiming and releasing branches, reading its inbox, went stale by lunchtime
-(2026-09-24: four live agents, the Mail tab showed two).
+updated in the last few hours. If only `hq hello` commented on it, an agent that
+said hello once in the morning and then worked all day, sending mail, claiming
+and releasing branches, reading its inbox, would look stale by lunchtime.
 
 So every command that acts under a name refreshes that name's presence, at most
 once an hour per name per machine. A local stamp holds the time of the last
@@ -19,7 +18,7 @@ A heartbeat never fails the command it rides on, and never slows it: the post
 goes out from a detached child process (the hidden `hq _heartbeat NAME`), so the
 command returns at once whatever GitHub does, and the child swallows its own
 errors. Each GitHub call may take up to 30 seconds to time out; done inline, a
-slow office added up to a minute to the first command of the hour.
+slow office could add up to a minute to the first command of the hour.
 """
 
 import fcntl
@@ -105,10 +104,10 @@ def claim_hour(name, cfg=None):
     """True for exactly one caller per hour per name on this machine, however
     many commands start at once.
 
-    Two commands that both read a stale stamp used to both post. Now the
-    stamp is re-read under an exclusive lock and, only if it is still due,
-    rewritten before the lock is released: the second command to get the lock
-    finds a fresh stamp and posts nothing. A stamp that cannot be written
+    Two commands can both read a stale stamp. So the stamp is re-read under an
+    exclusive lock and, only if it is still due, rewritten before the lock is
+    released: the second command to get the lock finds a fresh stamp and posts
+    nothing. A stamp that cannot be written
     raises, and then nothing is posted, since a heartbeat per command is what
     the stamp exists to prevent.
     """

@@ -15,7 +15,7 @@ class MissingTool(FileNotFoundError):
     A subclass of `FileNotFoundError`, so every handler that already catches
     that keeps working; what it adds is the NAME of the program. Without it the
     two ways `subprocess` raises FileNotFoundError - a missing program and a
-    missing `cwd` - are indistinguishable, and hq reported one as the other.
+    missing `cwd` - are indistinguishable, and hq would report one as the other.
     """
 
     def __init__(self, program):
@@ -30,10 +30,10 @@ def run(cmd, check=True, timeout=None, capture=True, cwd=None):
     `text=True` alone decodes with the machine's locale encoding and the strict
     error handler, which makes two ordinary things fatal. Under a non-UTF-8
     locale - `LC_ALL=C` in a cron job, a bare CI runner, a systemd unit - an
-    accented agent name in `git config hq.agent` raised UnicodeDecodeError, and
-    that crashed the pre-push gate, which the hook reads as a blocked push: one
-    name froze every push on the machine. A stray byte in any git output did the
-    same on any locale.
+    accented agent name in `git config hq.agent` would raise UnicodeDecodeError
+    and crash the pre-push gate, which the hook reads as a blocked push: one
+    name would freeze every push on the machine. A stray byte in any git output
+    would do the same on any locale.
 
     UTF-8 is what git actually writes, so this decodes more correctly, not just
     more safely; `errors="replace"` means a byte hq cannot read costs one
@@ -69,7 +69,7 @@ def slug(value):
 def parse_repo(url):
     """owner/name out of any remote URL form, or None.
 
-    An ~/.ssh/config alias (`git@github-alias:acme/fleet.git`) hides the real hostname, so a
+    An ~/.ssh/config alias (`git@github-alias:acme/storefront.git`) hides the real hostname, so a
     github.com-only pattern silently fails on it. That is worse than it sounds: the pre-push guard
     then keys claims by the raw URL, matches nothing, and waves every push through.
     """

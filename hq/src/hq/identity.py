@@ -12,16 +12,13 @@ from .util import MissingTool, run, slug
 #
 # HQ_SESSION_ID is the one a spawner is asked to set: it is hq's own variable, so
 # hq can promise what it means. The other three are best-effort fallbacks and each
-# is somebody else's variable. CLAUDE_CODE_SESSION_ID in particular is not a
-# documented interface of that runtime: it works today, it may be renamed tomorrow
-# without warning, and when it disappears an agent silently drops to a terminal id
-# or to no key at all. TERM_SESSION_ID and TMUX_PANE identify a terminal, not a
-# session, so two agents in one pane look like one agent.
+# is somebody else's variable. CLAUDE_CODE_SESSION_ID is set by Claude Code, and
+# hq cannot promise it stays. TERM_SESSION_ID and TMUX_PANE identify a terminal,
+# not a session, so two agents in one pane look like one agent.
 #
 # The order stays as it is, because changing it would rename every live session on
-# a machine mid-flight. What changes is that hq now says which one answered:
-# `hq whoami` prints the variable, so a spawner that forgot HQ_SESSION_ID can see
-# the fallback it is leaning on before the fallback goes away.
+# a machine mid-flight. `hq whoami` prints which variable answered, so a spawner
+# that forgot HQ_SESSION_ID can see the fallback it is leaning on.
 SESSION_VARIABLES = (
     "HQ_SESSION_ID",
     "CLAUDE_CODE_SESSION_ID",
@@ -58,16 +55,16 @@ def shared_identity_owner(cfg=None):
 
 
 def identity():
-    """Resolution order mirrors the pre-push hook: HQ_AGENT env (an explicit
-    override, and the only signal that survives anything), then a truly
-    worktree-scoped `git config --worktree hq.agent`, then THIS session's own
-    file, then the clone-wide `git config hq.agent`, and only then the
-    machine-wide file.
+    """The name this session resolves to, or None. Resolution order: HQ_AGENT
+    env (an explicit override, and the only signal that survives anything),
+    then a truly worktree-scoped `git config --worktree hq.agent`, then THIS
+    session's own file, then the clone-wide `git config hq.agent`, and only
+    then the machine-wide file. (The pre-push hook puts a worktree-scoped name
+    ahead of HQ_AGENT; see `hook.HOOK`.)
 
-    The machine-wide file is the one that used to mis-attribute work: it is
-    last-writer-wins, so a second `hq hello` on one machine silently renamed
-    every other live session. It is now used only when it is not demonstrably
-    somebody else's - when no session claimed it, or when this very session did.
+    The machine-wide file is last-writer-wins, so a second `hq hello` on one
+    machine rewrites it. It is used only when it is not demonstrably somebody
+    else's - when no session claimed it, or when this very session did.
     Anything else resolves to no identity, which fails loudly rather than
     signing another agent's name."""
     return identity_source()[0]
@@ -126,13 +123,12 @@ def git_config(*args):
     """`git config ...`, where every way of not getting an answer is "".
 
     No git on the machine is one of those ways. Resolving a name must not
-    depend on git: a name can come from four places that are not git, and hq
-    asks git first, so a missing git used to end every one of those commands in
-    a FileNotFoundError traceback before the other sources were even tried.
-    `hq whoami` could not answer a question about a file on disk, and `hq bye`
-    died BEFORE the local cleanup that finding 7 put first - so a machine
-    without git kept its identity for ever, exactly the failure that fix
-    removed for an unconfigured machine.
+    depend on git: a name can also come from HQ_AGENT or a file on disk, and hq
+    asks git early. Without this, a missing git would end every one of those
+    commands in a FileNotFoundError traceback before the other sources were
+    tried: `hq whoami` could not answer a question about a file on disk, and
+    `hq bye` would die before its local cleanup, so a machine without git would
+    keep its identity for ever.
 
     Not being able to ask git is not evidence about who this session is, in the
     same way that not reaching the office is not evidence about a claim.
@@ -169,13 +165,13 @@ def require_identity(strict=True):
     """The name this session may act under.
 
     `strict` is the default because every caller that reaches this function WRITES
-    something under a name: it closes a session issue, claims a branch, sends mail,
-    or moves a mailbox cursor. A name inherited from the clone-wide config or the
-    machine-wide file is shared with every other session here, so acting on it signs
-    or consumes another agent's work. That is not hypothetical: on 2026-09-16 a
-    session whose own file had just been removed by `hq bye` fell through to the
-    shared state and signed a second `hq bye` as a different, live agent, taking that
-    agent off the board. Reads that only display something may pass strict=False.
+    something under a name, or reads what is addressed to it: it claims or
+    releases a branch, sends mail, or reads a mailbox. A name inherited from the clone-wide config or the machine-wide file is
+    shared with every other session here, so acting on it signs or consumes another
+    agent's work. For example, a session whose own file `hq bye` has just removed
+    falls through to the shared state, and acting on that name could close a
+    different, live agent's session. Reads that only display something may pass
+    strict=False.
 
     Acting under a name is also proof of life, so a name this session owns gets
     its presence refreshed here, at most once an hour (see `presence`): the one
@@ -205,7 +201,8 @@ def require_identity(strict=True):
 
 
 def is_sovereign(name, cfg=None):
-    """The owner works hands-on with sovereign rights: claims warn them, never
-    block them. An empty `owner` in the config means nobody has that power."""
+    """Is `name` the configured owner? A claim never blocks the owner's push (the
+    gate warns instead), and the owner may release any claim. An empty `owner`
+    in the config means nobody has that power."""
     cfg = cfg or load_config()
     return bool(cfg.owner) and name == cfg.owner

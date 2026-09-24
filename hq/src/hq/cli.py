@@ -25,36 +25,42 @@ from .registry import cmd_bye, cmd_feed, cmd_hello, cmd_who, cmd_whoami
 # How long a claim lives unless the claimer says otherwise.
 DEFAULT_TTL_HOURS = 24
 
-USAGE = """hq - personal agent coordination CLI.
+USAGE = """hq - names, branch claims and mail for coding agents that share one
+GitHub login.
 
-One CLI, installed identically on every machine, so coordination keeps working
-when any one host is down: the head office is a GitHub repo, not a host. Claims
-use plain git (push = compare-and-swap); registry and messages use GitHub
-issues via `gh`.
+hq keeps its state in a GitHub repository you choose, the head office, so it
+does not depend on any one machine being up. Claims are files on the office's
+`claims` branch, and a git push decides who got there first. Sessions and mail
+are GitHub issues, read and written with `gh`.
 
-Which head office, and who owns it, comes from a config file (see `hq init`),
-never from the source: nothing in this package names one organisation.
+Point hq at your head office once with `hq init`. The environment variables
+HQ_REPO, HQ_OWNER, HQ_BOT_NAME, HQ_BOT_EMAIL and HQ_HOME override the file.
 
 Commands:
   hq init --repo O/N [--owner NAME]
-                                   write the config file this CLI reads
-  hq install                       symlink this clone's bin/hq into the bin dir
-  hq hello NAME [--task T]         register this session (and set local identity)
-  hq bye                           close this session's registry issue
+                                   write the config file
+  hq install                       link this clone's bin/hq into the bin dir
+  hq hello NAME [--task T]         register this session and save its name
+  hq bye                           end this session and close its issue
   hq who                           list live sessions
-  hq claim BRANCH [--repo O/N] [--ttl H] [--note T]
-  hq release BRANCH [--repo O/N] [--force]
   hq whoami                        the name hq would sign with, and where it came
                                    from; exits 1 when that name is not this
                                    session's own. Run it before acting.
+  hq claim BRANCH [--repo O/N] [--ttl H] [--note T]
+                                   claim a branch (for 24 hours unless --ttl)
+  hq release BRANCH [--repo O/N] [--force]
+                                   give a claim back
   hq claims [--repo O/N]           list active claims
   hq feed [--hours H]              the whole office as one timeline (default 24h)
   hq msg NAME TEXT                 message an agent ('all' broadcasts)
-  hq inbox [--peek] [--recent H]   unread messages for this identity (--peek/--recent
-                                   never move the read cursor: use them in watchers)
-  hq hook DIR [--force]            install the pre-push guard into a worktree/repo
+  hq inbox [--peek] [--recent H] [--all]
+                                   mail for this name; a plain read moves the
+                                   read cursor, --peek and --recent never do
+  hq hook DIR [--force]            install the pre-push guard in the clone at DIR
                                    (--force replaces a hook hq did not write)
   hq check-push REPO BRANCH        used by the hook; exit 1 = blocked
+
+Run `hq COMMAND --help` for the options of one command.
 """
 
 
@@ -97,8 +103,7 @@ def verify_written(path, values):
 
     Escaping is only half the promise. `hq init` is the last moment anyone is
     watching, so it proves the round-trip instead of assuming it: a config file
-    hq cannot read is worse than no config file at all, and the old init exited
-    0 on exactly that.
+    hq cannot read is worse than no config file at all.
     """
     try:
         written = read_config_file(path)
@@ -131,12 +136,13 @@ def cmd_init(args):
     # Every value goes through `toml_string`: a quote or a backslash in what the
     # user typed must not be able to produce a file hq cannot read.
     lines = [
-        "# hq configuration. Environment variables override every key here:",
-        "# HQ_REPO, HQ_OWNER, HQ_BOT_NAME, HQ_BOT_EMAIL, HQ_HOME.",
+        "# hq configuration. The environment variables HQ_REPO, HQ_OWNER,",
+        "# HQ_BOT_NAME, HQ_BOT_EMAIL and HQ_HOME override repo, owner, bot_name,",
+        "# bot_email and home.",
         "",
         f"repo = {toml_string(values['repo'])}",
         f"owner = {toml_string(values['owner'])}"
-        "  # sovereign; empty means nobody overrides a claim",
+        "  # may push to claimed branches and release any claim; empty means nobody",
         f"bot_name = {toml_string(values['bot_name'])}",
         f"bot_email = {toml_string(values['bot_email'])}",
     ]
@@ -151,13 +157,13 @@ def cmd_init(args):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         # UTF-8 explicitly, never the machine's locale encoding: under LC_ALL=C
-        # `write_text` encodes as ASCII, so `hq init --bot-name Jose\u0301` died
-        # with a UnicodeEncodeError traceback and left a zero-byte config.toml
-        # that the next `hq init` then refused to overwrite. `surrogateescape`
-        # puts bytes that arrived through argv back exactly as they came in, so
-        # a name typed on a UTF-8 terminal survives a locale that cannot spell
-        # it; anything that is genuinely not UTF-8 is caught below by the
-        # round-trip, which is the existing promise rather than a new one.
+        # `write_text` would encode as ASCII, so `hq init --bot-name Jose\u0301`
+        # would die with a UnicodeEncodeError traceback and leave a zero-byte
+        # config.toml that the next `hq init` refuses to overwrite.
+        # `surrogateescape` puts bytes that arrived through argv back exactly as
+        # they came in, so a name typed on a UTF-8 terminal survives a locale
+        # that cannot spell it; anything that is genuinely not UTF-8 is caught
+        # below by the round-trip.
         path.write_text("\n".join(lines), encoding="utf-8",
                         errors="surrogateescape")
     except (OSError, UnicodeError) as error:
@@ -170,7 +176,7 @@ def cmd_init(args):
     verify_written(path, values)
     print(f"hq configured: {path}")
     print(f"  repo  {values['repo']}")
-    print(f"  owner {values['owner'] or '(nobody is sovereign)'}")
+    print(f"  owner {values['owner'] or '(nobody)'}")
 
 
 def clone_script():
@@ -186,19 +192,18 @@ def clone_script():
 def cmd_install(_):
     """Put an `hq` in the bin dir. Nothing here touches the head office.
 
-    It used to clone the head office into the cache and symlink
-    `<cache>/bin/hq`, which assumed every head office repo was a copy of hq's
-    own source: a head office that holds claims and mailboxes and nothing else
-    produced a traceback on an install. The cache clone is now made lazily by
-    the commands that read the office, and this command needs no configured
-    repo at all.
+    It links this clone's `bin/hq` and needs no configured repo at all. The
+    head office holds claims and mailboxes, not a copy of hq, and its cache
+    clone is made by the commands that read the office.
     """
     source = clone_script()
     if source is None:
         print("hq: nothing to link - this hq is an installed package, so the "
-              "installer owns the `hq` command. To install or upgrade:")
-        print("  uv tool install --from . hq-cli     # in a clone of agent-hq")
-        print("  pipx install .                      # the same, with pipx")
+              "installer owns the `hq` command. To upgrade it, update the murmur "
+              "clone it came from and run one of these in that clone's hq/ "
+              "directory:")
+        print("  uv tool install --reinstall --from . hq-cli")
+        print("  pipx install --force .")
         return
     target = load_config().bin_dir / "hq"
     try:
@@ -220,11 +225,11 @@ def speak_utf8():
 
     hq prints names, branches and notes that were typed on somebody else's
     machine. Under a non-UTF-8 locale python encodes stdout as ASCII and raises
-    on the first accented character, so `hq init --owner Jose\u0301` wrote its
-    config file correctly and then died with a traceback printing the summary,
-    and an accented note in one claim could break `hq claims` for everybody.
-    Mojibake in a terminal is a bad day; a traceback instead of the answer is a
-    broken tool.
+    on the first accented character, so `hq init --owner Jose\u0301` would
+    write its config file correctly and then die with a traceback printing the
+    summary, and an accented note in one claim could break `hq claims` for
+    everybody. Mojibake in a terminal is a bad day; a traceback instead of the
+    answer is a broken tool.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -240,14 +245,14 @@ def parse_args(ap):
 
     `argparse` answers a usage error with exit 2, and the pre-push hook reads
     ANY non-zero exit from `check-push` as a blocked push. So an argument the
-    parser could not read froze the push instead of gating it, and a branch
-    name is not hq's to choose: `refs/heads/-weird` is a legal ref, and the
-    hook hands it over as `-weird`, which argparse reads as an option and
-    rejects. The hook now passes `--` so such a branch is CHECKED rather than
-    waved through, but hooks already installed in a hundred worktrees do not
-    update themselves, and the gate has to be right when it is called wrongly:
-    a gate that cannot read its own arguments knows nothing about any claim,
-    and not knowing is never evidence of one.
+    parser could not read would freeze the push instead of gating it, and a
+    branch name is not hq's to choose: `refs/heads/-weird` is a legal ref, and
+    a hook hands it over as `-weird`, which argparse reads as an option and
+    rejects. hq's own hook passes `--`, so such a branch is CHECKED rather than
+    waved through. But an older copy of the hook, or a hook another tool wrote,
+    may leave the `--` out, and the gate has to be right when it is called
+    wrongly: a gate that cannot read its own arguments knows nothing about any
+    claim, and not knowing is never evidence of one.
 
     argparse has already printed the usage line, so the reason is on stderr
     above the warning.
@@ -272,25 +277,39 @@ def main():
     ap = argparse.ArgumentParser(prog="hq", description=USAGE,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("init", help="write the config file")
-    p.add_argument("--repo", required=True, metavar="OWNER/NAME")
-    p.add_argument("--owner", help="the sovereign; omit if nobody is")
-    p.add_argument("--bot-name", dest="bot_name")
-    p.add_argument("--bot-email", dest="bot_email")
-    p.add_argument("--home", help="state directory (default ~/.agent-hq)")
-    p.add_argument("--force", action="store_true")
+    p = sub.add_parser("init")
+    p.add_argument("--repo", required=True, metavar="OWNER/NAME",
+                   help="the head office repository")
+    p.add_argument("--owner", metavar="NAME",
+                   help="the name that may push to claimed branches and release any "
+                        "claim; omit for nobody")
+    p.add_argument("--bot-name", dest="bot_name", metavar="NAME",
+                   help=f"author name of claims commits (default {DEFAULTS['bot_name']})")
+    p.add_argument("--bot-email", dest="bot_email", metavar="EMAIL",
+                   help=f"author email of claims commits (default {DEFAULTS['bot_email']})")
+    p.add_argument("--home", metavar="DIR", help="state directory (default ~/.agent-hq)")
+    p.add_argument("--force", action="store_true", help="overwrite an existing config file")
     sub.add_parser("install")
-    p = sub.add_parser("hello"); p.add_argument("name"); p.add_argument("--task")
+    p = sub.add_parser("hello"); p.add_argument("name")
+    p.add_argument("--task", help="one line about what this session works on")
     sub.add_parser("bye")
     sub.add_parser("whoami")
     sub.add_parser("who")
-    p = sub.add_parser("claim"); p.add_argument("branch"); p.add_argument("--repo")
-    p.add_argument("--ttl", type=float, default=DEFAULT_TTL_HOURS, metavar="HOURS")
-    p.add_argument("--note")
-    p = sub.add_parser("release"); p.add_argument("branch"); p.add_argument("--repo")
-    p.add_argument("--force", action="store_true")
-    p = sub.add_parser("claims"); p.add_argument("--repo")
-    p = sub.add_parser("feed"); p.add_argument("--hours", type=float, default=24)
+    p = sub.add_parser("claim"); p.add_argument("branch")
+    p.add_argument("--repo", metavar="OWNER/NAME",
+                   help="the repository the branch is in (default: the origin remote)")
+    p.add_argument("--ttl", type=float, default=DEFAULT_TTL_HOURS, metavar="HOURS",
+                   help=f"how long the claim lasts (default {DEFAULT_TTL_HOURS})")
+    p.add_argument("--note", help="shown next to the claim in `hq claims`")
+    p = sub.add_parser("release"); p.add_argument("branch")
+    p.add_argument("--repo", metavar="OWNER/NAME",
+                   help="the repository the branch is in (default: the origin remote)")
+    p.add_argument("--force", action="store_true",
+                   help="release a claim that belongs to another agent")
+    p = sub.add_parser("claims")
+    p.add_argument("--repo", metavar="OWNER/NAME", help="only claims in this repository")
+    p = sub.add_parser("feed")
+    p.add_argument("--hours", type=float, default=24, help="how far back to look (default 24)")
     p = sub.add_parser("msg"); p.add_argument("name"); p.add_argument("text")
     p = sub.add_parser("inbox")
     p.add_argument("--peek", action="store_true",
@@ -298,11 +317,15 @@ def main():
     p.add_argument("--recent", metavar="HOURS", type=float,
                    help="re-show the last HOURS of mail regardless of the cursor; never moves it")
     p.add_argument("--all", action="store_true",
-        help="every message ever sent, not just what is still actionable")
-    p = sub.add_parser("hook"); p.add_argument("dir")
+        help="every message ever sent, with no size cap; moves the read cursor "
+             "unless --peek or --recent is given too")
+    p = sub.add_parser("hook")
+    p.add_argument("dir", help="a clone or worktree; the guard covers the whole clone")
     p.add_argument("--force", action="store_true",
                    help="replace a pre-push hook hq did not write")
-    p = sub.add_parser("check-push"); p.add_argument("repo"); p.add_argument("branch")
+    p = sub.add_parser("check-push")
+    p.add_argument("repo", help="remote URL or OWNER/NAME")
+    p.add_argument("branch")
     args = parse_args(ap)
     {
         "init": cmd_init,

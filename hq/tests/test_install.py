@@ -1,14 +1,9 @@
 """Installing hq, and caching the head office, are two different jobs.
 
-`hq install` used to do both: it cloned the head office into the state dir and
-symlinked `<cache>/bin/hq` into the bin dir. That assumes every head office
-repo is a copy of hq's own source. A head office that holds claims, mailboxes
-and nothing else - which is what the README tells a stranger to create - gave
-an install a traceback, on the path the README calls the upgrade.
-
-So: install only links (or says which installer owns the command), the cache
-clone is made lazily by the commands that read the office, and neither of them
-assumes a branch called `main`.
+A head office holds claims, mailboxes and nothing else - it is not a copy of
+hq's own source. So `hq install` only links this clone's bin/hq (or says which
+installer owns the command), the cache clone is made by the commands that read
+the office, and neither of them assumes a branch called `main`.
 """
 
 import argparse
@@ -48,8 +43,8 @@ def test_install_needs_no_head_office_at_all(monkeypatch, capsys):
 
 
 def test_install_links_this_clone_not_a_copy_of_hq_inside_the_office(monkeypatch):
-    """The link points at the clone this code runs from. The old version
-    pointed at <cache>/bin/hq and crashed when the office had no bin/hq."""
+    """The link points at the clone this code runs from, never at a bin/hq
+    inside the office's cache clone, which has none."""
     monkeypatch.setenv("HQ_REPO", "acme/office")
     install()
     target = load_config().bin_dir / "hq"
@@ -67,13 +62,15 @@ def test_install_is_idempotent(monkeypatch):
 def test_an_installed_package_is_told_which_installer_owns_the_command(
         monkeypatch, capsys):
     """Installed with uv or pipx there is no clone to link, and no bin dir of
-    ours to write into. Say the one line that installs it instead of inventing
-    a link."""
+    ours to write into. Say how to upgrade it instead of inventing a link. A
+    plain second `uv tool install` or `pipx install` of the same version leaves
+    the old code in place, so the commands carry --reinstall and --force."""
     monkeypatch.setattr(cli, "clone_script", lambda: None)
     install()
     out = capsys.readouterr().out
-    assert "uv tool install --from . hq-cli" in out
-    assert "pipx install ." in out
+    assert "uv tool install --reinstall --from . hq-cli" in out
+    assert "pipx install --force ." in out
+    assert "agent-hq" not in out
     assert not (load_config().bin_dir / "hq").exists()
 
 
@@ -105,8 +102,8 @@ def bare_office(path, branch):
 
 
 def test_the_cache_clone_follows_the_office_default_branch(monkeypatch, tmp_path):
-    """`main` was hardcoded. An office on `master`, or on anything else a team
-    uses, was simply wrong - and the failure was a silent one."""
+    """An office on `master`, or on anything else a team uses, must work. A
+    hardcoded `main` would get it wrong, and silently."""
     office = bare_office(tmp_path / "office.git", "trunk")
     config = tmp_path / "home" / ".config" / "hq" / "config.toml"
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -158,8 +155,8 @@ def run_wrapper(monkeypatch, version, argv):
 def test_an_old_python_is_one_line_not_a_tomllib_traceback(monkeypatch):
     """`python3 bin/hq` is the install-free path the README documents, and the
     interpreter it lands on is whatever `python3` happens to be. `requires-python`
-    guards an install and nothing guards this, so below 3.11 the run died inside
-    `import tomllib` with a traceback that never named the requirement."""
+    guards an install and nothing guards this, so below 3.11 the run would die
+    inside `import tomllib` with a traceback that never names the requirement."""
     with pytest.raises(SystemExit) as stop:
         run_wrapper(monkeypatch, (3, 10, 20, "final", 0), ["hq", "whoami"])
 
@@ -170,7 +167,8 @@ def test_an_old_python_is_one_line_not_a_tomllib_traceback(monkeypatch):
 
 
 def test_an_old_python_does_not_block_every_push(monkeypatch, capsys):
-    """The same traceback, reached through the pre-push hook, froze the machine.
+    """The same traceback, reached through the pre-push hook, would freeze the
+    machine.
 
     The hook reads any non-zero exit from `check-push` as a blocked push. An hq
     that cannot start knows nothing about any claim, and not knowing is never

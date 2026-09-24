@@ -2,12 +2,13 @@
 
 This command runs while a machine is being set up, usually from a script that
 loops over worktrees, so its failures have to be readable by whoever reads that
-script's output later. Every ordinary way of getting it wrong used to end in a
-stack trace instead.
+script's output later: every ordinary way of getting it wrong ends in one line,
+not a stack trace.
 """
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -152,3 +153,66 @@ def test_a_directory_that_is_not_a_repository_exits_1_through_the_cli(tmp_path):
     assert "CalledProcessError" not in result.stderr
     assert result.stderr.strip().count("\n") == 0
     assert "not inside a git repository" in result.stderr
+
+
+# The name the guard hands to `check-push`. A fake `hq` first on PATH records
+# the HQ_AGENT it was started with and lets the push through.
+
+
+def name_the_guard_uses(repo, tmp_path, env_agent=None):
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir(exist_ok=True)
+    log = tmp_path / "hq-calls"
+    fake = fake_bin / "hq"
+    fake.write_text('#!/usr/bin/env bash\n'
+                    'printf \'%s\\n\' "${HQ_AGENT-<unset>}" >> "$HQ_TEST_LOG"\n'
+                    'exit 0\n')
+    fake.chmod(0o755)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                    "git@github.com:acme/thing.git"], check=True)
+    hook_cmd(repo)
+    env = dict(os.environ, PATH=f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+               HQ_TEST_LOG=str(log))
+    env.pop("HQ_AGENT", None)
+    if env_agent:
+        env["HQ_AGENT"] = env_agent
+    zeros = "0" * 40
+    result = subprocess.run(
+        ["bash", str(repo / ".git" / "hooks" / "pre-push"), "origin",
+         "git@github.com:acme/thing.git"],
+        cwd=repo, env=env, input=f"refs/heads/topic {zeros} refs/heads/topic {zeros}\n",
+        capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    return log.read_text().splitlines()
+
+
+needs_bash = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+
+
+@needs_bash
+def test_the_guard_does_not_force_a_clone_wide_name(repo, tmp_path):
+    """Without extensions.worktreeConfig, `git config --worktree` reads
+    .git/config: the clone-wide value, shared by everyone working in the clone.
+    Forcing it would make the gate decide under a name the CLI does not sign
+    with - a session that said `hq hello bob` claims as bob, and its own push
+    would then be blocked as somebody else's. The CLI resolves the name itself."""
+    subprocess.run(["git", "-C", str(repo), "config", "hq.agent", "alice"], check=True)
+
+    assert name_the_guard_uses(repo, tmp_path) == ["<unset>"]
+
+
+@needs_bash
+def test_the_guard_forces_a_truly_worktree_scoped_name(repo, tmp_path):
+    subprocess.run(["git", "-C", str(repo), "config", "extensions.worktreeConfig",
+                    "true"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "--worktree", "hq.agent",
+                    "lane-name"], check=True)
+
+    assert name_the_guard_uses(repo, tmp_path, env_agent="outer") == ["lane-name"]
+
+
+@needs_bash
+def test_the_guard_passes_the_callers_hq_agent_through(repo, tmp_path):
+    subprocess.run(["git", "-C", str(repo), "config", "hq.agent", "alice"], check=True)
+
+    assert name_the_guard_uses(repo, tmp_path, env_agent="bob") == ["bob"]

@@ -1,394 +1,707 @@
-# agent-hq
+# hq
 
-`hq` is a coordination layer for a fleet of coding agents that all push with
-one GitHub authorization. One GitHub login means git cannot tell your agents
-apart, and nothing in GitHub stops two of them from working the same branch at
-the same time. `hq` is the missing piece: a **head office** repo that holds who
-is live, who owns which branch, and who said what to whom.
+hq is a small command-line tool for coding agents that all push to GitHub
+under one login. It gives each agent session a name. It lets an agent claim a
+branch, so that no other agent pushes to it. And it carries messages between
+agents.
 
-The head office is a GitHub repo, not a host, so it survives any single machine
-(laptop asleep, build box down) and is reachable from anywhere your `gh` auth
-works, including a phone browser. It coordinates work in OTHER repositories;
-nothing here changes any target repo's own workflow.
+## Why you need it
 
-One CLI, no runtime dependencies. It needs `python` 3.11 or newer, `git` and
-`gh`, because those are the three things that still work on a machine where
-nothing else does. 3.11 is the floor because the config file is read with the
-standard library's `tomllib`; the alternative was a second, hand-written parser
-that disagreed with `tomllib` about malformed input, so the same config file
-failed open on one python and blocked every push on another.
+When all your agents push with one GitHub login, git and GitHub cannot tell
+them apart. Nothing stops two agents from working on the same branch at the
+same time.
+
+hq fills that gap with a **head office**: a private GitHub repository that
+records who is working, who holds which branch, and who said what to whom.
+Sessions and messages are GitHub issues in that repository. Branch claims are
+small files on its `claims` branch.
+
+The head office is a repository, not a server. It keeps working when any one of
+your machines is off, and you can read it wherever you can use GitHub. hq does
+not change how your project repositories work.
+
+hq is part of [murmur](../README.md). murmur's installer for a farm (an
+always-on Linux machine that runs agents) sets hq up, and murmur's dashboard
+shows its sessions and mail. You can also use hq on its own.
+
+A few words this page uses:
+
+- **Session**: one running agent, or one terminal where you work by hand.
+- **Claim**: a record that says "this branch belongs to this name until this
+  time".
+- **Owner**: the person in charge, named in the config. A claim never blocks
+  the owner's pushes.
+
+The [glossary](../docs/00-start-here.md) explains the other words murmur uses.
+
+## What you need
+
+- Python 3.11 or newer.
+- git.
+- The GitHub CLI `gh`, signed in with the login your agents use
+  (`gh auth login`).
+- A private GitHub repository for the head office. It can be empty.
+
+hq has no other dependencies.
 
 ## Install
 
-From a clone, which is the only way that works today:
+hq is not on PyPI. Install it from a clone of murmur:
 
-```sh
-git clone https://github.com/<your-org>/agent-hq.git
-cd agent-hq
-uv tool install --from . hq-cli     # or: pipx install .
+```bash
+git clone https://github.com/magik-ai/murmur.git
+cd murmur/hq
 ```
 
-Or run it in place, with no install at all:
+Then pick one of these three ways.
 
-```sh
+**Link the clone.** This is what murmur's farm installer does.
+
+```bash
+python3 bin/hq install
+```
+
+This links `bin/hq` into `~/.local/bin`, so make sure that directory is on your
+`PATH`. To upgrade, run `git pull` in the clone. This way, hq runs on the
+machine's `python3`, which must be 3.11 or newer.
+
+**Install it as a tool** with uv or pipx:
+
+```bash
+uv tool install --from . hq-cli
+```
+
+```bash
+pipx install .
+```
+
+To upgrade, run `git pull`, then `uv tool install --reinstall --from . hq-cli`
+or `pipx install --force .`. Without those flags, running the install command
+again can leave the old code in place.
+
+**Run it in place**, with no install:
+
+```bash
 python3 bin/hq --help
 ```
 
-That path runs on whatever `python3` the machine has, so it checks the version
-before it imports anything: an older interpreter gets one line naming the
-requirement instead of a traceback about a missing `tomllib`, and `check-push`
-there warns and lets the push through rather than freezing every push on the
-machine behind a stack trace. Which also means an older interpreter has no push
-gate at all: see [Check the interpreter](#check-the-interpreter-before-you-trust-the-gate).
+## Walkthrough
 
-> Not on PyPI yet. When it is published, `uv tool install hq-cli` and
-> `pipx install hq-cli` will be the one-line install; until then the name
-> resolves to nothing, so use the clone above.
+This takes about five minutes. You need a clone of a project repository whose
+`origin` remote is on GitHub. The examples call the project
+`your-org/storefront` and the head office `your-org/hq-office`. Use your own
+names.
 
-`bin/hq` is a thin wrapper over the `hq` package in `src/`. `hq install`
-symlinks it from THIS clone into your bin dir, so `git pull` here is the
-upgrade with no reinstall step. It links and nothing else: it needs no
-configured head office, and it never assumes your head office repo contains a
-copy of hq. The cache clone of the office is made lazily, by the first command
-that actually reads the office, on whatever branch that repo calls default.
+1. Create the head office. Keep it private: anyone who can read it can read
+   all the mail.
 
-## Configure
+   ```bash
+   gh repo create your-org/hq-office --private
+   ```
 
-Nothing in the source names an organisation. Point `hq` at your own head
-office once:
+2. Point hq at it, and name yourself as the owner:
 
-```sh
-hq init --repo your-org/agent-hq --owner alice
-```
+   ```bash
+   hq init --repo your-org/hq-office --owner alice
+   ```
 
-That writes `${XDG_CONFIG_HOME:-~/.config}/hq/config.toml`:
+   ```text
+   hq configured: /home/you/.config/hq/config.toml
+     repo  your-org/hq-office
+     owner alice
+   ```
 
-```toml
-repo = "your-org/agent-hq"
-owner = "alice"                  # the sovereign; empty means nobody is
-bot_name = "hq"                  # author of claims commits
-bot_email = "hq@users.noreply.github.com"
-# home = "~/.agent-hq"           # state and the cache clone
-# bin_dir = "~/.local/bin"       # where `hq install` links the CLI
-# clone_url_template = "https://github.com/{repo}.git"
-```
+3. Start a session. hq keeps one name per session, and it tells sessions apart
+   by a session key from the environment (see
+   [Names and sessions](#names-and-sessions)). In a plain terminal, set one
+   yourself:
 
-`repo` is the head office. `owner` is the one human who works hands-on: claims
-warn them rather than blocking them. Leave `owner` empty and nobody has that
-power, which is the right default for a team.
+   ```bash
+   export HQ_SESSION_ID="terminal-$$"
+   hq hello alice --task "try hq"
+   hq whoami
+   ```
 
-The environment overrides the file, key by key, for a spawner that configures
-one lane or one command inline:
+   ```text
+   hello alice: session #1 registered; identity saved for session terminal-4242
+   whoami: alice  (source: session file; session terminal-4242 from HQ_SESSION_ID)
+   ```
 
-| variable | overrides |
-| --- | --- |
-| `HQ_REPO` | `repo` |
-| `HQ_OWNER` | `owner` |
-| `HQ_BOT_NAME` | `bot_name` |
-| `HQ_BOT_EMAIL` | `bot_email` |
-| `HQ_HOME` | `home` |
+   `hq hello` opened the issue `session: alice` in the head office. `hq who`
+   lists the live sessions.
 
-With neither set, every command that needs the repo stops with one line telling
-you to run `hq init`. The exception is `check-push`, the push gate: an
-unconfigured `hq` knows of no claim, so it warns and lets the push through,
-exactly as it does when the network is down. A hook that outlived its config
-must not block every push in the repo.
+4. In your project clone, make a branch and claim it:
 
-**A public head office makes every message public.** Mailboxes are issues and
-messages are issue comments, so anyone who can read the repo can read the mail,
-the session registry and the full claims history, including whatever your
-agents paste into a message while debugging. Use a private repository for your
-head office unless you actually want an audit trail the world can read.
+   ```bash
+   cd ~/src/storefront
+   git switch -c feature/signup
+   hq claim feature/signup --note "signup page"
+   ```
 
-## Concepts
+   ```text
+   claimed your-org/storefront#feature/signup for alice until 2026-10-02T09:00:00Z
+   ```
 
-- **Session registry.** Every agent session, interactive or headless, says
-  `hq hello <name>` when it starts. Names are ASSIGNED by the owner, never
-  invented and never borrowed: a codename is per SESSION, so one found in
-  shared project memory belongs to ANOTHER agent. That happened on day one,
-  when a fresh session adopted a name it read in memory. Valid sources are only
-  the owner in the CURRENT conversation, or the spawner-set
-  `git config hq.agent` / `HQ_AGENT` of a dedicated worktree. An agent without
-  a name from one of those must ask the owner, and asking is the handshake that
-  proves it knows this protocol. `hq hello` warns when a same-named session was
-  live minutes ago. Live sessions are open issues labelled `session`; a session
-  that stops heartbeating goes stale by `updated_at` (three hours, in `hq who`
-  and the dashboard). Any `hq` command that acts under a name (`msg`, `claim`,
-  `release`, `inbox`, `inbox --peek` included) keeps that session live: it
-  posts the same heartbeat `hq hello` posts, at most once an hour per name per
-  machine even when several commands start at once (the stamp under
-  `presence.d/` in the state dir is re-read and rewritten under a lock before
-  the heartbeat goes out, and a heartbeat that then fails still waits the
-  hour). A fresh stamp costs no call at all, a name with no open session issue gets nothing
-  (`hq hello` is still what registers a session). The heartbeat goes out from
-  a detached child process (`hq _heartbeat`, hidden), so the command never
-  waits for GitHub, and a heartbeat that fails is silent and never fails the
-  command. So an agent that says hello once in the morning and works all day
-  does not look gone by lunch.
+   A claim lasts 24 hours unless you pass `--ttl HOURS`. `hq claims` lists all
+   live claims.
 
-- **Branch claims.** Before working on a branch, an agent runs
-  `hq claim <branch>`. Claims are JSON files on the `claims` branch of the head
-  office repo, and git push is the compare-and-swap: two agents claiming at
-  once cannot both win, because the second push is rejected and the loser is
-  shown the owner. A pre-push hook in each worktree refuses a push to a branch
-  claimed by someone else.
+5. Install the push guard in this clone. Then push as a second agent, bob:
 
-- **Messages.** `hq msg <agent> "text"` comments on that agent's inbox issue
-  (label `inbox`); `hq inbox` reads yours. Broadcast goes to the issue titled
-  `inbox: all`.
+   ```bash
+   hq hook .
+   HQ_AGENT=bob git push origin feature/signup
+   ```
 
-- **Identity.** The commit AUTHOR on work branches is
-  `<agent> (agent) <you+<agent>@example.com>`. Squash-merge makes the permanent
-  main-history author the PR author, so the target repo's history stays clean
-  while branch work stays attributable.
+   ```text
+   pre-push guard installed: /home/you/src/storefront/.git/hooks/pre-push
+   hq: PUSH BLOCKED - your-org/storefront#feature/signup is claimed by alice until 2026-10-02T09:00:00Z.
+       Coordinate first:  hq msg alice "..."   (or have alice run: hq release feature/signup)
+   ```
 
-## Identity, the hard part
+   `HQ_AGENT` sets the name for one command. The guard refused bob's push, so
+   git sent nothing. Your own push, as alice, goes through.
 
-Four incidents, all the same shape: `hq` signed one agent's work with another
-agent's name. Each fix is in `tests/test_identity.py`, and each is a rule worth
-stealing even if you never run this tool.
+6. Send bob a message, and read it as bob:
 
-Resolution order, everywhere (CLI and hook): `HQ_AGENT` env, then a genuinely
-worktree-scoped `git config --worktree hq.agent`, then **this session's own
-file** (`<home>/identity.d/<session>`), then the clone-wide `git config
-hq.agent`, and last the machine-wide `<home>/identity`.
+   ```bash
+   hq msg bob "feature/signup is mine until tonight"
+   HQ_AGENT=bob hq inbox
+   ```
 
-**A name belongs to a session, not to a machine.** `hq hello` writes a file
-keyed by this session's key, so a second `hq hello` on the same machine no
-longer renames every other live session. The machine-wide file survives for
-callers that export no session key at all, and `hq` reads it only when it is
-not demonstrably somebody else's: it records which session wrote it, and a
-different session gets a refusal instead of a wrong signature.
+   ```text
+   sent to bob (inbox issue #2)
+   --- 2026-10-01T09:05:00Z
+   **from alice** (2026-10-01T09:05:00Z):
+   feature/signup is mine until tonight
 
-```
-hq: this machine's identity file belongs to another session (written by
-session 1f4c...), so hq will not sign your work with 'alice'.
-Run `hq hello <your-name>` in THIS session, or prefix with HQ_AGENT=<name>.
-```
+   [read cursor for 'bob' on this machine advanced to 2026-10-01T09:05:10Z; `hq inbox --recent 6` re-shows recent mail without moving it]
+   ```
 
-This is why mail once arrived headed `from alice` while its body said "I'm
-bob": both ran on one machine, and the last `hello` won. Failing loudly beats
-signing another agent's name, including in the pre-push guard, where an
-unresolvable identity blocks the push rather than mistaking someone else's
-claimed branch for its own.
+   Reading moved bob's read cursor, so the next `hq inbox` as bob shows nothing
+   new. See [Mail](#mail).
 
-**A spawner must export `HQ_SESSION_ID`.** That is the contract, and the only
-variable in the list that `hq` owns. `hq` reads, in order, `HQ_SESSION_ID`,
-`CLAUDE_CODE_SESSION_ID`, `TERM_SESSION_ID`, `TMUX_PANE`, and the last three
-belong to somebody else. `CLAUDE_CODE_SESSION_ID` is not a documented interface
-of that runtime: it works today and may be renamed tomorrow without warning,
-and the day it goes away every agent silently drops to a terminal id or to no
-key at all. `TERM_SESSION_ID` and `TMUX_PANE` identify a terminal, not a
-session, so two agents sharing one pane look like one agent. Set
-`HQ_SESSION_ID` to anything stable and unique per session, ideally the
-spawner's own run id, and none of that can reach you.
+7. Look back, then finish:
 
-**Check your identity before you act.** `hq whoami` prints the name `hq` would
-sign with, the source it came from and which variable supplied the session key,
-and it exits 1 when that name is not this session's own. It is offline and
-instant, so make it the step before any action that writes under a name.
+   ```bash
+   hq feed
+   hq release feature/signup
+   hq bye
+   ```
 
-**Only three sources belong to this session:** `HQ_AGENT`, a truly
-worktree-scoped `git config --worktree hq.agent`, and this session's own file.
-The clone-wide `git config hq.agent` and the machine-wide file are shared with
-every other session on the machine, so they answer reads but `hq` REFUSES to
-act on them: `claim`, `release`, `msg`, `inbox` and the office half of `bye` all
-stop with an error naming the source. The hole this closes was found on
-2026-09-16: a session that
-had just run `hq bye` lost its own file, fell through to shared state, and its
-next `hq bye` closed a different live agent's session.
-
-`hq bye` does its local cleanup first, before anything that needs the head
-office and before the identity rule above, so a machine that was never
-configured cannot keep a name whose session has ended. Removing a local file
-signs nothing, so it does not need a name `hq` may act under. It removes both
-files `hq hello` wrote, the session one and the machine-wide one, and only when
-they still name this session: the machine-wide file is shared, so another
-agent's name there is not this goodbye's to take. On a machine that exports no
-session id there is nowhere to write but that shared file, which is why a
-keyless `hq bye` clears it and then says the registry issue is still open,
-naming the one command that closes it: `HQ_AGENT=<name> hq bye`. A config file
-`hq` cannot read does not stop that cleanup either: where the state dir is
-comes from `HQ_HOME` or the default, so the files go and the broken config is
-the exit line.
-
-**`git config hq.agent` is not per-worktree** unless
-`extensions.worktreeConfig` is enabled. Plain `git config` writes `.git/config`,
-which every linked worktree of the clone shares, and git documents `--worktree`
-as a synonym for `--local` while that extension is off. One lane setting it
-therefore renamed every agent working anywhere in that clone: the second shape
-of the same bug, and the reason it kept coming back after the identity file
-took the blame. Measured on a shared checkout carrying `hq.agent = alice`, a
-session that had said `hq hello bob` still resolved to alice in every worktree
-of that clone. `hq` now trusts `--worktree` only with the extension on, a
-session that said hello outranks the clone-wide value, and the pre-push hook
-forces only a genuinely worktree-scoped name. Give a lane its own name with
-`git config extensions.worktreeConfig true && git config --worktree hq.agent <name>`,
-or simply say `hq hello` in the session.
-
-## Reading mail consumes it
-
-`hq inbox` moves a read cursor that is per **name** per **machine**. The mail it
-prints is gone from every later `hq inbox` by any process signing as that name
-on that machine. Two agents lost an afternoon of mail this way (2026-09-14): a
-watcher polled `hq inbox` and discarded the output, and a second call in the
-same step read "inbox empty".
-
-- Watchers and scripts use `hq inbox --peek` (no cursor move) or read the
-  mailbox issue directly
-  (`gh api repos/<org>/<repo>/issues/<n>/comments?since=<ts>`).
-- Never call `hq inbox` twice in one step.
-- When a teammate says you are silent: `hq inbox --recent 6` re-shows the last
-  six hours without moving the cursor.
-- A plain read prints where the cursor moved to, so the consumption is never
-  silent.
-
-Two limits keep a mailbox readable. A name nobody has read as before is a NEW
-session with no backlog to catch up on, so a first read shows the last 24 hours
-rather than every broadcast ever sent: unbounded, that was 191 KB one loud
-night, past the 128 KB a single argv string holds, and spawners that inline
-mail into a prompt refused to start lanes. And a single read is capped at 40 KB,
-dropping from the OLD end, because the newest mail is the mail that still
-changes what you do. Truncation always says so, and `hq inbox --all` lifts both.
-
-## The push gate
-
-`hq hook <dir>` installs a pre-push guard in a worktree. It asks
-`hq check-push` before every push and refuses a branch claimed by someone else.
-
-Re-running it upgrades an older hq guard in place, which is how a worktree picks
-up a fixed one. A `pre-push` hook hq did not write is never replaced silently -
-it is somebody's guard, and losing one surfaces months later as a check that
-quietly stopped running - so hq refuses in one line and `--force` overrides.
-
-Fail-open is for NOT KNOWING. When the head office is unreachable and the local
-cache holds no claim for the branch, the push goes through with a loud warning,
-because offline hands-on work must never be blocked by an absence of
-information. But a claim already in the cache IS knowing: it is positive
-evidence that the branch belongs to someone else, and an outage does not make it
-less true, so that push is refused. The guard used to wave exactly those pushes
-through, which is the one case it exists for.
-
-**Exit 1 means one thing: a live claim by somebody else.** The hook reads any
-non-zero exit as a refused push, so everything else `check-push` might hit is a
-warning and an open gate: a config file it cannot read, an interpreter too old
-to start on, an unreachable office, an argument it cannot parse, or anything
-nobody foresaw. A gate that could not run knows of no claim, and not knowing is
-never evidence of one. That is also why the hook passes the branch name after
-`--`: `refs/heads/-weird` is a ref git pushes like any other, and without the
-separator the CLI read it as an option and refused the push.
-
-### A config file the gate cannot read
-
-The same rule applies to a broken `config.toml`: the gate warns and does not
-refuse the push, because a stray character in a config file is not evidence of a
-claim, and a gate that dies on one freezes every push on the machine.
-
-Two things still hold on that machine, and both are worth knowing:
-
-- **The environment carries the gate past the broken file.** `HQ_REPO` is read
-  whatever the file does, so with it set the office is still asked and a live
-  claim still blocks. Set it in the spawner and an unreadable file costs you
-  nothing.
-- **Otherwise the gate falls back to the local claims cache**, and a claim
-  already on disk still blocks: a config hq cannot parse is not permission. But
-  `home` is a config file key, so if that file is where your state dir was named,
-  hq cannot honour it and searches `~/.agent-hq` instead. It says so rather than
-  reporting that empty directory as an absence of claims:
-
-```
-hq: the local cache under /home/a/.agent-hq holds no live claim by another
-    agent for acme/thing#lane either; pushing unverified (fail-open)
-    (a `home` set in that config file could not be read, so
-    /home/a/.agent-hq may not be this machine's state dir; set HQ_HOME if the
-    gate is to be sure it read the right cache)
-```
-
-On a machine that never had a default state dir, that line says
-`/home/a/.agent-hq, which does not exist, may not be this machine's state dir`,
-which settles it: a directory hq never created holds no cache, so the silence
-above is not an answer about that branch at all.
-
-Set `HQ_HOME` on any machine whose state dir is not the default and the gate
-reads the right cache no matter what happens to the file.
-
-### Check the interpreter before you trust the gate
-
-**A machine whose `python3` is older than 3.11 has no push gate.** hq will not
-run there, and by the rule above a gate that could not run knows of no claim, so
-`check-push` warns and lets the push through. That is not a one-off warning
-somebody acknowledges once: it happens on EVERY push on that machine, for as
-long as that interpreter is the one the hook finds, and the pushes it waves
-through include pushes to branches another agent has claimed.
-
-This is a deliberate trade. Two TOML parsers disagreed about malformed input, so
-the same config file failed open on one python and blocked every push on
-another; one parser is worth more than two supported versions. The cost is that
-the floor is now a deployment requirement rather than a nicety, and it is easy
-to miss: **Ubuntu 22.04 LTS ships python 3.10**, and so do plenty of build
-images and long-lived VMs.
-
-So before you rely on the guard, check the interpreter on every machine that
-pushes:
-
-```sh
-python3 --version                     # 3.11 or newer, or that machine is ungated
-hq check-push -- "$(git remote get-url origin)" some-branch
-```
-
-The second line tells you which state the machine is in. On an older python it
-answers with the warning below and exits 0, which is exactly what it will do for
-every real push on that machine:
-
-```
-hq: WARNING - needs python 3.11 or newer, this is python 3.10.20 (...);
-run it with a newer interpreter, or install it with
-`uv tool install --from . hq-cli`; pushing unverified (fail-open)
-```
-
-## Layout
-
-- `src/hq/` : the CLI, split by what it coordinates. `config` (where hq is
-  pointed), `identity` (who this session is), `claims` (the compare-and-swap
-  branch and its push gate), `mail`, `registry`, `presence` (the hourly
-  heartbeat every name-acting command sends), `github`, `hook`, `cli`.
-- `bin/hq` : thin wrapper, for running a clone with no install at all, and the
-  file `hq install` symlinks into your bin dir. It is THIS clone's wrapper, not
-  a copy of hq inside the head office: installing hq and caching the office are
-  two different jobs.
-- `tests/` : pytest, no network. `pytest` runs them; CI runs them on 3.11 and
-  3.12.
-- `claims` branch : `claims/<repo>/<branch-slug>.json`, one file per claim.
-- Issues : `session: <name>` (registry), `inbox: <name>` (mailboxes).
+   `hq feed` prints the last 24 hours of mail, claims and sessions as one
+   timeline. `hq release` gives the branch back. `hq bye` clears this
+   session's name and closes its issue.
 
 ## Commands
 
-```
-hq init --repo O/N [--owner NAME]  write the config file
-hq install                         symlink this clone's bin/hq into the bin dir
-hq hello NAME [--task T]           register this session
-hq bye                             close this session's registry issue
-hq who                             list live sessions
-hq whoami                          the name hq would sign with, and where it came from
-hq claim BRANCH [--repo O/N] [--ttl H] [--note T]
-hq release BRANCH [--repo O/N] [--force]
-hq claims [--repo O/N]             list active claims
-hq feed [--hours H]                the whole office as one timeline
-hq msg NAME TEXT                   message an agent ('all' broadcasts)
-hq inbox [--peek] [--recent H] [--all]
-hq hook DIR [--force]              install the pre-push guard (--force
-                                   replaces a hook hq did not write)
-hq check-push REPO BRANCH          used by the hook; exit 1 = blocked
+| Command | What it does |
+| --- | --- |
+| `hq init --repo OWNER/NAME` | Write the config file. |
+| `hq install` | Link this clone's `bin/hq` into your bin directory. |
+| `hq hello NAME` | Register this session under a name. |
+| `hq whoami` | Show the name hq would use, and where it came from. |
+| `hq who` | List the sessions. |
+| `hq bye` | End this session. |
+| `hq claim BRANCH` | Claim a branch. |
+| `hq release BRANCH` | Give a claim back. |
+| `hq claims` | List the live claims. |
+| `hq hook DIR` | Install the push guard in a clone. |
+| `hq check-push REPO BRANCH` | The check the push guard runs. |
+| `hq msg NAME TEXT` | Send a message. |
+| `hq inbox` | Read your mail. |
+| `hq feed` | Show the head office as one timeline. |
+
+`hq --help` lists them all, and `hq COMMAND --help` shows the options of one
+command. The sections below give the details.
+
+### Sessions
+
+**`hq hello NAME [--task TEXT]`** registers this session under NAME. hq
+lowercases the name, and turns each run of characters other than letters,
+digits, `.`, `_` and `-` into one `-`. It saves the name for this session on
+this machine. It opens the issue `session: NAME` in the head office, or reuses
+the open one, and posts a heartbeat comment on it.
+
+Use the name the owner gave this session. A name you find in shared notes or
+project memory belongs to another session. If a session with the same name was
+active in the last three hours, hq warns you:
+
+```text
+hq: WARNING - a session named 'alice' was live 12 minutes ago. If that was not you, you are taking another agent's name (did it come from shared project memory?) - stop and ask the owner for YOUR codename.
 ```
 
-## Non-goals
+**`hq whoami`** prints the name hq would use, where the name came from, and the
+session key. It exits 1 when there is no name, or when the name comes from a
+source that other sessions share (see [Names and sessions](#names-and-sessions)).
+It needs no network, so run it before anything that acts under a name.
 
-Not a CI system. Not a task board: the issues in your target repos remain the
-board. Not a chat product: the feed is a timeline, not a channel to sit in.
+**`hq who`** lists the open session issues, most recently updated first. Each
+line shows the name, `live` or `STALE`, the hours since the last update, and
+the machine the session started on:
+
+```text
+alice              live  updated  0.2h ago  machine: build-box (you)
+```
+
+A session is `STALE` after three hours without an update.
+
+**`hq bye`** ends this session. First it removes this session's name from this
+machine. Then it closes the session issue with a `bye` comment. If the name
+comes from a shared source, hq does not close the issue. It prints the command
+that does instead: `HQ_AGENT=<name> hq bye`.
+
+### Claims and the push guard
+
+**`hq claim BRANCH [--repo OWNER/NAME] [--ttl HOURS] [--note TEXT]`** claims
+BRANCH for this session.
+
+- hq finds the repository from the `origin` remote of the current directory.
+  It reads GitHub remotes over HTTPS or SSH, including SSH host aliases from
+  `~/.ssh/config`. `--repo` names the repository instead.
+- A claim lasts 24 hours unless you pass `--ttl HOURS`.
+- `--note` is shown next to the claim in `hq claims`.
+- Claiming a branch you already hold renews your claim.
+
+If another name holds a live claim on the branch, hq stops:
+
+```text
+hq: your-org/storefront#feature/signup is CLAIMED by bob until 2026-10-02T09:00:00Z - talk first: hq msg bob "..."
+```
+
+Each claim is a JSON file on the `claims` branch of the head office. Its path
+is `claims/<repo>/<branch>.json`, where each run of characters other than
+letters, digits, `.`, `_` and `-` becomes `-`. For example:
+`claims/your-org-storefront/feature-signup.json`. The first claim creates the
+`claims` branch.
+
+hq keeps its own clone of the head office in the state directory: the
+**cache**. It writes each change to the claims as one commit there, and pushes
+it. The push decides who got there first. When two sessions
+claim the same branch at once, one push wins. The other push is rejected; hq
+fetches again, sees the winner's claim, and stops with the message above.
+
+If the push gets no answer within 30 seconds, hq cannot know whether the claim
+landed, and says so:
+
+```text
+hq: the claims push did not answer within 30s - it may or may not have landed. Run `hq claims` to see which, before retrying
+```
+
+**`hq release BRANCH [--repo OWNER/NAME] [--force]`** deletes the claim. The
+name that holds it, and the owner, can release it. `--force` releases a claim
+that belongs to another name. An expired claim blocks nothing, so you do not
+have to release it.
+
+**`hq claims [--repo OWNER/NAME]`** lists the live claims: repository, branch,
+holder, expiry and note.
+
+**`hq hook DIR [--force]`** installs the push guard, a git `pre-push` hook, in
+the clone that contains DIR. Git shares hooks between all worktrees of a
+clone, so one install covers them all. Run `hq hook` again to upgrade the
+guard; hq knows its own guard by the line `agent-hq pre-push guard`. hq does
+not replace a `pre-push` hook that it did not write, unless you pass
+`--force`:
+
+```text
+hq: /home/you/src/storefront/.git/hooks/pre-push already exists and hq did not write it - overwriting it would remove that guard without a word. Move it aside, or call hq from it, or pass --force to replace it
+```
+
+For every branch you push, the guard runs
+`hq check-push -- <origin URL> <branch>`, and refuses the push when that
+command fails. Some details:
+
+- The guard looks for `hq` on your `PATH`, then at `~/.local/bin/hq`. If it
+  finds neither, it lets every push through without a word.
+- It checks claims for the repository that `origin` names, whichever remote
+  you push to. A clone without an `origin` remote is not guarded.
+- It checks the push under this session's name (see
+  [Names and sessions](#names-and-sessions)).
+
+**`hq check-push [--] REPO BRANCH`** is the check the guard runs. REPO is a
+remote URL or `OWNER/NAME`. It exits 1 only when another name holds a live
+claim on the branch and you are not the owner. See
+[How the push guard decides](#how-the-push-guard-decides).
+
+### Mail
+
+**`hq msg NAME TEXT`** sends TEXT to NAME, lowercased like the names of
+`hq hello`. The message is a comment on the issue `inbox: NAME` in the head
+office. hq opens that issue if it does not
+exist, so check the spelling: a mistyped name gets a mailbox nobody reads.
+`hq msg all "..."` writes to `inbox: all`, which every session reads.
+
+**`hq inbox [--peek] [--recent HOURS] [--all]`** shows your mail: new comments
+on `inbox: <your name>` and on `inbox: all`.
+
+A plain `hq inbox` **consumes** the mail it shows. It moves a read cursor that
+is kept per name and per machine. After that, no `hq inbox` by any process
+using the same name on this machine shows those messages again. When a read
+shows mail, it also prints where the cursor moved to.
+
+- `--peek` shows new mail without moving the cursor. Use it in watchers and
+  scripts.
+- `--recent HOURS` shows the last HOURS of mail, whatever the cursor says, and
+  does not move the cursor. If someone says you missed a message, run
+  `hq inbox --recent 6`.
+- `--all` shows every message ever sent, with no size limit. On its own, it
+  moves the cursor like a plain read.
+
+Two limits keep the output small. The first read of a name on a machine shows
+only the last 24 hours. And one read shows about 40,000 bytes at most: hq drops
+the oldest messages first, and says how many it left out. It always shows the
+newest message, even a longer one. `--all` lifts both limits.
+
+Do not run a plain `hq inbox` twice in one step. The second call finds nothing.
+
+**`hq feed [--hours HOURS]`** prints one timeline of the head office: messages,
+claim changes and sessions, for the last 24 hours or the last HOURS. It is
+meant for a person catching up:
+
+```text
+01 Oct 09:01  [claim] claim your-org/storefront#feature/signup by alice
+01 Oct 09:05  [mail] alice -> bob: feature/signup is mine until tonight
+01 Oct 09:05  [session] alice active
+```
+
+### Setup
+
+**`hq init --repo OWNER/NAME [--owner NAME] [--bot-name NAME] [--bot-email EMAIL] [--home DIR] [--force]`**
+writes the config file (see [Configuration](#configuration)). Then it reads the
+file back to check it. It does not replace an existing file unless you pass
+`--force`. It needs no network.
+
+**`hq install`** links this clone's `bin/hq` into your bin directory,
+`~/.local/bin` unless you set `bin_dir`. It needs no configured head office.
+If you installed hq with uv or pipx, there is nothing to link, so it prints the
+upgrade commands instead.
+
+## Configuration
+
+`hq init` writes `~/.config/hq/config.toml`, or
+`$XDG_CONFIG_HOME/hq/config.toml` when `XDG_CONFIG_HOME` is set. hq reads the
+file again on every command. Keys can sit at the top level or in an `[hq]`
+table.
+
+```toml
+repo = "your-org/hq-office"
+owner = "alice"
+bot_name = "hq"
+bot_email = "hq@example.invalid"
+# home = "~/.agent-hq"
+# bin_dir = "~/.local/bin"
+# clone_url_template = "https://github.com/{repo}.git"
+```
+
+| Key | Default | Variable | What it is |
+| --- | --- | --- | --- |
+| `repo` | none | `HQ_REPO` | The head office, as `OWNER/NAME`. Every command except `init`, `install`, `whoami`, `hook` and `check-push` needs it. |
+| `owner` | nobody | `HQ_OWNER` | The person in charge. A claim never blocks this name's pushes: hq prints a note ending `sovereign push allowed` instead. This name may also release any claim. |
+| `bot_name` | `hq` | `HQ_BOT_NAME` | Author name of the commits on the `claims` branch. |
+| `bot_email` | `hq@example.invalid` | `HQ_BOT_EMAIL` | Author email of those commits. |
+| `home` | `~/.agent-hq` | `HQ_HOME` | The state directory. |
+| `bin_dir` | `~/.local/bin` | none | Where `hq install` puts the link. |
+| `clone_url_template` | `https://github.com/{repo}.git` | none | How hq clones the head office. `{repo}` becomes the value of `repo`. Use `git@github.com:{repo}.git` if git on this machine talks to GitHub over SSH. |
+
+Environment variables override the file, key by key. A program that starts
+agents (a spawner) can use them to configure one agent, or one command. An
+empty `HQ_OWNER=` means nobody is the owner for that command.
+
+**About `bot_email`.** hq pushes the claims commits to the head office on
+GitHub, and GitHub links a commit to the account that owns its author email.
+The default address uses `.invalid`, a reserved domain name that can never be
+registered, so GitHub links these commits to nobody. Set your own address if
+you want them linked to your account. hq also reads
+`hq@users.noreply.github.com`, which older config files may contain, as the
+default: that address belongs to another GitHub login.
+
+**Keep the head office private.** Mailboxes are issues, and messages are issue
+comments. Anyone who can read the repository can read all the mail, the
+sessions and the whole claims history. That includes anything an agent pastes
+into a message.
+
+### The state directory
+
+hq keeps its local state in `~/.agent-hq`, or in the directory that `home` or
+`HQ_HOME` names:
+
+| Path | What it holds |
+| --- | --- |
+| `repo/` | The cache: hq's clone of the head office, for claims. hq makes it on first use. |
+| `claims.index` | A scratch file that hq uses to build claims commits. |
+| `identity.d/<session key>` | The name of each session on this machine. |
+| `identity` | The name from the last `hq hello` on this machine. |
+| `identity.session` | Which session wrote `identity`. |
+| `lastread` | The `hq inbox` read cursors, one per name. |
+| `presence.d/`, `presence.lock` | When this machine last sent a heartbeat for each name. |
+
+## Names and sessions
+
+A name belongs to a session, not to a machine. Several agents often share one
+machine. If they shared one name file, the last `hq hello` would rename all the
+others, and hq would sign one agent's work with another agent's name.
+
+### The session key
+
+hq tells sessions apart by a session key. It takes the key from the first of
+these environment variables that is set:
+
+1. `HQ_SESSION_ID`. This is hq's own variable. A spawner should set it for
+   each agent it starts, to a value unique to that session, such as its own
+   run ID.
+2. `CLAUDE_CODE_SESSION_ID`, set by Claude Code.
+3. `TERM_SESSION_ID`, set by some terminal programs.
+4. `TMUX_PANE`, set by tmux.
+
+The last three belong to other programs. The last two identify a terminal,
+not an agent: two agents in one terminal pane get one key. `hq whoami` shows
+which variable gave the key.
+
+When none of the four is set, the session has no key. `hq hello` then can only
+write the machine-wide name file, and hq will not act under a name from that
+file. Set `HQ_SESSION_ID`, or put `HQ_AGENT=<name>` in front of each command.
+
+### Where a name comes from
+
+hq looks for the name in this order, and uses the first it finds:
+
+1. `HQ_AGENT` in the environment. It sets the name for one command or one
+   process.
+2. `git config --worktree hq.agent`, but only when the clone has
+   `extensions.worktreeConfig` turned on.
+3. This session's own file, `identity.d/<session key>` in the state directory.
+   `hq hello` writes it.
+4. The clone-wide `git config hq.agent`.
+5. The machine-wide file `identity` in the state directory, from the last
+   `hq hello` on this machine. hq skips it when another session wrote it.
+
+The first three belong to this session. The last two are shared by every
+session on the machine, so a name from them may be another agent's. hq still
+shows such a name in `hq whoami`, with a warning. But it will not act under
+it: `hq claim`, `hq release`, `hq msg` and `hq inbox` stop with an error that
+names the source, and `hq bye` does not close the session issue.
+
+The push guard differs in two ways. It puts a name from source 2 ahead of
+`HQ_AGENT`. And it uses whatever name hq finds, shared or not. When it finds no
+name at all, any claim blocks the push.
+
+Names are lowercase: `hq hello` lowercases them for you. If you set `HQ_AGENT`
+yourself, use the same lowercase name.
+
+### One name per worktree
+
+To give each worktree of a clone its own name, turn on per-worktree config
+once, then set the name in each worktree:
+
+```bash
+git config extensions.worktreeConfig true
+git config --worktree hq.agent <name>
+```
+
+Without the extension, git treats `--worktree` like `--local` (or refuses it,
+when the clone has linked worktrees). `--local` writes the clone-wide
+`.git/config`, which every worktree of the clone shares.
+
+### Heartbeats
+
+`hq who` counts a session as live while its issue was updated in the last three
+hours. So any command that acts under this session's own name refreshes that
+issue: `hq claim`, `hq release`, `hq msg` and `hq inbox`, `--peek` included. It
+does this at most once an hour per name per machine. A background process
+posts the heartbeat, so the command never waits for GitHub, and never fails
+because of it. A name with no open session issue gets no heartbeat: only
+`hq hello` registers a session.
+
+## How the push guard decides
+
+`hq check-push` exits 1 for one reason only: another name holds a live claim
+on the branch you push, and you are not the owner. The guard turns exit 1 into
+a refused push.
+
+In every other case, hq prints a warning and lets the push through. The rule
+is simple: not knowing about a claim is not evidence of one. This happens
+when:
+
+- no head office is configured;
+- the head office cannot be reached, and the cache holds no claim on the
+  branch by another name;
+- the config file cannot be read or parsed;
+- the machine's `python3` is older than 3.11 (see below);
+- hq cannot read its own arguments;
+- anything else goes wrong that hq did not foresee.
+
+A claim that hq already knows about still blocks. When the head office cannot
+be reached, hq checks the cache. If the cache holds a live claim by another
+name, the push is refused, and the message says the claim came from the local
+cache.
+
+**A config file hq cannot read.** hq still reads the environment. With
+`HQ_REPO` set, the guard asks the head office as usual. Without it, the guard
+can only check the local cache. And if your state directory is not the default,
+the guard cannot know where it is: `home` is set in the broken file. hq says
+so:
+
+```text
+    (a `home` set in that config file could not be read, so /home/you/.agent-hq may not be this machine's state dir; set HQ_HOME if the gate is to be sure it read the right cache)
+```
+
+Set `HQ_HOME` on any machine whose state directory is not the default. Then
+the guard reads the right cache whatever happens to the file.
+
+**An old Python.** If you linked the clone with `hq install`, or run
+`python3 bin/hq`, hq runs on the machine's `python3`. If that is older than
+3.11, hq cannot start. The guard then lets every push through, with this
+warning each time:
+
+```text
+hq: WARNING - needs python 3.11 or newer, this is python 3.10.12 (/usr/bin/python3); run it with a newer interpreter, or install it with `uv tool install --from . hq-cli`; pushing unverified (fail-open)
+```
+
+Ubuntu 22.04, for example, ships Python 3.10. An `hq` installed with uv or pipx
+uses the Python it was installed with, which is always 3.11 or newer. Check
+each machine that pushes:
+
+```bash
+python3 --version
+hq check-push -- "$(git remote get-url origin)" some-branch
+```
+
+When the guard works and nobody holds `some-branch`, the second command prints
+nothing.
+
+## Troubleshooting
+
+### No head office is configured
+
+```text
+hq: no head office repo configured - run `hq init --repo owner/name` (or set HQ_REPO); config file: /home/you/.config/hq/config.toml
+```
+
+Run `hq init --repo OWNER/NAME`, or set `HQ_REPO`.
+
+### hq will not act under your name
+
+```text
+hq: 'alice' comes from the machine file, which every session on this machine shares, so hq will not act under it. Run `hq hello <your-name>` in THIS session, or prefix the command with HQ_AGENT=<your-name>. `hq whoami` shows what hq currently thinks you are.
+```
+
+The same message can name `the clone config` instead. Two more messages mean
+the same thing:
+
+```text
+hq: this machine's identity file belongs to another session (written by session 1f4c2a), so hq will not sign your work with 'alice'. Run `hq hello <your-name>` in THIS session, or prefix the command with HQ_AGENT=<your-name>.
+hq: no identity - run `hq hello <name>` first (or set HQ_AGENT)
+```
+
+This session has no name of its own. Run `hq hello <name>` in this session,
+with a session key set (see [The session key](#the-session-key)). Or put
+`HQ_AGENT=<name>` in front of the command. `hq whoami` shows what hq sees.
+
+If `hq hello` warns that a session with your name was live a few minutes ago,
+another session may be using that name. Stop and ask the owner for your own.
+
+### gh fails
+
+```text
+hq: `gh issue list` failed (...) - check `gh auth status` and that the head office repo exists and is visible to this login
+```
+
+The text in brackets is what `gh` said. Run `gh auth status`. Check that this
+login can see the head office, and that `repo` names it correctly. If `gh` is
+not installed, hq says so, and you need to install the GitHub CLI and run
+`gh auth login`.
+
+### git cannot reach the head office
+
+```text
+hq: cannot reach your-org/hq-office (...) - try again
+hq: WARNING - cannot reach your-org/hq-office and the local cache holds no live claim by another agent for your-org/storefront#feature/signup; pushing unverified (fail-open)
+```
+
+Claims travel over git, not `gh`. hq fetches them from the URL that
+`clone_url_template` gives. Check that git on this machine can fetch from that
+URL. The second message means that a push went through unchecked.
+
+### A claim did not go through
+
+```text
+hq: the claims push did not answer within 30s - it may or may not have landed. Run `hq claims` to see which, before retrying
+```
+
+Run `hq claims` to see whether your claim is there, before you try again.
+
+```text
+hq: the claims push failed twice - git said:
+```
+
+Read git's message below that line. If git rejected the push because the
+`claims` branch had moved, other claims landed while hq tried: run the command
+again. If git says this login may not push, give it write access to the head
+office.
+
+```text
+hq: cannot build the claims commit (...) - nothing was pushed and no claim changed; the cache clone is /home/you/.agent-hq/repo
+```
+
+hq could not write to its cache. Check that the state directory is writable
+and that git works. If the cache is broken, delete it: hq clones it again on
+the next command.
+
+### hq cannot tell which repository you mean
+
+```text
+hq: not inside a git repo with an origin remote - pass --repo owner/name
+```
+
+Run the command inside your project clone, or pass `--repo OWNER/NAME`. hq says
+`cannot parse owner/name from origin url` when `origin` is not a GitHub
+address it can read; pass `--repo` then too.
+
+### Pushes go through with no message at all
+
+The guard is not installed in this clone, or it cannot find `hq`, or the clone
+has no `origin` remote. Check all three:
+
+```bash
+cat "$(git rev-parse --git-path hooks)/pre-push"
+command -v hq || ls -l ~/.local/bin/hq
+git remote get-url origin
+```
+
+### The inbox is empty, but someone sent you mail
+
+Another process on this machine may have read it under the same name, which
+moved the cursor. Or the message went to a different name.
+`hq inbox --recent 6` shows the last six hours without moving the cursor. hq
+only reads open issues, so do not close mailbox issues.
+
+### A session shows STALE in hq who
+
+Nothing updated its issue for three hours. Any claim, release, message or
+inbox read under that session's own name refreshes it, at most once an hour.
+So does `hq hello` with the same name.
 
 ## Development
 
-```sh
-pip install -e ".[test]"   # python 3.11 or newer
-pytest
+```bash
+cd hq
+python3 -m pip install -e ".[test]"
+python3 -m pytest -q
+python3 bin/hq-selftest
 ```
+
+The tests use git and bash, and no network. CI runs them on Python 3.11 and
+3.12 ([workflow](../.github/workflows/hq-tests.yml)).
+
+- `src/hq/`: the package. `cli` (the commands), `config`, `identity`,
+  `registry` (hello, bye, who, feed), `claims` (claims and the push guard's
+  check), `hook`, `mail`, `presence` (heartbeats), `github` (the `gh` calls)
+  and `util`.
+- `bin/hq`: runs the clone without installing it. `hq install` links this file.
+- `bin/hq-selftest`: the identity checks, with no test framework.
+- `tests/`: the pytest suite.
+
+## What hq is not
+
+hq is not a task tracker: your issues and boards stay where they are. It is not
+a chat app: `hq feed` is a log to read, not a channel to sit in. And it is not a
+CI system.

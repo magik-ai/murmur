@@ -12,18 +12,24 @@ MARKER = "agent-hq pre-push guard"
 
 HOOK = """#!/usr/bin/env bash
 # agent-hq pre-push guard: refuse pushing to a branch claimed by another agent.
-# Fail-open on network trouble - offline hands-on work is never blocked.
-# Identity: per-worktree `git config hq.agent` wins (many agents share a farm
-# machine), then the HQ_AGENT env, then this session's own name, and only then
-# the machine-wide file - which hq ignores when another session wrote it, so a
+# When hq cannot tell (office unreachable and no claim in the local cache, no
+# config, an error), it warns and lets the push through.
+# Identity: a worktree-scoped `git config --worktree hq.agent` wins (many agents
+# share a farm machine), then the HQ_AGENT env, then hq's own order: this
+# session's own name, the clone-wide `git config hq.agent`, and last the
+# machine-wide file - which hq ignores when another session wrote it, so a
 # guard can never decide "this branch is mine" under a neighbour's name.
 hq_bin="$(command -v hq || echo "$HOME/.local/bin/hq")"
 [ -x "$hq_bin" ] || exit 0
 repo_url="$(git remote get-url origin 2>/dev/null)" || exit 0
-# Only a TRULY worktree-scoped value may be forced here. Plain `git config
-# hq.agent` lives in .git/config, which every linked worktree shares, so
-# exporting it would stamp one name onto every agent working in this clone.
-wt_agent="$(git config --worktree hq.agent 2>/dev/null || true)"
+# Only a TRULY worktree-scoped value may be forced here. Without
+# extensions.worktreeConfig, `git config --worktree` reads .git/config, which
+# every linked worktree of the clone shares, so forcing that value would stamp
+# one name onto every agent working in this clone.
+wt_agent=""
+if [ "$(git config --bool extensions.worktreeConfig 2>/dev/null)" = "true" ]; then
+  wt_agent="$(git config --worktree hq.agent 2>/dev/null || true)"
+fi
 export HQ_AGENT="${wt_agent:-${HQ_AGENT:-}}"
 [ -n "$HQ_AGENT" ] || unset HQ_AGENT
 while read -r _local _lsha remote _rsha; do
@@ -40,12 +46,12 @@ exit 0
 def written_by_hq(path):
     """Did hq write this hook file?
 
-    `hq hook` used to overwrite whatever `pre-push` it found. A repo with a hook
-    of its own - a linter, a secret scanner, a hook a team installs from its own
-    tooling - lost it silently, and the loss surfaced later as a check that had
-    quietly stopped running. hq's own guard, of any version, carries the marker
-    line and is still upgraded in place, so re-running `hq hook` stays the way
-    to update an old guard.
+    `hq hook` never overwrites a `pre-push` it did not write. A repo's own hook
+    - a linter, a secret scanner, a hook a team installs from its own tooling -
+    would otherwise be lost silently, and the loss would surface later as a
+    check that had quietly stopped running. hq's own guard, of any version,
+    carries the marker line and is upgraded in place, so re-running `hq hook`
+    is the way to update an old guard.
 
     A file hq cannot read is not hq's: refusing is the safe answer.
     """
@@ -58,12 +64,11 @@ def written_by_hq(path):
 def cmd_hook(args):
     """Install the guard into a worktree or clone. Every failure is one line.
 
-    This runs while a machine is being set up, usually from a script, and each
-    of the ordinary ways it fails used to end in a stack trace that named no
-    next step: a directory that does not exist (FileNotFoundError about a `cwd`
-    deep inside subprocess), a directory that is not a git repository
-    (CalledProcessError with git's own message swallowed), a machine without
-    git at all, and a hooks directory hq may not write.
+    This runs while a machine is being set up, usually from a script, so each
+    ordinary way it can fail gets one line naming the next step instead of a
+    stack trace: a directory that does not exist, a directory that is not a git
+    repository, a machine without git at all, and a hooks directory hq may not
+    write.
     """
     target = Path(args.dir).resolve()
     if not target.is_dir():

@@ -1,10 +1,10 @@
 """Reading mail: the first-read window, the byte cap, and the cursor.
 
-Both limits exist because of a real morning. An unbounded first read handed a
-brand new lane every broadcast ever sent (191 KB), which is past the 128 KB a
-single argv string holds, so spawners that inline mail into a prompt refused to
-start. And a plain read CONSUMES: the cursor is per name per machine, so a
-watcher polling `hq inbox` ate six messages nobody ever saw.
+An unbounded first read would hand a brand new lane every broadcast ever sent,
+which can be more than a spawner can paste into one prompt: so a first read
+shows one day, and one read shows at most INBOX_BYTE_CAP bytes. And a plain
+read CONSUMES: the cursor is per name per machine, so a watcher polling
+`hq inbox` eats mail that nobody then sees.
 
 No GitHub here: the two functions that reach the network are replaced.
 """

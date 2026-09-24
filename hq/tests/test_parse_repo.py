@@ -1,9 +1,9 @@
 """owner/name out of a remote URL, in every shape a remote can take.
 
-The alias case is the one that cost something. An ~/.ssh/config alias hides the
-real hostname, a github.com-only pattern returned None for it, and the pre-push
-guard then keyed claims by the raw URL, matched nothing, and waved every push
-through. A guard that silently passes is worse than no guard.
+The alias case matters most. An ~/.ssh/config alias hides the real hostname, a
+github.com-only pattern returns None for it, and the pre-push guard would then
+key claims by the raw URL, match nothing, and wave every push through. A guard
+that silently passes is worse than no guard.
 """
 
 import pytest
