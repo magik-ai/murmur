@@ -1,32 +1,41 @@
 # Quickstart: from a fresh box to a first pull request
 
-Ten steps. At the end, a headless agent has opened a pull request on your repository from a machine
-you are not sitting at. Full detail lives in [`OPERATIONS.md`](OPERATIONS.md); the ways this bites
-are in [`sharp-edges.md`](sharp-edges.md).
+Ten steps turn a plain Linux machine into a **farm**: an always-on machine where coding agents
+work while nobody watches. At the end, one agent has opened a pull request on your repository.
+Each agent works as a **lane**: one task, on its own branch, in its own git worktree.
 
-Substitute your own values for `<FARM_HOST>`, `<PROJECT>`, `<OWNER>/<REPO>` and `<LANE>`.
+Replace `<FARM_HOST>` (the farm's ssh host alias), `<PROJECT>`, `<OWNER>/<REPO>`, `<LANE>` and
+`<CODENAME>` with your own values. The full guide is [`OPERATIONS.md`](OPERATIONS.md). The ways a
+farm can lose work are in [`sharp-edges.md`](sharp-edges.md).
 
-murmur runs Claude Code and Codex, on your own machine or on a DigitalOcean Droplet. Those are the
-two engines and the two places we have run for real; anything else is a contribution
-([`CONTRIBUTING.md`](../../CONTRIBUTING.md)).
+**Shortcut.** On Ubuntu or Debian, [`farm/install.sh`](../../farm) does steps 1, 2, 3 and 5 in one
+command. If Python is too old, it stops and prints the line from step 1. It also installs Claude
+Code and sets up the [head office](#head-office-is-optional). Then continue with step 4 to log in,
+and with step 7. [Chapter 12 of the handbook](../../docs/12-the-machine.md) explains it.
+
+murmur supports two engines, Claude Code and Codex, on your own Linux machine or on a DigitalOcean
+Droplet. Anything else is a contribution: see [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 
 ---
 
+## Set up a farm, step by step
+
 ### 1. Get a box with systemd
 
-Ubuntu 22.04 or newer, Debian 12, or a comparable systemd distribution: a spare desktop, a VM, a
-DigitalOcean Droplet (the dashboard's Machine tab can create one for you, `fleet machines create`
-from a terminal). It needs CPU and RAM rather than a GPU. Everything below runs as an ordinary user, and
-nothing in the fleet needs root.
+Use Ubuntu 22.04 or newer, Debian 12, or another Linux with systemd. It can be a spare PC, a
+virtual machine, or a DigitalOcean Droplet. The `/murmur:farm` command of the murmur Claude Code
+plugin can create a Droplet from your laptop and install murmur on it. On Windows, use WSL2 with
+Ubuntu, with systemd running inside it. The farm needs CPU and memory, not a GPU. fleet runs as an
+ordinary user and never needs root; only installing packages uses `sudo`.
 
 ```bash
 sudo apt update && sudo apt install -y git tmux python3 curl
 python3 -V          # must be 3.11 or newer
 ```
 
-Ubuntu 24.04 and later and Debian 12 ship Python 3.11 or newer, so they work as they are.
-Ubuntu 22.04 ships 3.10: add 3.11 from the deadsnakes PPA and put it first on `PATH` (the
-system's own `/usr/bin/python3` stays 3.10, which apt needs), then check again:
+Ubuntu 24.04 and newer, and Debian 12, ship Python 3.11 or newer. Ubuntu 22.04 ships 3.10. There,
+add 3.11 from the deadsnakes PPA and put it first on `PATH`. The system's own `/usr/bin/python3`
+stays 3.10, because apt needs it. Then check again:
 
 ```bash
 sudo apt-get install -y software-properties-common && sudo add-apt-repository -y ppa:deadsnakes/ppa && sudo apt-get install -y python3.11 python3.11-venv && sudo ln -sf /usr/bin/python3.11 /usr/local/bin/python3 && hash -r
@@ -36,153 +45,163 @@ python3 -V          # Python 3.11.x
 ### 2. Let user services run when nobody is logged in
 
 ```bash
-loginctl enable-linger "$USER"
-systemctl --user is-system-running          # running, or degraded but answering
+loginctl enable-linger "$USER"              # use sudo if it asks for permission
+systemctl --user is-system-running          # "running", or "degraded" but answering
 ```
 
-Without linger, the sweep timer, the supervisor daemon and the CI queue die when your ssh session
-closes. This is the single most common setup mistake.
+These run as systemd user services: the agents themselves, the sweep timer (the janitor that
+clears finished worktrees), the supervisor daemon (it restarts lanes that have a restart policy)
+and, once you enable it in step 9, the dashboard. Without linger, systemd stops them all when your
+last ssh session closes. This is the most common setup mistake.
 
 ### 3. Install GitHub's CLI and log in
 
 ```bash
-sudo apt install -y gh        # or the upstream apt repository for a current version
-gh auth login                 # choose HTTPS, and let it configure git credentials
+sudo apt install -y gh        # or GitHub's own apt repository, for a newer version
+gh auth login                 # choose HTTPS, and let it set up git credentials
 gh auth status
 ```
 
-Agents push branches and open pull requests through this login, and the janitor asks GitHub whether
-a branch was merged. A farm without `gh` cannot finish a lane.
+Agents push branches and open pull requests through this login. The sweep asks GitHub whether a
+branch was merged. Without `gh`, a lane cannot finish.
 
 ### 4. Install an agent CLI and log in on a subscription
 
-Install `claude` and/or `codex`, then log in once, interactively, over a terminal session:
+Install Claude Code, Codex, or both. murmur's own installer installs Claude Code with:
 
 ```bash
-ssh -t <FARM_HOST> claude                     # then /login
-ssh -L 1455:localhost:1455 -t <FARM_HOST> codex login   # the tunnel carries the OAuth callback back
+curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-Log in on a **subscription**, not an API key: the fleet unsets `ANTHROPIC_API_KEY` at spawn, so a
-lane cannot quietly bill an API account. If the farm is the machine you are already on, drop the
-`ssh` prefix.
+fleet starts Claude Code from `~/.local/bin/claude` (the `CLAUDE_BIN` variable changes it) and
+Codex from `/usr/bin/codex` (set `FLEET_CODEX_BIN` in `~/.config/fleet/env` to change it).
+
+Log in once, interactively, from a terminal:
+
+```bash
+ssh -t <FARM_HOST> claude                               # then type /login
+ssh -L 1455:localhost:1455 -t <FARM_HOST> codex login   # the tunnel carries the login callback
+```
+
+If you are already on the farm, leave out the `ssh` part. Log in on a **subscription**, not an API
+key. fleet removes `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from every lane, so a lane cannot bill
+an API account by accident.
 
 ### 5. Install the fleet
 
 ```bash
 git clone https://github.com/magik-ai/murmur ~/work/murmur
-cd ~/work/murmur/fleet && ./install.sh
+cd ~/work/murmur/fleet && ./install.sh       # add --local if you work on the farm itself
 ```
 
-It prints what it did: the launcher, the orchestrator skill, the example configs, the sweep timer.
-On a single machine use `./install.sh --local`, which skips the ssh shim advice and records a
-loopback dashboard bind. Add `~/.local/bin` to your PATH if the installer says so.
+The installer prints what it did: the `fleet` command in `~/.local/bin`, the orchestrator skill
+(the playbook for the session that splits work into lanes), the example configs in
+`~/.config/fleet/`, and the sweep timer. Add `~/.local/bin` to your `PATH`
+if it tells you to. `--local` records a dashboard address that only this machine can reach, and
+skips the advice about laptops.
 
 ### 6. If the farm is remote, shim it from your own machine
 
+Do not install fleet a second time on your laptop. Add this small script instead. It runs each
+`fleet` command on the farm over ssh, and quotes every argument, so briefs with quotes and line
+breaks arrive intact:
+
 ```bash
-printf '#!/usr/bin/env bash\nargs=(); for a in "$@"; do args+=("$(printf %%q "$a")"); done\nexec ssh <FARM_HOST> "$HOME/.local/bin/fleet ${args[*]}"\n' > ~/.local/bin/fleet
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/fleet <<'EOF'
+#!/usr/bin/env bash
+args=(); for a in "$@"; do args+=("$(printf %q "$a")"); done
+exec ssh <FARM_HOST> "\$HOME/.local/bin/fleet ${args[*]}"
+EOF
 chmod +x ~/.local/bin/fleet
 fleet capacity        # answers from the farm
 ```
 
-Do not install the tool twice. The shim quotes every argument, which is what makes a brief with
-quotes and newlines survive the trip.
-
 ### 7. Register your project
 
 ```bash
-fleet add-project --name <PROJECT> --repo <OWNER>/<REPO>
+fleet add-project --name <PROJECT> --repo <OWNER>/<REPO> --port-base 5200
 fleet projects
 ```
 
-This clones the repository to `~/work/<PROJECT>` and records it in `~/.config/fleet/projects.toml`.
-Give each project its own `--port-base` so lanes from different projects never fight over a port.
+This clones the repository to `~/work/<PROJECT>` and records it in
+`~/.config/fleet/projects.toml`. A lane's dev server port is the project's `--port-base` (default
+5200) plus a slot number. Give each project its own port base.
 
 ### 8. Spawn the first lane
 
 ```bash
 fleet capacity
-fleet spawn --project <PROJECT> --lane <LANE> --model sonnet \
-      --by <CODENAME> \
+fleet spawn --project <PROJECT> --lane <LANE> --model sonnet --by <CODENAME> \
       --task "Fix X. Acceptance: the new test fails before the change and passes after."
 ```
 
-Write the brief as an acceptance contract, not a wish. A lane gets a fresh worktree off the base
-branch, its own ports, and one pass at the work. Long or punctuation-heavy briefs belong in a file:
-`--brief-file ~/.fleet/briefs/<LANE>.md`. To have the work driven all the way to a merge instead of
-one pass, add `--restart until-merged` and start the daemon (`fleet daemon start`).
+Write the brief as an acceptance contract, not a wish. `--by` is your code name: it tags who
+spawned the lane, and the dashboard groups lanes by it. The lane gets a fresh worktree from the
+project's base branch, its own ports, and one pass at the work. Put a long brief, or one full of
+quotes, in a file: `--brief-file ~/.fleet/briefs/<LANE>.md`. To have fleet start the lane again
+until its pull request is merged, add `--restart until-merged` and start the supervisor daemon
+with `fleet daemon start`.
 
 ### 9. Watch it
 
 ```bash
-fleet status                  # every lane plus farm health
-fleet tail <slug>             # one lane, human-readable, with its last message
+fleet status                  # every lane, and the farm's health
+fleet status --json           # the same, for scripts
+fleet tail <slug>             # one lane: status, pull request, last message
 fleet events --follow         # the event stream: spawned, status, delivered, dropped-scope
-fleet dashboard start         # the board on 127.0.0.1:7878, started for you on the first spawn
-fleet dashboard stop          # never a pattern kill, this is a shared service
-fleet dashboard restart       # after changing the bind, the title or the token
-fleet dashboard status        # is it running, and on what socket
-fleet dashboard token         # the bearer token the board needs before it can change anything
+fleet dashboard start         # the dashboard on 127.0.0.1:7878; a spawn also starts it
+fleet dashboard token         # the token the dashboard needs before it can change anything
+fleet dashboard status        # is it running, and on which address
+fleet dashboard restart       # after you change its address, title or token
+fleet dashboard stop          # stop it with this command, never with a pattern kill
+fleet dashboard enable        # run it as a user service that comes back after a reboot
 ```
 
-Prefer `fleet events` and `fleet status --json` over grepping logs.
+`<slug>` is the lane's unique id, printed by `fleet spawn`. Read `fleet events` and
+`fleet status --json` rather than grepping log files.
 
-Open the board once as `http://127.0.0.1:7878/?token=<token>`. The tab keeps the token from then
-on, so you paste it once per browser and never again. Reaching the board from another machine is
-`FLEET_DASH_BIND` in `~/.config/fleet/env` plus `fleet dashboard restart`, and then the token
-covers reading as well as writing.
+Open the dashboard once as `http://127.0.0.1:7878/?token=<token>`. The browser tab keeps the token
+until you close it. From a laptop, open a tunnel first, then use the same address on the laptop:
 
-The board is a small product of its own, four tabs down the left side:
+```bash
+ssh -N -L 7878:127.0.0.1:7878 <FARM_HOST>
+```
 
-| Tab | Answers, in one line |
+| Tab | What it answers |
 |---|---|
-| Board | who is running, what is being verified, is the machine healthy: the screen you keep open |
-| Mail | what the agents said to each other, and where you reply to one of them |
-| Queue | every merge-result verification run, and the log of the stage that failed |
-| Machine | set up and run the farm: power, services, accounts, engines, projects, health, settings |
+| Board | Who is working on what, and is the machine healthy? The screen to keep open |
+| Mail | What did the agents say to each other? You can reply to one of them here |
+| Machine | Power, services, machines, subscriptions, models and projects |
 
-**The Board is the one to leave open.** Two strips sit under the header: the machine strip (load,
-memory, disk, GPU, temperature, capacity, the countdown to the next sweep) and the accounts strip
-(one card per subscription with its session and weekly bars and the reset countdown, red when it
-is out of room). Below them the page is a two-pane canvas: agents on the left, the verification
-queue on the right (running and waiting runs, plus a count of recent ones that links to the Queue
-tab). One splitter between the panes is draggable, its position is remembered by your browser, and
-under 1100 px the two panes stack into one column. Clicking an agent opens a drawer with its
-brief, its result, its checks, its log and a box to send it a message.
+The power setting is in the header of every tab. It is the same setting as `fleet mode`:
 
-While a prerequisite is still missing, or no agent has ever run on this farm, the Board is a setup
-checklist instead: one line per step, with the spawn command already filled in with the name of
-your first registered project. The checklist goes away on its own once the farm is complete.
+| Dashboard | `fleet mode` | What it does |
+|---|---|---|
+| Full | `full` | the agents may use every core |
+| Shared | `soft` | the agents give way to whatever else runs; new lanes still start |
+| Background | `balanced` | the agents keep a small share; no new lane starts |
+| Paused | `hard` | the agents are held back hard; no new lane starts |
+| Automatic | `auto` | Full, or Shared while the GPU is busy; Full when there is no GPU sensor |
 
-The header carries the same controls on every tab: the product name (`FLEET_DASH_TITLE`), the
-capacity pill with the reason on hover, a project filter, the freshness label, the jump palette,
-the theme switch, and the power mode. The power mode is a four-state control, Full, Shared,
-Background and Paused, plus Automatic, and it is the same setting as `fleet mode`: Full leaves
-every core to the agents, Shared and Background hand CPU back to whatever else you are doing,
-Paused stops new spawns, and Automatic picks one of the four from how busy the machine is.
-
-Every live panel carries a freshness label, "Live" or "Stale" with a time, so you can always tell
-whether you are looking at the current state or the last good read. Mail runs 45 seconds behind
-the office by design, and the label is how you see that rather than guess at it.
-
-Press Cmd+K (Ctrl+K on Linux and Windows) anywhere on the page to open the jump palette and go
-straight to a tab, an agent, a project or a conversation. The switch in the header flips the whole
-page between light and dark, and the choice is remembered per browser.
+Press Ctrl+K or Cmd+K on any tab to jump to a tab, a lane, a project or a conversation.
+[`OPERATIONS.md`](OPERATIONS.md#5-the-dashboard) describes each tab in full.
 
 ### 10. Review, merge, clean up
 
-The lane ends by opening a pull request and stopping. **Merging is your decision, never the
-agent's.** Review it on GitHub like any other contribution.
+The lane ends by opening a pull request and stopping. **It never merges: merging is your
+decision.** Review the pull request on GitHub like any other contribution.
 
 ```bash
 gh pr view <N> --web
-fleet sweep --dry-run         # what the janitor would remove next pass
+fleet sweep --dry-run         # what the janitor would remove on its next pass
 fleet clean --project <PROJECT>
 ```
 
-After a merge, the janitor removes that worktree and reaps the card on its own within ten minutes.
-Only pushed work is safe from it.
+The sweep runs every 10 minutes. It removes the worktree of a merged lane. About 15 minutes after
+a lane ends, it also clears the lane's card and worktree, unless its pull request is still open.
+It keeps uncommitted work, and before it removes a worktree it pushes commits that were never
+pushed to `refs/fleet-salvage/<slug>`. Commit and push, and your work is safe.
 
 ---
 
@@ -190,47 +209,51 @@ Only pushed work is safe from it.
 
 ```bash
 fleet capacity                       # can the farm take another agent?
-fleet accounts                       # subscription windows and reset countdowns
+fleet accounts                       # each Claude subscription's session and weekly use
 fleet spawn --project <PROJECT> --lane <LANE> --model sonnet --effort high --task "..."
 fleet status                         # lanes plus farm health
-fleet logs <slug>                    # raw stream of one lane
-fleet msg <slug> "rebase on main before pushing"    # a correction, read at the lane's next checkpoint
+fleet logs <slug>                    # one lane's raw output, followed live
+fleet msg <slug> "rebase on main before pushing"    # read at the lane's next checkpoint
+fleet kill <slug>                    # stop a lane; add --retire so nothing respawns it
 fleet clean --project <PROJECT>      # after the merges
 ```
 
 ## Picking an engine and a tier
 
-| work | engine and tier |
+| Work | Engine and tier |
 |---|---|
-| hard, ambiguous, architectural, review | `--model opus --effort xhigh`, or `--engine codex --effort high` |
+| hard, unclear, architecture, review | `--model opus --effort xhigh`, or `--engine codex --effort high` |
 | an ordinary feature lane | `--model sonnet --effort high` |
 | mechanical and well specified | `--model haiku`, or `--engine codex --effort low` |
-| one subscription is running hot | the other engine at the same tier, a separate pool |
+| one subscription is running hot | the other engine at the same tier: it is a separate pool |
 
-`--effort low|medium|high|xhigh` works on both engines. With several subscriptions configured,
-`--account auto` spreads a batch across the ones with headroom, and `fleet accounts balance` names
-the next engine and account to use.
+Claude Code is the default engine, and `--model` sets its tier. For Codex, `--effort` sets the
+tier on one model. `--effort low|medium|high|xhigh` works on both engines. Claude lanes use
+`--account auto` unless you name an account: it spreads lanes across the subscriptions that still
+have room. `fleet accounts balance` names the next engine and account to use.
 
-## Head office (agent-hq) is optional
+## Head office is optional
 
-Branch claims, the pre-push claims guard and the AGENT-HQ paragraph in every brief are a
-deployment's own coordination layer. Fleet wires them up only when the `hq` CLI is on PATH, and
-then `~/.config/fleet/policy.toml` decides:
+The **head office** is a private GitHub repository that agents use for names, branch claims and
+messages, through the `hq` command (see [`hq/`](../../hq)). When `hq` is on the farm's `PATH`, each
+lane claims its branch, gets a pre-push hook that refuses a branch someone else has claimed, and
+starts with its unread mail. `~/.config/fleet/policy.toml` switches it:
 
 ```toml
 [hq]
-enabled = true     # or false to spawn without the claim, the hook and the mail
+enabled = true     # false: spawn without the claim, the hook and the mail
 ```
 
-A box with no `hq` binary spawns exactly as before, minus all of it, and says nothing. A box that
-has the binary but no `[hq]` table keeps head office ON and warns once per spawn until you write
-the table, so an upgrade cannot drop a running farm's claims in silence.
+Without `hq` on `PATH`, lanes spawn without any of this, and fleet says nothing. With `hq` on
+`PATH` but no `[hq]` table, head office stays on, and every spawn prints a warning until you add
+the table.
 
 ## Golden rules
 
-- One lane is one coherent slice of work. Overlapping lanes collide in the merge, not in the farm.
-- Agents open pull requests and stop. Merging is always a human call.
-- If capacity says amber or red, spawn fewer or wait. Hardware is the only hard gate.
-- Only committed and pushed work survives the janitor. An open pull request protects a worktree
-  indefinitely; untracked scratch protects nothing.
-- Give every lane its own test database and its own ports. Shared ones are what stall a batch.
+- One lane is one coherent slice of work. Lanes that change the same files collide when you merge.
+- Agents open pull requests and stop. Merging is always your call.
+- If `fleet capacity` says `warn`, spawn fewer. If it says `BLOCK`, wait. The capacity check
+  blocks only on hardware: memory, disk and temperature.
+- Only committed and pushed work is safe. An open pull request protects a worktree for as long as
+  it is open. `--force` on `clean` or `sweep` removes uncommitted work.
+- Give every lane its own test database, and let it use the ports fleet gives it.

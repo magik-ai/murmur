@@ -1,106 +1,121 @@
 # fleet
 
-Spawn and track a fleet of **headless Claude Code agents** on a "farm": any
-machine with spare cores, local or reachable over ssh (the one this was built on
-is a WSL distro on a desktop PC). An orchestrator fans a batch of work out to the
-farm: one agent per lane, each in its own git worktree, each driving a slice to
-a pull request. A live dashboard shows the lot; the farm never overloads.
+fleet runs many coding agents at once on one Linux machine, which murmur calls a **farm**. It
+starts Claude Code and Codex agents headless (no chat window, nobody typing), gives each one its
+own git worktree and branch, and shows them all on a web dashboard. It is for people who already
+use coding agents and want to run more of them than a laptop can hold, or keep them working while
+the laptop is closed.
 
-It's **project-agnostic**: point it at any repo. Each worker grounds itself in
-that repo's own `CLAUDE.md`.
+A **lane** is one agent doing one task on its own branch. The **orchestrator** is whoever splits
+the work into lanes and starts them: you, or a Claude Code session you talk to. The handbook's
+[glossary](../docs/00-start-here.md#words-this-handbook-uses) explains the other words.
 
-> **Everyday cheat sheet: [`docs/QUICKSTART.md`](docs/QUICKSTART.md).**
-> Full setup, access, recovery and troubleshooting for the whole rig (farm +
-> fleet): [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
->
-> How to run every check in this repo, and how to tell whether the farm is still in sync with
-> the project: [`docs/VERIFYING.md`](docs/VERIFYING.md).
->
-> Merge-result verification on the farm (an accelerator, never a merge
-> authority): [`docs/CI.md`](docs/CI.md).
->
-> Upgrading a farm that ran an older fleet: [`docs/MIGRATION.md`](docs/MIGRATION.md).
+fleet works with any repository. Each agent reads that repository's own `CLAUDE.md` and follows
+its rules. fleet is one part of murmur; the [main README](../README.md) describes the others.
 
-## Why
+## Install
 
-Past ~4-5 parallel agents a laptop dies (RAM, heat). The documented pattern is:
-run the agents on a separate machine, pull finished branches back over git.
-`fleet` is the thin harness that makes a Claude Code orchestrator do exactly
-that, on the subscription (no API billing), with capacity guards so the box
-stays healthy.
+The farm needs Linux with systemd, Python 3.11 or newer, git, tmux, the GitHub CLI (`gh`) logged
+in, and Claude Code or Codex logged in on a subscription. [`docs/QUICKSTART.md`](docs/QUICKSTART.md)
+walks through each one.
 
-## Install (on the farm)
-
-Clone this repository onto the machine that will run the agents, install it, and register the
-first project:
+On the farm, clone murmur, run the installer, and register the repository your agents will work
+on:
 
 ```bash
-git clone https://github.com/magik-ai/murmur ~/work/murmur   # fleet lives in murmur/fleet
+git clone https://github.com/magik-ai/murmur ~/work/murmur
 cd ~/work/murmur/fleet && ./install.sh
-fleet add-project --name myproj --repo owner/name   # clones the repo and registers it
+fleet add-project --name myproj --repo your-org/your-repo   # clones it to ~/work/myproj
 ```
 
-`install.sh` puts `fleet` on your PATH and seeds `~/.config/fleet/` from `config/*.example.toml`.
-Tune the capacity limits, the per-lane commit identity and the optional head-office integration in
-`~/.config/fleet/policy.toml`; register further repos in `~/.config/fleet/projects.toml`.
+`install.sh` links the `fleet` command into `~/.local/bin` and the orchestrator skill into
+`~/.claude/skills/fleet`. It copies the example `policy.toml` and `projects.toml` into
+`~/.config/fleet/`, and never overwrites your own copies. It also turns on a timer that runs
+`fleet sweep` every 10 minutes: the **sweep** removes the worktrees of finished lanes.
+`./install.sh --help` lists its options.
 
-### Optional: drive the farm from another machine
+On a fresh Ubuntu or Debian machine, [`farm/install.sh`](../farm) does all of this in one command.
+It also installs the system packages and Claude Code, and runs the dashboard as a service. It
+sets up the **head office** too: a private GitHub repository that agents use for names, branch
+claims and messages. See [chapter 12 of the handbook](../docs/12-the-machine.md).
 
-If you orchestrate from a laptop rather than on the farm itself, a one-line shim makes a local
-`fleet` call run over ssh, so the orchestrator never has to know it is remote. Nothing requires
-it, and working directly on the farm is fully supported.
+### Optional: drive the farm from your laptop
+
+You can work on the farm directly. If you would rather type `fleet` commands on your laptop, do
+not install fleet there. Put the small script below on the laptop instead. It sends each `fleet`
+command to the farm over ssh. It also quotes every argument, so a brief with quotes or line breaks
+arrives unchanged. `farm` is the farm's ssh host alias from your `~/.ssh/config`.
 
 ```bash
-printf '#!/usr/bin/env bash\nargs=(); for a in "$@"; do args+=("$(printf %%q "$a")"); done\nexec ssh farm "\$HOME/.local/bin/fleet ${args[*]}"\n' > ~/.local/bin/fleet
-chmod +x ~/.local/bin/fleet   # `farm` is an ssh host alias for the farm machine
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/fleet <<'EOF'
+#!/usr/bin/env bash
+# Run fleet on the farm over ssh, with every argument quoted for the remote shell.
+args=(); for a in "$@"; do args+=("$(printf %q "$a")"); done
+exec ssh farm "\$HOME/.local/bin/fleet ${args[*]}"
+EOF
+chmod +x ~/.local/bin/fleet
+fleet capacity      # the answer now comes from the farm
 ```
 
 ## Use
 
 ```bash
-fleet capacity                       # can the farm take another agent?
-fleet spawn --project myproj --lane battles --model sonnet \
-      --task "Implement X. Acceptance: …"
-fleet status                         # table of agents + farm health
-fleet logs <slug>                    # tail one agent's raw stream
-fleet dashboard start                # web view on 127.0.0.1:7878 (see FLEET_DASH_BIND)
-fleet dashboard token                # the bearer token every write needs
-fleet clean --all                    # remove finished agents' worktrees
+fleet capacity                    # can the farm take another agent?
+fleet spawn --project myproj --lane login-form --model sonnet \
+      --task "Add a login form. Acceptance: the new test fails before and passes after."
+fleet status                      # every lane, and the farm's health
+fleet tail <slug>                 # one lane: status, pull request, last message
+fleet logs <slug>                 # one lane's raw output, followed live
+fleet dashboard start             # the web dashboard on http://127.0.0.1:7878
+fleet dashboard token             # the token the dashboard needs to change anything
+fleet clean --project myproj      # remove the worktrees of finished lanes
 ```
 
-Spawn a worker with `--issue N` (it reads the GitHub issue), `--task "…"`
-(inline brief), or `--brief-file path` (a brief written on the farm).
+`fleet spawn` prints the lane's **slug**, its unique id: the lane name, the time and a number.
+Give the task in one of three ways: `--task "..."` (inline), `--brief-file <path>` (a file on the
+farm, best for long briefs), or `--issue N` (the agent reads that GitHub issue). A lane ends by
+opening a pull request and stopping. It never merges: merging is your decision. `fleet help`
+lists every command.
 
-The dashboard is a small product of its own, four tabs down the side. **Board** is the screen you
-keep open: the machine and accounts strips under the header, then agents on the left and the
-verification queue on the right, with a draggable splitter between them, and a setup checklist
-instead of all of it until the farm is complete. **Mail** is the head office as a three-pane
-conversation app: mailboxes, thread, and a composer pinned to the bottom. **Queue** is one row per
-merge-result verification run, with a detail panel that carries each stage's log. **Machine** is
-the control room: power, services, accounts, engines, projects, health and settings.
+### The dashboard
 
-What you can do from the page: stop or retire a lane, message a running lane, send mail as the
-dashboard, throttle the farm or drain and resume it, start and stop the agent runner, the
-verification runner and the sweep timer, add and remove an account, enable, disable and test an
-engine, register and remove a project, and enqueue or cancel a verification. What stays at a
-terminal on purpose: spawning (money and identity belong to a session with a name), provider keys
-(`fleet models auth <id>` reads them from stdin), the dashboard's own stop and restart, and the
-`--force` forms of `clean` and `sweep`. `FLEET_DASH_TITLE` names the board (default `murmur`), and
-`FLEET_DASH_HQ_AGENT` sets the identity any mail sent from the browser carries (default
-`dashboard`), never the name of whoever is looking at the screen.
+The dashboard is a web page with three tabs:
 
-The dashboard can stop an account and flip a model, so changing anything through it needs a
-bearer token, on loopback as much as anywhere else, and a cross-site request is refused whatever
-token it carries. The first start mints one into `~/.config/fleet/dash-token` (mode 600) unless
-`FLEET_DASH_TOKEN` is set; `fleet dashboard token` prints it, and you open the page once as
-`http://<bind>:7878/?token=<token>`. Widen the bind with `FLEET_DASH_BIND` and the token covers
-reading too, because a lane's brief and its result are not public either.
+- **Board** is the screen to keep open. It shows the machine's load, memory, disk and
+  temperatures, one card per subscription with its usage limits, and every lane with its status,
+  model, cost and pull request. Click a lane to read its brief, its result, its GitHub checks and
+  its log, or to send it a message. While part of the setup is missing, the Board starts with a
+  checklist of what to fix.
+- **Mail** shows the messages the agents sent each other through the head office, as
+  conversations. You can reply from this tab.
+- **Machine** holds the controls: power, services, machines, subscriptions, models and projects.
 
-### Grouped lanes, one PR
+From the page you can stop or retire a lane, send a lane a message, send head office mail, change
+the power setting, and throttle, drain or resume the whole farm. You can also start and stop the
+supervisor daemon and the sweep timer, and add or remove subscriptions, models, projects and
+machines. A few things stay at a terminal: spawning a lane, `fleet clean` and `fleet sweep`,
+storing a provider key (`fleet models auth <id>` reads it from standard input), and restarting
+the dashboard itself.
 
-Use a group when several disjoint lanes contribute to one coherent change. Each
-lane gets its own branch and author identity, and a pre-push territory guard;
-only `group assemble` creates the integration PR.
+Every change made through the page needs a bearer token, even from the farm itself. The dashboard
+creates one on its first start, in `~/.config/fleet/dash-token`, unless you set
+`FLEET_DASH_TOKEN`. `fleet dashboard token` prints it. Open the page once as
+`http://127.0.0.1:7878/?token=<token>`, and that browser tab keeps it. A request from another
+website is refused, whatever token it carries.
+
+By default, the dashboard listens on `127.0.0.1` only. To reach it from your laptop, use a tunnel:
+`ssh -N -L 7878:127.0.0.1:7878 farm`, then open the same address. You can also set
+`FLEET_DASH_BIND` in `~/.config/fleet/env` and run `fleet dashboard restart`. With any address
+other than loopback, reading the page needs the token too. The
+[operations guide](docs/OPERATIONS.md#5-the-dashboard) has the details.
+
+### Several lanes, one pull request
+
+Use a **group** when several lanes each build one part of a single change. Each lane gets its own
+branch, its own commit author and a **territory**: the files it may change. A push that changes
+files outside the lane's territory is refused. When the lanes have pushed, `fleet group assemble`
+merges them into one integration branch and opens one pull request.
 
 ```toml
 branch_base = "main"
@@ -121,45 +136,68 @@ effort = "high"
 ```bash
 fleet group start lesson --project myproj --spec lesson-group.toml
 fleet group status lesson --json
-fleet group assemble lesson --dry-run
-fleet group assemble lesson       # pushes group/lesson/integration and opens one PR
+fleet group assemble lesson --dry-run   # the merge order and each lane's files; pushes nothing
+fleet group assemble lesson             # pushes group/lesson/integration, opens one pull request
 ```
 
-Territories are mandatory and overlapping glob languages are rejected before
-any worker starts. A collision during assembly is aborted and reported for
-human resolution; Fleet never auto-resolves it or merges the resulting PR.
+Every lane needs a territory and exactly one of `task` or `brief`. A spec whose territories
+overlap is refused before any agent starts. Before it pushes, `assemble` checks the result for
+conflict markers and syntax errors, and runs the project's `validation` command if
+`projects.toml` sets one. If two lanes conflict, it stops and names the files. It never resolves
+a conflict and never merges the pull request.
 
 ## How it works
 
-- **spawn** → capacity check → fresh worktree off `origin/main` → deterministic
-  ports → launches `claude -p "<brief>" --model … --output-format stream-json
-  --dangerously-skip-permissions` in a detached `tmux` session.
-- The stream is teed to a raw log and parsed into `~/.fleet/state/<slug>.json`
-  (status, model, cost, tokens, last activity, PR url). The terminal `result`
-  event marks the agent done.
-- Each worker's **system framing** (`lib/brief_template.md`) enforces: stay in
-  your lane, use a **private test DB** named by your agent-id (never the shared
-  one), **don't run the full suite locally** (that's CI's job), don't hardcode a
-  migration number. These are the traps that stall parallel agents.
-- **Capacity** (`lib/metrics.py` + `config/policy.example.toml`; live overrides in `~/.config/fleet/policy.toml`) blocks a spawn when free
-  RAM / agent count / GPU temp cross a limit.
+- **Spawn.** `fleet spawn` checks capacity and the power setting. It then creates a worktree and a
+  new branch from the project's base branch on `origin`, and hands the lane its port numbers. It
+  starts the engine headless (for Claude Code, `claude -p` with `--output-format stream-json`) as
+  a systemd user service in `fleet.slice`, so the power setting can cap its CPU and memory.
+- **State.** The engine's output goes to `~/.fleet/logs/<slug>.jsonl` and is read into
+  `~/.fleet/state/<slug>.json`: status, model, cost, tokens, last activity and pull request.
+  `fleet status` and the dashboard read these files.
+- **Framing.** Every lane gets the same extra instructions, from `lib/brief_template.md`: stay in
+  your lane, use your own test database and the ports you were given, run only the tests you
+  touched, open a pull request and stop.
+- **Capacity.** `lib/metrics.py` blocks a new spawn when free memory or free disk is below a floor,
+  or when the GPU or CPU is too hot. The number of agents never blocks; it only raises a warning.
+  You tune the limits in `~/.config/fleet/policy.toml`.
+- **Clean-up.** The sweep timer removes the worktree of a lane whose pull request has merged. It
+  also clears finished lanes that have no open pull request, 15 minutes after they end. It keeps
+  uncommitted work, and it saves commits that were never pushed to a hidden ref on `origin` first.
 
 ## Layout
 
+```text
+bin/fleet               the fleet command (bash)
+lib/                    the Python behind it: capacity (metrics.py), power (mode.py), the
+                        supervisor daemon (supervisor.py), engine output readers (parse_*.py),
+                        and the instructions every lane gets (brief_template.md)
+dashboard/              a standard-library HTTP server and the single-page dashboard
+config/*.example.toml   example policy (limits, power, commit identity), projects and model catalog
+systemd/                the user units: supervisor daemon, dashboard, sweep service and timer
+skills/fleet/           the orchestrator skill
+install.sh              links the command, the skill and the example configs into place
+docs/                   the quickstart, the operations guide, the sweep rules, sharp edges, tests
 ```
-bin/fleet              CLI (bash)
-lib/metrics.py         telemetry + capacity verdict (JSON)
-lib/parse_stream.py    stream-json -> per-agent state file
-lib/brief_template.md  system framing injected into every worker
-dashboard/             stdlib HTTP server + single-page UI
-config/*.example.toml  policy (limits) + projects (registry)
-```
 
-Runtime lives outside the repo: `~/.fleet/` (state, logs, worktrees) and
-`~/.config/fleet/` (projects.toml, policy.toml).
+Apart from `audit.log`, a record of kills and cleans that git ignores, nothing fleet writes at
+runtime lives in the clone. State, logs and worktrees go to `~/.fleet/`, and settings to
+`~/.config/fleet/` (`policy.toml`, `projects.toml`, `env`).
 
-## Not included
+## The orchestrator skill
 
-The orchestrator's own instructions ("how I fan out") belong in a user-level
-`~/.claude/CLAUDE.md` plus a `/fleet` command, not here, so the tool stays
-generic and never leaks into a shared project repo.
+`skills/fleet/SKILL.md` is the orchestrator's playbook: how to split a batch into lanes, spawn
+them, watch them and merge only when you say so. `install.sh` links it into
+`~/.claude/skills/fleet`, and into `~/.codex/skills/fleet` when Codex is installed. It belongs to
+your own setup. Do not copy it into a shared project repository.
+
+## More documentation
+
+| Document | What it covers |
+|---|---|
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | From a fresh machine to a first pull request, and the everyday commands |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Setup, access, daily running, recovery and troubleshooting |
+| [`docs/SWEEP.md`](docs/SWEEP.md) | What the janitor removes, and how not to lose work to it |
+| [`docs/sharp-edges.md`](docs/sharp-edges.md) | The failure modes that can destroy work, and their guards |
+| [`docs/VERIFYING.md`](docs/VERIFYING.md) | How to run the test suites before you change fleet itself |
+| [`../docs/12-the-machine.md`](../docs/12-the-machine.md) | Choosing the machine, and the one-command installer |
