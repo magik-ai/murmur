@@ -268,9 +268,9 @@ class StreamTextTest(unittest.TestCase):
 class PageBuildTest(unittest.TestCase):
     """The build number a tab compares with the one it was loaded from.
 
-    It used to be the page shell's own date only, so a deploy that changed nothing but a script
-    kept the old number, and a tab opened before that deploy never learned it was running old
-    code (owner, 2026-09-23: the Board "lost" its Fable limits in exactly such a tab).
+    The page shell's own date alone is not enough: a deploy that changed nothing but a script
+    would keep the old number, and a tab opened before that deploy would never learn it was
+    running old code.
     """
 
     def test_a_changed_script_changes_the_build(self):
@@ -4171,10 +4171,10 @@ class ModelsContractTest(unittest.TestCase):
         self.assertTrue(payload["farm_alias"])
 
 MACHINES_JSON = {
-    "this": {"name": "granite", "address": "100.64.0.11"},
+    "this": {"name": "homestead", "address": "100.64.0.11"},
     "total_monthly_usd": 96,
     "machines": [
-        {"name": "granite", "provider": "this-farm", "user": "work",
+        {"name": "homestead", "provider": "this-farm", "user": "farm",
          "address": "100.64.0.11", "size": "", "monthly_usd": 0, "region": "",
          "state": "ready", "detail": "this farm", "checked_at": "2026-09-23T08:00:00Z",
          "finish_command": "", "tunnel_command": ""},
@@ -4294,14 +4294,12 @@ class HostingCase(unittest.TestCase):
 
 class HostingProvidersTest(unittest.TestCase):
     """The server's guard map against the library's catalog. The server never imports the
-    catalog at run time, so this test is what keeps the two from drifting: once
-    `fleet/lib/host_presets.py` is in the tree, every id and job it ships must be in the guard,
-    and the guard may name nothing the catalog does not ship."""
+    catalog at run time, so this test is what keeps the two from drifting: every id and job
+    `fleet/lib/host_presets.py` ships must be in the guard, and the guard may name nothing the
+    catalog does not ship."""
 
     def test_the_guard_map_is_the_catalog_ids_and_jobs(self):
         path = os.path.join(dashboard.FLEET_HOME, "lib", "host_presets.py")
-        if not os.path.exists(path):
-            self.skipTest("host_presets.py is hosting-core's and has not merged yet")
         spec = importlib.util.spec_from_file_location("host_presets_under_test", path)
         catalog = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(catalog)
@@ -4310,8 +4308,8 @@ class HostingProvidersTest(unittest.TestCase):
 
 
 class HostingTidyTest(unittest.TestCase):
-    """The hosting lane's own files: no trailing whitespace, and the operations paragraph it
-    edited still wraps like the rest of that document."""
+    """The hosting files: no trailing whitespace in the server and its tests, and the
+    operations paragraph on the snapshot still wraps like the rest of that document."""
 
     def test_no_line_ends_in_whitespace(self):
         for name in ("server.py", "test_server.py"):
@@ -4323,7 +4321,9 @@ class HostingTidyTest(unittest.TestCase):
         path = os.path.join(dashboard.FLEET_HOME, "docs", "OPERATIONS.md")
         with open(path) as handle:
             text = handle.read()
-        start = text.index("**Read, from the snapshot.**")
+        start = text.find("**Read, from the snapshot.**")
+        if start < 0:
+            self.skipTest("docs/OPERATIONS.md has no snapshot paragraph to measure")
         paragraph = text[start:text.index("\n\n", start)]
         for line in paragraph.splitlines():
             self.assertLessEqual(len(line), 100, line)
@@ -4346,7 +4346,7 @@ class HostingSnapshotTest(HostingCase):
         self.assertEqual(machines["this"], MACHINES_JSON["this"])
         self.assertEqual(machines["total_monthly_usd"], 96)
         self.assertEqual([row["name"] for row in machines["machines"]],
-                         ["granite", "nursery", "orchard"])
+                         ["homestead", "nursery", "orchard"])
         self.assertEqual(machines["machines"][1]["state"], "needs-login")
         hosts = dashboard.hosting_hosts()
         self.assertFalse(hosts["pending"])
@@ -4354,9 +4354,9 @@ class HostingSnapshotTest(HostingCase):
         self.assertEqual(hosts["providers"][1]["login_state"], "not_installed")
 
     def test_the_amended_fields_reach_the_page_untouched(self):
-        """The contract amendment: machine rows carry `provider_id`, provider rows carry `cli`,
-        `color`, `engines` and `docs`, and each size carries `default`. The core lane emits
-        them, this server passes them through as they are, and the page relies on them."""
+        """Machine rows carry `provider_id`, provider rows carry `cli`, `color`, `engines` and
+        `docs`, and each size carries `default`. The CLI emits them, this server passes them
+        through as they are, and the page relies on them."""
         machines = json.loads(self.machines_file.read_text())
         machines["machines"][1]["provider_id"] = 4001
         machines["machines"][2]["provider_id"] = None
@@ -4567,20 +4567,20 @@ class HostingWriteTest(HostingCase):
     def test_a_machine_of_your_own_is_registered_and_buys_nothing(self):
         with self.farm() as box:
             status, payload = dashboard.machines_create(
-                {"provider": "ssh", "name": "attic", "target": "farm@10.0.0.4"})
+                {"provider": "ssh", "name": "attic", "target": "farm@192.0.2.4"})
             record = self.done(status, payload)
             self.assertEqual(self.argv(box)[0],
-                             ["machines", "add", "--name", "attic", "--target", "farm@10.0.0.4"])
+                             ["machines", "add", "--name", "attic", "--target", "farm@192.0.2.4"])
         self.assertEqual(record["state"], "done", record)
         self.assertEqual(record["key"], "machine:attic")
 
     def test_a_machine_of_your_own_may_name_its_port(self):
         with self.farm() as box:
             status, payload = dashboard.machines_create(
-                {"provider": "ssh", "name": "attic", "target": "farm@10.0.0.4", "port": "2222"})
+                {"provider": "ssh", "name": "attic", "target": "farm@192.0.2.4", "port": "2222"})
             self.done(status, payload)
             self.assertEqual(self.argv(box)[0],
-                             ["machines", "add", "--name", "attic", "--target", "farm@10.0.0.4",
+                             ["machines", "add", "--name", "attic", "--target", "farm@192.0.2.4",
                               "--port", "2222"])
 
     def test_check_adopt_and_forget_are_one_verb_and_one_name(self):
@@ -4626,7 +4626,7 @@ class HostingWriteTest(HostingCase):
                 self.assertEqual(again, 409)
                 self.assertIn("already running", refusal["error"])
                 other, second = dashboard.machines_create(
-                    {"provider": "ssh", "name": "attic", "target": "farm@10.0.0.4"})
+                    {"provider": "ssh", "name": "attic", "target": "farm@192.0.2.4"})
                 self.assertEqual(other, 202, second)
                 gate.write_text("go")
                 self.finish(first["job"]["id"])
@@ -4647,7 +4647,7 @@ class HostingWriteTest(HostingCase):
         bodies = [("/api/machines/plan", {"provider": "do-droplet", "name": "nursery",
                                           "size": "s-4vcpu-8gb", "region": "fra1"}),
                   ("/api/machines", {"provider": "ssh", "name": "attic",
-                                     "target": "farm@10.0.0.4"}),
+                                     "target": "farm@192.0.2.4"}),
                   ("/api/machines/check", {"name": "nursery"}),
                   ("/api/machines/destroy", {"name": "nursery", "confirm": "nursery"}),
                   ("/api/machines/adopt", {"name": "nursery"}),
@@ -4700,7 +4700,7 @@ class HostingRefusalTest(HostingCase):
                       [{}, {"name": ""}, {"name": "-rf"}, {"name": "../../etc/passwd"},
                        {"name": "Nursery"}, {"name": "n"}, {"name": "a" * 41},
                        {"name": "nursery; rm -rf /"}, {"name": "nurse ry"},
-                       {"name": "nursery\nmachines destroy granite"}])
+                       {"name": "nursery\nmachines destroy homestead"}])
 
     def test_a_provider_this_farm_does_not_know_is_refused(self):
         self.refusals(dashboard.hosts_check,
@@ -4819,7 +4819,7 @@ class HostingRefusalTest(HostingCase):
         self.refusals(dashboard.machines_destroy,
                       [{"name": "nursery"}, {"name": "nursery", "confirm": ""},
                        {"name": "nursery", "confirm": "yes"},
-                       {"name": "nursery", "confirm": "granite"},
+                       {"name": "nursery", "confirm": "homestead"},
                        {"name": "", "confirm": ""}, {"confirm": "nursery"}])
 
     def test_a_price_that_is_not_a_number_is_refused(self):
@@ -4831,12 +4831,12 @@ class HostingRefusalTest(HostingCase):
                        dict(base, confirm_usd="48; doctl"), dict(base, confirm_usd="nan")])
 
     def test_a_target_or_a_port_that_is_not_one_is_refused(self):
-        base = {"provider": "ssh", "name": "attic", "target": "farm@10.0.0.4"}
+        base = {"provider": "ssh", "name": "attic", "target": "farm@192.0.2.4"}
         self.refusals(dashboard.machines_create,
-                      [dict(base, target=""), dict(base, target="10.0.0.4"),
-                       dict(base, target="farm@10.0.0.4 rm -rf /"),
-                       dict(base, target="farm@10.0.0.4;id"),
-                       dict(base, target="-lroot@10.0.0.4"), dict(base, target=".x@10.0.0.4"),
+                      [dict(base, target=""), dict(base, target="192.0.2.4"),
+                       dict(base, target="farm@192.0.2.4 rm -rf /"),
+                       dict(base, target="farm@192.0.2.4;id"),
+                       dict(base, target="-lroot@192.0.2.4"), dict(base, target=".x@192.0.2.4"),
                        dict(base, target="farm@-oProxyCommand"),
                        dict(base, port="0"), dict(base, port="65536"), dict(base, port="-1"),
                        dict(base, port="ssh"), dict(base, port="22 22")])

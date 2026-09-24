@@ -360,9 +360,9 @@ function commandTitle(model) {
   return model.run ? `${model.label || model.id} runs ${command}: ${model.run}` : `${model.label || model.id} runs ${command}`;
 }
 
-/* A row this farm's models.toml still lists and murmur no longer ships (its preset was removed
-   on 2026-09-24, or it was a command of its own). The server says so, with the one sentence on
-   how to take it out; nothing here removes it for the person. */
+/* A row this farm's models.toml lists and murmur does not ship (a preset this checkout does
+   not carry, or a command of its own). The server says so, with the one sentence on how to take
+   it out; nothing here removes it for the person. */
 function notInCatalog(model) {
   return (model || {}).in_catalog === false;
 }
@@ -375,7 +375,7 @@ function orphanPill(model) {
 }
 
 /* One provider, one line: every cell is cut with an ellipsis and carries its whole text in its
-   title (the owner's table law). The long things live in the sidebar the name opens. */
+   title (the one-line table rule). The long things live in the sidebar the name opens. */
 function modelRow(context, model) {
   const status = statusOf(model);
   const [meaning, label] = STATUS[status];

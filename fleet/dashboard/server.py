@@ -281,13 +281,13 @@ def config_payload():
         "pending": not snapshot.get("tried"),
     }
 
-# branch -> {"backend":"pass|fail|pend", ...}, filled by a 60s poller so the per-3s
-# dashboard tick never hammers the GitHub API.
+# branch -> [{"name": ..., "state": "pass|fail|pending|skipped|unknown"}], filled by a 60s
+# poller so the per-3s dashboard tick never hammers the GitHub API.
 CI_CACHE = {}
 _UNREADABLE_REPORTED = set()
 
 
-ACCOUNTS_REFRESH_SECONDS = 600  # owner's cadence: each refresh is one API call per account
+ACCOUNTS_REFRESH_SECONDS = 600  # ten minutes: each refresh is one API call per account
 # "Refresh now" on the page. One press is one request per account to the vendor, so a second
 # press inside a minute is refused rather than queued: an account that is being throttled is
 # made worse by asking again.
@@ -2570,7 +2570,7 @@ SIZE_OR_REGION = re.compile(r"[a-z0-9][a-z0-9-]{1,31}")
 # A confirmed monthly price: plain digits, and cents if any. No sign, exponent, underscore or
 # `inf`, each of which float() accepts and none of which the CLI's own comparison expects.
 CONFIRM_USD = re.compile(r"[0-9]{1,5}(?:\.[0-9]{1,4})?")
-# user@host, each side starting with a letter or a digit for the same reason: `-lroot@10.0.0.4`
+# user@host, each side starting with a letter or a digit for the same reason: `-lroot@192.0.2.4`
 # would otherwise reach `--target` reading as an ssh option.
 SSH_TARGET = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9.-]*")
 # One line of an OpenSSH public key: the type, the base64 body, and the optional comment. Not a
@@ -2909,7 +2909,7 @@ def _machines_add_own(body, name):
     target = str(body.get("target") or "").strip()
     if not SSH_TARGET.fullmatch(target):
         return 400, {"error": "a machine of your own is named user@host, for example "
-                              "farm@10.0.0.4"}
+                              "farm@192.0.2.4"}
     args = [fleet_bin(), "machines", "add", "--name", name, "--target", target]
     raw = body.get("port")
     if raw not in (None, ""):
@@ -3324,11 +3324,11 @@ _feed_snapshots = {}
 _feed_windows = [float(MAIL_WINDOW_HOURS)]
 FEED_WINDOWS_TRACKED = 8
 # The timeline is ASSEMBLED HERE, never by running `hq feed`. That command re-reads every
-# mailbox in the office for itself: on the farm with ninety nine of them it takes eighty seven
-# seconds, which is past any timeout a page can wait behind, so the route answered an error and
-# the Overview said the agents had been silent all day. Everything the timeline shows is
+# mailbox in the office for itself: an office of about a hundred mailboxes takes well over a
+# minute, which is past any timeout a page can wait behind, so the route would answer an error
+# and the page would say the agents had been silent all day. Everything the timeline shows is
 # already held: the threads this server reads for the Mail tab, the sessions `hq who` reports
-# in 0.7s, and the live branch claims.
+# in under a second, and the live branch claims.
 FEED_TEXT_LIMIT = 200
 # A day of a busy office is thousands of messages, and no reader scrolls past the newest few
 # hundred. The cut keeps the newest, which is the end a timeline is read from.
@@ -3640,9 +3640,9 @@ def _check_state(check):
 def _ci_parse(rollup):
     """A PR's statusCheckRollup -> [{"name": ..., "state": ...}], in the order the forge gave.
 
-    EVERY check is kept, under the name the forge reported it by. This used to keep only names
-    containing backend, frontend or docker, which is one farm's job names baked into the tool:
-    a farm whose jobs are called anything else read as "nothing has reported yet", forever.
+    EVERY check is kept, under the name the forge reported it by. Keeping only names such as
+    backend, frontend or docker would bake one farm's job names into the tool, and a farm whose
+    jobs are called anything else would read as "nothing has reported yet", forever.
     """
     out = []
     for check in rollup or []:
@@ -4063,7 +4063,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif self.path.startswith("/api/accounts/add"):
                 engine = (body.get("engine") or "claude").strip()
                 if engine == "codex":
-                    # codex is a single shared account (~/.codex, Team plan): no dir-per-name; this
+                    # codex is a single shared account (~/.codex): no dir-per-name; this
                     # just re-logs it in through the SSH-tunnelled OAuth callback.
                     self._send(200, json.dumps({
                         "name": "codex", "engine": "codex",
@@ -4082,8 +4082,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if os.path.isdir(path) and os.path.exists(os.path.join(path, ".credentials.json")):
                     self._send(409, json.dumps({"error": "account already exists"})); return
                 os.makedirs(path, exist_ok=True)
-                # The login is interactive OAuth on the user's Mac: this command opens Claude in the
-                # new account's config dir; the user runs /login inside and pastes the browser code.
+                # The login is interactive OAuth on the user's machine: this command opens Claude in
+                # the new account's config dir; the user runs /login inside and pastes the browser
+                # code.
                 cmd = ("ssh -t %s 'CLAUDE_CONFIG_DIR=$HOME/.fleet/claude-accounts/%s claude'"
                        % (CA.FARM_ALIAS, name))
                 self._send(200, json.dumps({

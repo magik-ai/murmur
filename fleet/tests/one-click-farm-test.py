@@ -1064,11 +1064,11 @@ class DashboardBind(Scratch):
                               capture_output=True, text=True, timeout=120,
                               env=dict(os.environ, FAKE_LOG=self.fake_log,
                                        FAKE_STATE_DIR=self.fake_state,
-                                       FAKE_TAILSCALE_ANSWERS="100.101.102.103",
+                                       FAKE_TAILSCALE_ANSWERS="100.64.1.2",
                                        PATH=DASH_FAKES + os.pathsep + os.environ["PATH"],
                                        **scratch_env))
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(done.stdout), [["127.0.0.1", ""], ["100.101.102.103", ""],
+        self.assertEqual(json.loads(done.stdout), [["127.0.0.1", ""], ["100.64.1.2", ""],
                                                    ["::1", ""]])
 
 

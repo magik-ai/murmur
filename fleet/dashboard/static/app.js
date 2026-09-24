@@ -12,17 +12,17 @@ import {
 import board from "./views/board.js";
 import mail from "./views/mail.js";
 
-/* The machine tab is written in its own lane, in its own file. Until that file is on the
-   farm the tab is here and says so, rather than taking the whole page down with a failed
+/* The machine tab is a file of its own, loaded after the page. Until it has loaded, or if it
+   cannot be, the tab is here and says so, rather than taking the whole page down with a failed
    import: a missing module in a static import list is a blank screen, not a missing tab. */
 const machineSoon = {
   id: "machine",
   title: "Machine",
   needs: [],
   render: () => emptyState({
-    title: "The machine controls are coming from the machine lane",
+    title: "The machine controls have not loaded",
     body: "Power, services, accounts, models and projects live here. "
-      + "Until that file is installed, use the command line for them.",
+      + "Reload the page; until they load, use the command line for them.",
     command: "fleet status",
   }),
 };
@@ -207,8 +207,8 @@ export function paint() {
 }
 
 /* The build this tab was loaded from. A tab left open across a deploy keeps running the old code
-   against the new data, which looks exactly like a fix that never shipped (owner, 2026-09-23: the
-   Board "lost" its Fable limits in a tab opened before the deploy that added them). */
+   against the new data, which looks exactly like a fix that never shipped: a tab opened before
+   a deploy that adds a limit to the Board goes on drawing the Board without it. */
 let loadedBuild = "";
 
 function newBuildNote() {
@@ -302,8 +302,8 @@ function paintFreshness() {
   node.hidden = !(failing || stale.length > 0);
 }
 
-/* The sweep's countdown is one short line in the header, where the owner's first dashboard
-   kept it: it looks after the whole machine, so it belongs on every tab, not on a Board tile. */
+/* The sweep's countdown is one short line in the header: it looks after the whole machine, so
+   it belongs on every tab, not on a Board tile. */
 function paintSweep() {
   const node = document.getElementById("sweepNote");
   if (!node) return;
@@ -327,7 +327,7 @@ function paintSweep() {
   }
 }
 
-/* The header says whether the farm is working, in the owner's words (2026-09-24): on, paused or
+/* The header says whether the farm is working, in three words: on, paused or
    off. Off is the agent runner stopped, so nothing starts or restarts; paused is the power
    setting on Paused, so nothing new starts; on is everything else. */
 function paintFarmState() {
@@ -401,8 +401,8 @@ function paintPower() {
 }
 
 /* The five settings are a select, the same field as the project filter beside it: five
-   buttons on a sunk track were the widest and the odd one out in the header (owner audit,
-   2026-09-24), and on a phone they did not fit at all. */
+   buttons on a sunk track would be the widest thing in the header and the odd one out, and on
+   a phone they do not fit at all. */
 function paintPowerPick(pick, mode) {
   const allowed = api.access.writable;
   pick.disabled = !allowed || Boolean(state.powerBusy);
@@ -639,8 +639,8 @@ function wire() {
   });
 }
 
-/* The machine tab, once its lane has installed its file. A tab that is not there yet is a
-   tab that says so; it is never a reason for the other two not to draw. */
+/* The machine tab, once its file has loaded. A tab that is not there yet is a tab that says
+   so; it is never a reason for the other two not to draw. */
 async function adoptMachine() {
   try {
     const module = await import("./views/machine.js");

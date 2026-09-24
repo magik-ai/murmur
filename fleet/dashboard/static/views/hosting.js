@@ -535,7 +535,7 @@ function providerCard(context, row, mark, extra) {
     h("b", null, row.label || row.id),
     stage ? h("span", { class: "h-stage" }, stage) : null),
   /* Two short lines on a card, and the price, the terms and any warning only once it is
-     picked: cards of fine print are a wall nobody reads (owner, 2026-09-24). */
+     picked: cards of fine print are a wall nobody reads. */
   h("div", { class: "muted m-preset-sum", title: row.summary || "" }, row.summary || ""),
   chosen ? providerFacts(row, extra) : null);
 }
@@ -660,7 +660,7 @@ function ownFields(context) {
       "aria-label": "user at host",
       "data-target": "",
       "data-field": "target",
-      placeholder: "farm@192.168.1.40",
+      placeholder: "farm@192.0.2.40",
       value: local.target,
       oninput: (event) => {
         local.target = event.target.value;
@@ -808,7 +808,7 @@ function validate(context, preset, full) {
   if (preset.id === "ssh") {
     const target = local.target.trim();
     if (!target) return "Say which account and address this farm logs in to, as user@host.";
-    if (!TARGET_RE.test(target)) return "A target reads user@host, for example farm@192.168.1.40.";
+    if (!TARGET_RE.test(target)) return "A target reads user@host, for example farm@192.0.2.40.";
     const port = local.port.trim();
     if (port && !/^\d{1,5}$/.test(port)) return "A port is a whole number.";
     if (port && (Number(port) < 1 || Number(port) > 65535)) return "A port is between 1 and 65535.";

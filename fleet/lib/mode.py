@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Power modes — hand CPU back to Windows when you're using the PC, take it all when idle.
+"""Power modes — hand the CPU back when you are using the machine, take it all when idle.
 
-The farm runs in a WSL distro whose agents live in a systemd --user slice, `fleet.slice`
-(the spawn launcher puts them there). Because that slice is in the user manager's delegated
-cgroup subtree, we can cap its CPU LIVE and REVERSIBLY with `systemctl --user set-property`
-— no root, no WSL restart, no killing agents. That's the whole trick.
+The farm's agents live in a systemd --user slice, `fleet.slice` (the spawn launcher puts them
+there). Because that slice is in the user manager's delegated cgroup subtree, we can cap its CPU
+LIVE and REVERSIBLY with `systemctl --user set-property` — no root, no restart, no killing
+agents. That's the whole trick.
 
 Modes:
   full      no cap, spawns on           — the farm takes everything (default when idle)
@@ -18,12 +18,12 @@ FLEET_NVIDIA_SMI) it is INERT: it resolves to full and says so once, rather than
 to read a game that nothing is watching for. The manual profiles work regardless.
 
 A sensor that IS there and fails to answer (nvidia-smi timing out under load is the common
-case) is a different thing entirely, and used to be treated the same: one slow read released
-the cap to full, the next one throttled back to soft, and the farm yo-yoed while somebody was
-gaming. A failed read keeps whatever profile is in force and leaves the hysteresis alone.
+case) is a different thing entirely. Treated the same, one slow read would release the cap to
+full, the next would throttle back to soft, and the farm would yo-yo while somebody was gaming.
+A failed read keeps whatever profile is in force and leaves the hysteresis alone.
 
 `auto` is the default and deliberately picks SOFT, never a harder profile: casually using
-the PC must not stop the fleet — it just steps aside. Pick a harder profile by hand
+the machine must not stop the fleet — it just steps aside. Pick a harder profile by hand
 (`fleet mode balanced|hard`, or the dashboard selector) for a serious session. A manual
 pick always wins over auto until you set `fleet mode auto` again.
 
@@ -222,7 +222,7 @@ def resolve_effective(setting, gpu_util, rt, auto, sensor_present=False):
 
     `sensor_present` separates the two reasons gpu_util can be None. No sensor at all resolves
     to full, because nothing will ever throttle it. A sensor that failed THIS read keeps the
-    profile already in force: releasing the cap on a timeout is how the farm used to yo-yo
+    profile already in force: releasing the cap on a timeout would make the farm yo-yo
     between full and soft while somebody was gaming."""
     if setting != "auto":
         return setting

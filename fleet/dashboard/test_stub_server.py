@@ -271,11 +271,10 @@ MODELS = [
      "installed": True, "path": "/home/farm/.local/bin/demostrict", "last_test": None,
      "install_hint": "npm install -g @example/demo-strict",
      "in_catalog": True, "catalog_note": ""},
-    # A row murmur no longer ships: this farm added Grok Build before its preset was removed on
-    # 2026-09-24, and its models.toml still lists it. The server reads it as it always did and
-    # marks it in_catalog false, with lib/models.py's own sentence (catalog_standing) on how its
-    # owner takes it out. Nothing removes it for them, and it still offers Remove because this
-    # farm added it.
+    # A row murmur does not ship: this farm's models.toml lists Grok Build, whose preset this
+    # checkout does not carry. The server reads it and marks it in_catalog false, with
+    # lib/models.py's own sentence (catalog_standing) on how to take it out. Nothing removes it
+    # for the person, and it still offers Remove because this farm added it.
     {"id": "grok", "label": "Grok Build", "color": "#1A1A1A", "enabled": False,
      "engine": "generic", "source": "added", "preset": "grok", "status": "off",
      "variant": "",
@@ -508,7 +507,7 @@ HEALTH_ERROR = [
     {"id": "cpu_temp_sensor", "label": "temperature sensor", "state": "error",
      "detail": "The sensor package is installed but returned nothing.", "fix": "sudo sensors-detect"},
     {"id": "sweep_timer", "label": "sweep timer", "state": "off", "detail": "not enabled on this machine",
-     "fix": "fleet autosweep --enable"},
+     "fix": "fleet autosweep on"},
     {"id": "office", "label": "head office", "state": "missing", "detail": "no office to reach",
      "fix": "hq init --repo <owner>/<office>"},
 ]
@@ -692,8 +691,8 @@ def power_preview(action):
 
 # ------------------------------------------------------------------- hosting
 
-# The providers as fleet/lib/host_presets.py serves them (design section 2), with the facts of
-# the research pass of 2026-09-23: sizes, prices, stages and what each one is honest about.
+# The providers as fleet/lib/host_presets.py serves them (design section 2), with its facts:
+# sizes, prices, stages and what each one is honest about.
 # Nothing in this file talks to a provider, and no secret value is ever held here.
 HOST_PRESETS = [
     {"id": "ssh", "label": "Your own machine", "summary": "A Linux box you already reach over SSH. Nothing new to pay for.", "color": "#7A8699", "job": "machine", "cli": "ssh",
@@ -798,10 +797,10 @@ MACHINES = [
      "size": "s-2vcpu-4gb", "monthly_usd": 24, "region": "fra1", "state": "unrecorded",
      "detail": "tagged murmur-by-quartz at the provider and not in this registry",
      "checked_at": ago(120), "provider_id": 4008, "finish_command": "", "tunnel_command": ""},
-    {"name": "ithaca", "provider": "ssh", "user": "dev", "address": "192.168.1.40",
+    {"name": "ithaca", "provider": "ssh", "user": "farm", "address": "192.0.2.40",
      "size": "", "monthly_usd": 0, "region": "", "state": "ready",
      "detail": "fleet capacity answered", "checked_at": ago(600), "provider_id": None,
-     "finish_command": "", "tunnel_command": TUNNEL_TEMPLATE.format(address="192.168.1.40")},
+     "finish_command": "", "tunnel_command": TUNNEL_TEMPLATE.format(address="192.0.2.40")},
 ]
 
 # A lane name on a real farm is longer than a card, and so is a machine name a person gave a
@@ -907,7 +906,7 @@ def machine_plan(body):
          "/tmp/xxxx.pub", "--context", "murmur"],
         # Inbound SSH only, and every outbound rule: a DigitalOcean firewall denies whatever it
         # does not list, outbound included, so one without these would cut the farm off from
-        # GitHub and the model providers (internal/research/report-hosting.md, "Firewall").
+        # GitHub and the model providers.
         ["doctl", "compute", "firewall", "create", "--name", "murmur-ssh-only", "--tag-names",
          "murmur-farm", "--inbound-rules",
          "protocol:tcp,ports:22,address:0.0.0.0/0 protocol:tcp,ports:22,address:::/0",
@@ -1423,7 +1422,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                    "base_branch": "main", "ports": {"web": base, "api": 8100, "e2e": 9100},
                    "lanes_open": 0, "last_activity": time.time()}
             SENT["projects"].append(row)
-            # The real server clones the repository, so it answers with a job (amendment 7).
+            # The real server clones the repository, so it answers with a job.
             job = job_new("add_project", f"registering {body['name']}", seconds=2)
             return self._json(202, {"job": job})
         if parsed.path in ("/api/models/discover", "/api/models/select"):  # stub_models.py

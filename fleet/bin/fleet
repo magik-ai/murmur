@@ -30,10 +30,10 @@ _load_env_file() {
 }
 _load_env_file
 
-# Playwright's browsers ship without their OS libraries and the host has no passwordless sudo, so
-# the .debs are unpacked user-locally instead. Without this a lane's Chromium dies with
+# Playwright's browsers ship without their OS libraries. A host with no passwordless sudo keeps
+# the .debs unpacked user-locally, under the path below. Without this a lane's Chromium dies with
 # "libnspr4.so: cannot open shared object file" and the agent reports a farm limitation rather than
-# a result — three lanes lost their turn to exactly that.
+# a result.
 FLEET_PW_LIBS="$HOME/.local/pwdeps/root/usr/lib/x86_64-linux-gnu"
 if [ -d "$FLEET_PW_LIBS" ]; then
   export LD_LIBRARY_PATH="$FLEET_PW_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -144,8 +144,8 @@ cmd_identity() { # show or set the mark for a code name
   "$PY" "$FLEET_HOME/lib/identity.py" cli "$@"
 }
 
-# Stop an agent's process container — new (systemd --user service in fleet.slice) or a
-# legacy tmux session still running from before the switch. Try both; ignore what's absent.
+# Stop an agent: its systemd --user service in fleet.slice, and a tmux session of the same name
+# if one is left. Try both; ignore what's absent.
 _stop_agent() { # $1 = slug
   systemctl --user stop "fleet-$1" 2>/dev/null || true
   systemctl --user reset-failed "fleet-$1" 2>/dev/null || true
@@ -313,7 +313,7 @@ cmd_spawn() {
     claude|codex) ;;
     *) if [ "$("$PY" "$FLEET_HOME/lib/models.py" routable "$engine" 2>/dev/null)" != "yes" ]; then
          # No row to enable: `fleet models enable` would only answer "no such model". An engine
-         # murmur used to ship (Gemini CLI, Grok Build, ...) lands here once its preset is gone.
+         # with no preset in this catalog lands here.
          if [ "$("$PY" "$FLEET_HOME/lib/models.py" field "$engine" id 2>/dev/null)" != "$engine" ]; then
            echo "engine '$engine' is not in murmur's catalog: murmur ships Claude Code and Codex."
            echo "  adding a preset for it is a contribution: see CONTRIBUTING.md, \"An engine preset\""
@@ -334,9 +334,9 @@ cmd_spawn() {
       case "$effort" in low|medium|high|xhigh) ;; *) echo "unknown effort '$effort' (low|medium|high|xhigh)"; return 1;; esac
     fi
     # No --account means `auto`: round-robin over every account with session and weekly headroom
-    # (lib/claude_accounts.py resolve_auto). Without this default a lane silently took the
-    # default account, the pool shared with the owner's own sessions, and died on its first
-    # step once that account hit its weekly limit. A name pins that account.
+    # (lib/claude_accounts.py resolve_auto). Without this default a lane would silently take the
+    # default account, the pool shared with your own sessions, and die on its first step once
+    # that account hit its weekly limit. A name pins that account.
     # Resolution fails loudly when the account has no credentials or nothing has headroom.
     [ -z "$account" ] && account="auto"
     account_dir="$("$PY" "$FLEET_HOME/lib/claude_accounts.py" dir "$account")" || return 1
@@ -360,7 +360,7 @@ cmd_spawn() {
     IFS=$'\t' read -r icon color <<< "$_id"
   fi
 
-  # Train/DAG gate (P1-5): --after defers the spawn. Record a pending spec and STOP here —
+  # Train/DAG gate: --after defers the spawn. Record a pending spec and STOP here —
   # before any dashboard/capacity/worktree work — so a gated lane creates nothing until the
   # daemon fires it when its dependency delivers. (Needs `fleet daemon` running, like --restart.)
   if [ -n "$after" ]; then
@@ -602,7 +602,7 @@ except Exception:
     pass
 PY
 
-  # agent-hq (phase 2): the lane starts knowing who it is at HQ, and any unread
+  # Head office: the lane starts knowing who it is there, and any unread
   # coordination mail rides into THIS launch's prompt. The brief file persisted
   # above stays clean, so a respawn never replays stale mail.
   if [ "$hq_on" = "1" ]; then
@@ -738,7 +738,7 @@ RUN
 }
 
 cmd_events() {
-  # Tail the append-only event stream (P1-6): lane started/pr-opened/exited, delivered,
+  # Tail the append-only event stream: lane started/pr-opened/exited, delivered,
   # respawned, dropped-scope. Stateless filtering — no subscriptions. See lib/events.py.
   #   fleet events --follow --project myproj --lane my-lane
   #   fleet events --since <unix_ts> --json
@@ -1988,7 +1988,7 @@ fleet: headless Claude Code and Codex agents on the farm
                                   a new bind or token takes effect, and `status` reports the
                                   socket it is really listening on
   fleet mode [auto|full|soft|balanced|hard]
-                                  power mode — hand CPU back to Windows when you game.
+                                  power mode — give the CPU back when you use the machine.
                                   auto (default): full when the GPU is idle, soft when
                                   it's busy (you're playing). soft ~50% CPU keeps spawning;
                                   balanced ~35% / hard ~20% PAUSE new spawns. Live, no

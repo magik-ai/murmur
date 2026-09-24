@@ -278,7 +278,7 @@ code, .mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular
 }
 .side-foot { padding: 10px 16px; border-top: 1px solid var(--line); font-size: 11px; }
 
-/* The header has two groups and nothing else (owner audit, 2026-09-24): on the left how the
+/* The header has two groups and nothing else: on the left how the
    farm is, in plain words; on the right what the reader can change, every piece the same
    field or button at the same height. The page's name is not here: the sidebar already says
    which tab is open, so the title stays for a screen reader only. */
@@ -356,9 +356,9 @@ body.fixed-page .readonly-strip { margin-bottom: 0; }
 /* --------------------------------------------------------- 4. controls */
 
 /* One control system. Every button, field, select and switch on a screen is one height and
-   speaks one type, so a row of them lines up without anybody lining it up: the owner's audit
-   (2026-09-23) found a 12px caption beside a 13px select beside a 24px bubble beside a 34px
-   switch in a single filter row. */
+   speaks one type, so a row of them lines up without anybody lining it up. Without it, a
+   single filter row held a 12px caption beside a 13px select beside a 24px bubble beside a 34px
+   switch. */
 button { font: inherit; color: inherit; }
 
 .ghost-button, .button {
@@ -594,13 +594,13 @@ thead th:has(.sortby) { padding: 0; }
 }
 .sortby:hover { color: var(--text); }
 /* Every table's actions sit in one last column of one width, and every button in it is the same
-   size, so the actions line up down a table and from one table to the next (owner, 2026-09-24).
+   size, so the actions line up down a table and from one table to the next.
    Three buttons at most; a destructive one is always last, in the danger ink. */
 th.actions, td.actions { width: 276px; min-width: 276px; max-width: 276px; text-align: right; }
 th.actions.one, td.actions.one { width: 104px; min-width: 104px; max-width: 104px; }
 /* Between a phone and a 1600px window the widest tables lay out in fixed columns, so
    they fit the window instead of scrolling sideways: a cell that does not fit is cut, with its
-   whole text on the title, and the machines lose their Last check column (owner, 2026-09-24).
+   whole text on the title, and the machines lose their Last check column.
    A phone keeps the sideways scroll: six columns do not share 358px. */
 @media (min-width: 641px) and (max-width: 1599px) {
   table.h-machines, table.m-services { table-layout: fixed; }
@@ -610,9 +610,8 @@ th.actions.one, td.actions.one { width: 104px; min-width: 104px; max-width: 104p
   table.m-services .m-col-svc-state { width: 11%; }
   table.m-services .m-col-change { width: 12%; }
 }
-/* The agents table has eight columns since the Model column joined (owner, 2026-09-24), and
-   below 1600 it lays them out in fixed shares so it fits the window: a cut cell keeps its
-   words on its title, as the Machine tables do. */
+/* The agents table has eight columns, and below 1600 it lays them out in fixed shares so it
+   fits the window: a cut cell keeps its words on its title, as the Machine tables do. */
 @media (min-width: 641px) and (max-width: 1599px) {
   table.agents-table { table-layout: fixed; }
   table.agents-table th { overflow: hidden; text-overflow: ellipsis; }
@@ -829,8 +828,8 @@ body.fixed-page .update-strip { margin-bottom: 0; }
   font-size: 12px; color: var(--text-dim);
 }
 .foot > * { min-width: 0; overflow-wrap: anywhere; }
-/* The engine a lane or an account spends, as its vendor's mark, at the right edge like the
-   first farm page drew it. The words stay on the title. */
+/* The engine a lane or an account spends, as its vendor's mark, at the right edge. The words
+   stay on the title. */
 .engine-mark { width: 16px; height: 16px; flex: none; color: var(--text); opacity: 0.8; }
 .foot .engine-at { margin-left: auto; display: inline-flex; }
 .model-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
@@ -868,7 +867,7 @@ button.agent-card {
    reader opened this page, and every tall tile above them is a tile in their way. */
 .grid.strip-tiles { grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 12px; }
 .strip-tiles .tile { min-height: 84px; }
-/* Every subscription in one row (owner ruling 2026-09-22: four plus an orphan looked wrong).
+/* Every subscription in one row: four and an orphan on a line of its own reads as a mistake.
    The row divides its width by the count, down to a floor, and only past six does it wrap. */
 .grid.accounts-row { grid-template-columns: repeat(auto-fit, minmax(max(150px, calc((100% - 5 * 12px) / 6)), 1fr)); }
 button.account-chip {

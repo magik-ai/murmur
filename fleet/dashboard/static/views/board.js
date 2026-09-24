@@ -72,8 +72,8 @@ function tile(label, value, note, state, key) {
   /* Every tile has the same three rows in the same places: label at the top, value under it,
      note pinned to the bottom. A long note is cut with an ellipsis and carried in full in its
      title, so a long path or a long sensor name never makes one tile taller than its row. */
-  /* The state pill sits in the note row, never beside the label: beside it, a pill squeezed
-     "Temperature" into "Temper..." on the reference farm. */
+  /* The state pill sits in the note row, never beside the label: beside it, a pill squeezes
+     "Temperature" into "Temper...". */
   return card({ class: "card-pad tile", key: key || label },
     h("div", { class: "label" }, h("span", { class: "label-text" }, label)),
     h("div", { class: "value", "data-flash": "", title: value }, value),
@@ -119,8 +119,8 @@ function heatTile(context, metrics) {
     metrics.cpu_temp_source || "", null);
 }
 
-/* Capacity and the sweep are not tiles any more: both are one short line in the header, which
-   is on every tab (owner audit 2026-09-23), and a tile here only said the same thing again. */
+/* Capacity and the sweep are not tiles: both are one short line in the header, which is on
+   every tab, and a tile here would only say the same thing again. */
 
 function machineStrip(context) {
   const resource = context.res("/api/metrics");
@@ -181,8 +181,8 @@ function accountCard(account, context) {
       + "Open this subscription on the Machine tab",
     onclick: () => context.go("machine", { section: "accounts", account: account.name }),
   },
-    /* The engine rides in the top right corner as its vendor's mark, where the first farm page
-       drew it (owner, 2026-09-24); an engine without a mark stays a word. */
+    /* The engine rides in the top right corner as its vendor's mark; an engine without a mark
+       stays a word. */
     h("div", { class: "label" },
       h("b", null, account.label || account.name),
       h("div", { class: "spacer" }),

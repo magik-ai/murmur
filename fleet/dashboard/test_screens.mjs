@@ -45,7 +45,7 @@ async function measured(page, state, tab, size) {
       };
     });
     return [
-      // Five tiles since the owner's audit of 2026-09-23: Capacity and the sweep are header lines.
+      // Five tiles: capacity and the sweep are header lines, not tiles.
       ["puts the machine on one strip", seen.strip === 5, JSON.stringify(seen)],
       ["says when the sweep runs in the header", /^Sweep /.test(seen.sweep), seen.sweep],
       ["puts every subscription on the strip under it", seen.accounts >= 2, String(seen.accounts)],
@@ -108,7 +108,7 @@ async function measured(page, state, tab, size) {
         size.width === 390 || (seen.names[0] === "all" && seen.first === "Everyone"), seen.names.join(", ")],
       ["never scrolls the page under the panes", !seen.pageScrolls, String(seen.pageScrolls)],
       ["keeps the composer on the screen", seen.composer, String(seen.composer)],
-      ["says none of the words the amendment forbids", jargon.length === 0, jargon.join(", ")],
+      ["says none of the jargon words", jargon.length === 0, jargon.join(", ")],
     ];
   }
   if (tab === "mail" && state === "error") {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scope-manifest enforcement (P0-4) in a throwaway FLEET_STATE with a stubbed `gh` — proves a
+"""Scope-manifest enforcement in a throwaway FLEET_STATE with a stubbed `gh` — proves a
 lane with --issues cannot 'deliver' while any issue is dropped, and that delivered/dropped is
 classified correctly. Never touches the real farm."""
 import json

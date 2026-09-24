@@ -77,8 +77,9 @@
 .m-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex: none; }
 .m-runs .cmd { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m-detail { font-size: 11px; line-height: 1.4; margin-top: 3px; overflow-wrap: anywhere; }
-/* One line in the table, whatever buttons a row has (the owner's one-line rule): three buttons
-   used to wrap and make that one row twice as tall. In the phone card list they may wrap. */
+/* One line in the table, whatever buttons a row has (the one-line table rule): three buttons
+   would otherwise wrap and make that one row twice as tall. In the phone card list they may
+   wrap. */
 .m-row-actions { gap: 6px; flex-wrap: nowrap; align-items: center; }
 .m-detail-list dd { overflow-wrap: anywhere; }
 
@@ -127,7 +128,7 @@
 .m-label { color: var(--text-dim); font-size: 12px; }
 .m-keyline { color: var(--tone-wait); }
 
-/* Table cells are one line each (owner rule 2026-09-23): a pill and its sentence sit side by
+/* Table cells are one line each: a pill and its sentence sit side by
    side, the sentence cut with an ellipsis and carried in full by the cell's title. */
 /* The sentence yields to the windows: three bars with their numbers need the room more than
    the tail of "Lanes can be spawned on this account", which the title carries in full. */

@@ -2,10 +2,8 @@
 """The places a farm can run, one dict each.
 
 Every preset is a machine: a whole farm, with systemd user services, tmux, worktrees, the
-dashboard and the installer as it is. murmur ships two, the ones it has run for real: a Linux
-box you already reach over SSH, and a DigitalOcean Droplet. The remote runners that once sat
-here (DigitalOcean Managed Agents, Railway and Vercel sandboxes) were removed on 2026-09-24 by
-the owner's decision; see CONTRIBUTING.md for how to add a machine preset.
+dashboard and the installer as it is. murmur ships two: a Linux box you already reach over SSH,
+and a DigitalOcean Droplet. CONTRIBUTING.md says how to add a machine preset.
 
 Fields, all present on every preset so a reader never has to guess:
 
@@ -27,10 +25,9 @@ Fields, all present on every preset so a reader never has to guess:
   regions   the regions this farm offers, first is the default, may be empty
   engines   the fleet engines this hosting can run
 
-Accuracy. Every command, flag and number below comes from the research pass of 2026-09-23
-(`internal/research/report-hosting.md` and `internal/research/report-hosting-cli.md`). Where
-that pass could not confirm something from a vendor's own page, the preset says UNVERIFIED in
-its `terms` rather than inventing a flag. Prices move: the droplet numbers are labelled "list
+Accuracy. Every command, flag and number below was read from the vendors' own pages on
+2026-09-23. Where a page could not confirm something, the preset says UNVERIFIED in its `terms`
+rather than inventing a flag. Prices move: the droplet numbers are labelled "list
 price on 2026-09-23" and `fleet machines plan` prefers the live price from the provider.
 """
 import copy
@@ -38,8 +35,8 @@ import re
 
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 
-# The date the research pass read the vendors' pricing pages. Every number below is from that
-# day, and every place that shows a price to a person shows this with it.
+# The date the vendors' pricing pages were read. Every number below is from that day, and every
+# place that shows a price to a person shows this with it.
 PRICED_ON = "2026-09-23"
 LIST_PRICE_NOTE = f"list price on {PRICED_ON}"
 
@@ -49,7 +46,7 @@ LIST_PRICE_NOTE = f"list price on {PRICED_ON}"
 # FLEET_DOCTL_CONTEXT (an empty value means doctl's own default context).
 DOCTL_CONTEXT = "murmur"
 
-# The droplet sizes this farm offers, exactly the research table (Basic, Regular Intel).
+# The droplet sizes this farm offers (Basic, Regular Intel).
 DEFAULT_SIZE = "s-4vcpu-8gb"
 DROPLET_SIZES = [
     {"slug": "s-2vcpu-4gb", "label": "2 vCPU, 4 GB, 80 GB disk",
@@ -93,9 +90,9 @@ PRESETS = [
         "color": "#0069FF",
         "job": "machine",
         "cli": "doctl",
-        # The research pass read doctl's command reference, not its packaging page, so the
-        # install line sends a person to the vendor rather than naming a package that may be
-        # wrong on their system. The terms sentence says so.
+        # doctl's command reference was read, not its packaging page, so the install line
+        # sends a person to the vendor rather than naming a package that may be wrong on their
+        # system. The terms sentence says so.
         "install": "see https://docs.digitalocean.com/reference/doctl/how-to/install/",
         "login": "doctl auth init --context murmur",
         "whoami": ["doctl", "account", "get", "-o", "json", "--context", DOCTL_CONTEXT],

@@ -76,7 +76,7 @@ async function measured(page, state, screen, size) {
         ["Power", "Services", "Accounts", "Models", "Projects"]
           .every((word) => body.includes(word)), body.slice(0, 120)],
       ["draws no Settings section, which only repeated where files live",
-        !body.includes("written where they live"), "the owner asked for it gone"],
+        !body.includes("written where they live"), "the settings live in their files"],
       ["draws no Health section on a farm that has not asked for one",
         !body.includes("What this farm needs"), "Health is off unless FLEET_DASH_HEALTH=on"],
       ["says the dashboard keeps running through a power action, on the Power heading",

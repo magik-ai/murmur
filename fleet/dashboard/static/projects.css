@@ -1,6 +1,6 @@
 /* Projects: the GitHub strip, the import dialog and the six-column table. Every class here is
    prefixed p- and every colour is a token from app.css. Every table cell is one line (the
-   owner's table rule): cut with an ellipsis, the full text in the cell's title. */
+   one-line table rule): cut with an ellipsis, the full text in the cell's title. */
 
 .p-link {
   padding: 0; border: 0; background: none; cursor: pointer;
@@ -77,7 +77,7 @@ input.p-search, .p-paste-row input { max-width: none; }
 /* ------------------------------------------------------------ the table */
 
 .p-table { table-layout: fixed; }
-/* The actions column is the same 276px as in every other table (owner, 2026-09-24); the
+/* The actions column is the same 276px as in every other table; the
    Repository column takes what is left. */
 .p-col-project { width: 17%; }
 .p-col-access { width: 12%; }

@@ -162,7 +162,7 @@ async function openScreen(page, screen) {
     await page.waitForTimeout(400);
     if (screen === "add-machine-own") {
       await page.fill("#drawer [data-machine-name]", "loft");
-      await page.fill("#drawer [data-target]", "dev@192.168.1.55");
+      await page.fill("#drawer [data-target]", "farm@192.0.2.55");
       await scrollToStep(page, 2);
       return true;
     }
@@ -235,7 +235,7 @@ for (const state of STATES) {
         for (const [name, passed, detail] of await measured(page, screen, state)) {
           check(`${state} hosting ${size.width} ${name}`, passed, detail);
         }
-        /* The owner's rule, measured in the same pass that photographs it. */
+        /* The one-line table rule, measured in the same pass that photographs it. */
         const heights = await page.evaluate(() => {
           const out = {};
           for (const table of document.querySelectorAll("#view .h-machines")) {

@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """The engines a person can add as a model, one dict each.
 
-murmur ships the two engines it has run for real, Claude Code and Codex, and the shipped catalog
-(config/models.example.toml) already carries both. The other presets that once sat here (Gemini
-CLI, Qwen Code, Kimi Code, Grok Build, OpenCode, Aider, Ollama and the free-form Custom command)
-were removed on 2026-09-24 by the owner's decision.
+murmur ships presets for two engines, Claude Code and Codex, and the shipped catalog
+(config/models.example.toml) already carries both. CONTRIBUTING.md says how to add another.
 
 The list is still the mechanism an engine is added by: a preset is a description complete enough
 that adding it is picking a card, naming it, and pasting one command. The dashboard's Add a model

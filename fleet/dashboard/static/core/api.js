@@ -154,21 +154,21 @@ export function normaliseError(error, path = "") {
       return {
         title: "This dashboard cannot read that",
         body: said || "The server refused the request because it carried no dashboard token.",
-        command: "fleet dash --print-token",
+        command: "fleet dashboard token",
       };
     }
     if (error.status === 404) {
       return {
         title: "The server does not serve this route",
         body: `${path || error.path} is missing, so this panel has nothing to read. The page and the server are different versions.`,
-        command: "fleet update && fleet dash --restart",
+        command: "git -C <murmur checkout> pull && fleet dashboard restart",
       };
     }
     if (said === UNREADABLE) {
       return {
         title: "The answer could not be read",
         body: `${path || error.path} answered something that is not the data this page expects. A proxy or a sign-in page in front of the farm does exactly this.`,
-        command: "fleet dash --status",
+        command: "fleet dashboard status",
       };
     }
     if (said) {
@@ -188,14 +188,14 @@ export function normaliseError(error, path = "") {
   if (error && error.name === "AbortError") {
     return {
       title: "The server took too long to answer",
-      body: `${path || ""} did not come back within thirty seconds, so this panel has nothing to show yet. A route that reads the forge on every farm is the usual reason.`.trim(),
-      command: "fleet dash --status",
+      body: `${path || ""} did not come back within thirty seconds, so this panel has nothing to show yet.`.trim(),
+      command: "fleet dashboard status",
     };
   }
   return {
     title: "The dashboard server did not answer",
     body: "Nothing came back from the server, so this panel has no data. Check that it is still running.",
-    command: "fleet dash --status",
+    command: "fleet dashboard status",
   };
 }
 

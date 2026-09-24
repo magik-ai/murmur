@@ -1,7 +1,7 @@
 /* Hosting. Every class here is prefixed h- and every colour is a token from app.css, so this
    file can be linked after app.css and machine.css without taking anything of its own with it.
 
-   The owner's rule for a table decides most of this file: every cell of the table is exactly
+   One rule for a table decides most of this file: every cell of the table is exactly
    one line. A long value is cut with an ellipsis and carries its full text in a title, and the
    Actions cell keeps its buttons on one line and lets the wrapper scroll instead of wrapping
    them under each other, which is the one thing that makes two rows different heights. */

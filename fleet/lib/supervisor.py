@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """fleet supervisor — the native reconcile loop behind `fleet daemon`.
 
-Replaces the pattern every orchestrator hand-rolls in bash (platon's farm-watch.sh):
+Replaces the pattern every orchestrator hand-rolls in bash:
 a lane is a ONE-PASS process, but the WORK is not — so a lane that exits before it delivered
 must be respawned, and a lane that "finished" without delivering must be told apart from one
 that succeeded. This module owns that judgment natively.
@@ -9,7 +9,7 @@ that succeeded. This module owns that judgment natively.
 Design that matters:
   * Everything is keyed by (project, LANE), never slug — because a respawn mints a NEW slug, so
     "is this lane alive?" and "did this lane deliver?" only make sense at the lane level. This is
-    exactly why the bash version grepped `lane.*running` instead of tracking pids.
+    exactly why a bash watcher greps `lane.*running` instead of tracking pids.
   * OPT-IN. A lane is only ever touched if its record carries an explicit `restart` policy. Every
     existing lane — and every lane an orchestrator's own watcher already manages — has no policy
     and is invisible here. The daemon cannot disturb a running fleet it wasn't told to own.
@@ -49,9 +49,9 @@ DEFAULT_MAX = int(os.environ.get("FLEET_RESPAWN_MAX", "10"))              # back
 BOOTSTRAP_GRACE = int(os.environ.get("FLEET_BOOTSTRAP_GRACE", "120"))     # s to let a spawn boot
 # The mirror of bootstrap on the way DOWN: a lane's unit goes inactive the moment the agent exits,
 # but a PR it just opened (gh create) can lag GitHub's API by seconds. A tick in that window sees
-# "exited, no PR" and respawns a FRESH branch — the duplicate-PR storm (one lane cut 3 PRs this
-# way, #3953/#3960/#3964). updated_at is a PARSER field the daemon never rewrites, so it freezes at
-# exit and this window closes on its own; respawn of a genuinely dropped lane just waits it out.
+# "exited, no PR" and respawns a FRESH branch — the duplicate-PR storm. updated_at is a PARSER
+# field the daemon never rewrites, so it freezes at exit and this window closes on its own; respawn
+# of a genuinely dropped lane just waits it out.
 TEARDOWN_GRACE = int(os.environ.get("FLEET_TEARDOWN_GRACE", "180"))       # s for a PR to become visible
 _RESPAWN_FALLBACK = {}  # (project, lane) -> highest attempted count in this process
 
@@ -607,7 +607,7 @@ def reconcile(verbose=True):
         if lane_running(recs, project, lane):
             continue
         repo = rec.get("repo") or _repo_for(project)
-        # Scope manifest (P0-4): if the lane owns several issues, the SCOPE is the done condition,
+        # Scope manifest: if the lane owns several issues, the SCOPE is the done condition,
         # overriding done_when. A lane cannot be "delivered" while any issue is dropped.
         scope = scope_report(rec, repo) if rec.get("issues") else None
         if scope is not None:
@@ -642,8 +642,8 @@ def reconcile(verbose=True):
             continue
         # An OPEN PR is the deliverable, merely unmerged. `pr-merged` reads that as unmet, but the
         # agent cannot merge its own PR — it needs review, green CI and the queue — so respawning
-        # here does not retry the work, it mints a FRESH branch and a DUPLICATE PR. One lane cut
-        # ten near-identical PRs this way (2026-07-20); wait for the open PR to resolve instead.
+        # here does not retry the work, it mints a FRESH branch and a DUPLICATE PR, again and
+        # again; wait for the open PR to resolve instead.
         # A PR closed unmerged leaves no open PR, so a genuinely dropped lane still respawns.
         # Scoped to pr-merged: a `until-file:` lane may hold an open PR and still owe its report.
         if rec.get("done_when") == "pr-merged":

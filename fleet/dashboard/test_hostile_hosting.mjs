@@ -240,25 +240,17 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
   check("hosting: a name too long for its cell is cut, and the cell carries all of it",
     seen.cut && /the-second-farm-for-the-checkout-rewrite/.test(seen.title),
     JSON.stringify(seen).slice(0, 200));
-  // One line at the table's row height, 40px since the owner's audit of 2026-09-23.
+  // One line at the table's row height, 40px.
   check("hosting: and the row it is in is still one line high", seen.height <= 42,
     String(seen.height));
   check("hosting: nothing threw on the quiet farm", thrown.length === 0, thrown[0]);
   await context.close();
 }
 
-/* ------------------------------------------------- every row of every table is one line */
-
-/* Two tables on this tab do not hold to the owner's rule today, and did not before this section
-   existed: the models table has one row of 59px at 1440, and the accounts table wraps to three
-   lines at 390. Both are measured on main and both live in machine.css, which is another lane's
-   file, so they are named here rather than quietly skipped, and the rule still covers every
-   other table at both widths. */
 /* ---------------------------------------------- one actions column, one button size */
 
 /* Every table on the Machine tab keeps its actions in one last column of one width, every
-   button in it is the same size, and a destructive one is always the last in its row (owner,
-   2026-09-24: the buttons were all different widths and sizes). */
+   button in it is the same size, and a destructive one is always the last in its row. */
 {
   const { page, context } = await open();
   await page.waitForTimeout(800);
@@ -293,7 +285,7 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
 }
 
 /* A laptop window of 1280 or 1366 holds every Machine table without a sideways scroll: the
-   widest three switch to fixed columns and cut their cells (owner, 2026-09-24). The fixed
+   widest three switch to fixed columns and cut their cells. The fixed
    columns start at 641, so 700 is checked for titles too, where the cuts are deepest. */
 for (const width of [700, 1024, 1280, 1366, 1440]) {
   const { page, context } = await open({ size: { width, height: 900 } });
@@ -637,7 +629,7 @@ for (const [opener, picker, controls] of [
   }));
   check("hosting: the dialog offers your own machine and a DigitalOcean Droplet, and nothing else",
     steps.providers.join(",") === "ssh,do-droplet", steps.providers.join(","));
-  /* The price waits for the pick (owner, 2026-09-24): an unpicked card is its stage and a
+  /* The price waits for the pick: an unpicked card is its stage and a
      summary, and the picked one carries its price line. */
   check("hosting: an unpicked provider card carries its stage, its summary and no price line",
     /generally available/.test(steps.text) && /A Linux box you already reach over SSH/.test(steps.text)
@@ -927,14 +919,14 @@ for (const [opener, picker, controls] of [
   check("hosting: and its review shows the one command that will run",
     /fleet machines add --name/.test(own.command), own.command);
   await page.fill("#drawer [data-machine-name]", "loft");
-  await page.fill("#drawer [data-target]", "dev@192.168.1.55");
+  await page.fill("#drawer [data-target]", "farm@192.0.2.55");
   await page.fill("#drawer [data-port]", "2222");
   await page.click("[data-machine-create]");
   await page.waitForTimeout(1200);
   const body = bodyOf(sent, "/api/machines");
   check("hosting: adding your own machine sends the target and the port, and no price",
     body && body.provider === "ssh" && body.name === "loft"
-    && body.target === "dev@192.168.1.55" && body.port === "2222"
+    && body.target === "farm@192.0.2.55" && body.port === "2222"
     && body.confirm_usd === undefined, JSON.stringify(body));
   check("hosting: nothing threw adding a machine of your own", thrown.length === 0, thrown[0]);
   await context.close();
@@ -1095,8 +1087,7 @@ for (const [opener, picker, controls] of [
 /* ------------------------------------------------------------ the provider cards */
 
 /* A card before it is picked is its name, its stage and two short lines; the price and the terms
-   wait for the pick (owner, 2026-09-24: "short descriptions, two lines each, and the rest after
-   the choice"). */
+   wait for the pick. */
 {
   const { page, context, thrown } = await open();
   await page.click("[data-add-machine]");

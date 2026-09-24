@@ -8,7 +8,7 @@ prompt is ever sent, so no request here costs a token. The method is chosen by t
 preset adds its docs list to DOCS and, when its CLI can list models, a function to ROUTES.
 
 An answer is {source: "account" | "docs", models: [{id, label, description}], error}, and
-annotate() adds each model's `cost_note` and `on` (the conductor's amendment to section 6):
+annotate() adds each model's `cost_note` and `on` (design section 6):
 
   source   "account" when the provider itself answered (its CLI, its local file, its port),
            "docs" when the list is the one its documentation gives
@@ -101,9 +101,8 @@ def _docs(*rows):
     return [{"id": mid, "label": label, "description": said} for mid, label, said in rows]
 
 
-# What each provider's documentation says it offers (checked 2026-09-23, see
-# internal/research/report-model-discovery.md). A description here is shown and asks nothing;
-# only the cost rule above asks.
+# What each provider's documentation says it offers, as read on 2026-09-23. A description here
+# is shown and asks nothing; only the cost rule above asks.
 DOCS = {
     "claude": _docs(
         ("sonnet", "Sonnet 5", ""),

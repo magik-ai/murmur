@@ -36,8 +36,8 @@ LHM_URL = os.environ.get("FLEET_LHM_URL", "").strip()
 DEFAULT_POLICY = {
     "ram_min_gb": 6,      # hard floor: below this, block spawns (headroom for in-flight bursts)
     "disk_min_gb": 20,    # state/git writes stop being trustworthy below this hard floor
-    # Agent count no longer BLOCKS: hardware is the only hard gate. `warn_agents` still drives
-    # an amber "watch it" signal; there is no count ceiling.
+    # Agent count never BLOCKS: hardware is the only hard gate. `warn_agents` drives an amber
+    # "watch it" signal; there is no count ceiling.
     "gpu_temp_max": 87,   # hard ceiling in C; set it a little under where your GPU throttles
     "cpu_temp_max": 92,   # hard ceiling in C; set it a little under where your CPU throttles
     "warn_ram_gb": 8,     # soft: dashboard/orchestrator warns below this (above the hard floor)
@@ -209,7 +209,7 @@ def mem():
 
     A machine without /proc (a Mac, a container built without it) is not a broken farm, it is a
     farm this reading cannot be taken on. Returning None says that; letting the error escape
-    used to take the whole metrics answer down with it, and with it the capacity pill, the
+    would take the whole metrics answer down with it, and with it the capacity pill, the
     machine tiles and the system tiles.
     """
     d = {}

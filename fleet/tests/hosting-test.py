@@ -32,7 +32,7 @@ def machine_presets():
 
 
 class Presets(unittest.TestCase):
-    """The provider facts, as the research pass of 2026-09-23 recorded them."""
+    """The provider facts, as read from the vendors' own pages on 2026-09-23."""
 
     FIELDS = ("id", "label", "summary", "color", "job", "cli", "install", "login", "whoami", "docs",
               "terms", "stage", "pricing", "sizes", "regions", "engines")
@@ -46,7 +46,7 @@ class Presets(unittest.TestCase):
             self.assertIn(row["stage"], ("ga", "preview", "early access"), row["id"])
             self.assertRegex(row["color"], r"^#[0-9A-Fa-f]{6}$", row["id"])
             # A card says what the provider is in two short lines; prices and caveats wait until
-            # it is picked (owner, 2026-09-24).
+            # it is picked.
             self.assertLessEqual(len(row["summary"]), 90, row["id"])
 
     def test_murmur_ships_your_own_machine_and_a_droplet_and_nothing_else(self):
@@ -74,7 +74,7 @@ class Presets(unittest.TestCase):
             self.assertIsInstance(row["whoami"], list, row["id"])
             self.assertEqual(row["whoami"][0], row["cli"], row["id"])
 
-    def test_droplet_sizes_and_prices_are_the_research_table(self):
+    def test_droplet_sizes_and_prices_are_the_list_table(self):
         sizes = host_presets.preset("do-droplet")["sizes"]
         self.assertEqual([(s["slug"], s["vcpu"], s["ram_gb"], s["disk_gb"], s["monthly_usd"])
                           for s in sizes],
@@ -109,7 +109,7 @@ class Presets(unittest.TestCase):
                          sorted(["fra1", "ams3", "lon1", "nyc3", "sfo3", "sgp1", "tor1", "blr1",
                                  "syd1"]))
 
-    def test_what_the_research_could_not_confirm_says_so(self):
+    def test_what_could_not_be_confirmed_says_so(self):
         self.assertIn("UNVERIFIED", host_presets.preset("do-droplet")["terms"])
 
     def test_a_caller_cannot_edit_the_shipped_description(self):

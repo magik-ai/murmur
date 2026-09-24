@@ -46,7 +46,7 @@ EXTRA_DIR = os.path.join(HOME, ".fleet", "claude-accounts")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
 # An account at or past this share of a window is not a candidate: a lane spawned into it would
-# finish (or die) against someone else's remaining sliver, most likely the owner's.
+# finish (or die) against someone else's remaining sliver, most likely yours.
 FULL = 95
 # A lane runs for tens of minutes. An account already deep into its session window hits the
 # session cap mid-run and dies with its work half done, so spawns prefer accounts under this
@@ -80,8 +80,7 @@ def account_email(name: str) -> str:
 def display(name: str) -> str:
     """What a person reads for an account: a name set in DISPLAY_NAMES, else the part of its
     login before the @, else the folder name. The folder `default` is ~/.claude, which says
-    nothing about whose subscription it is (owner, 2026-09-23: "what does default mean, if it
-    is jane.doe?")."""
+    nothing about whose subscription it is."""
     if name in DISPLAY_NAMES:
         return DISPLAY_NAMES[name]
     login = _login(name)
@@ -464,7 +463,7 @@ def resolve_auto(summaries: dict, state_path: str = None) -> str | None:
 
     `fleet spawn` without `--account` resolves here, so lanes spread evenly across every
     subscription instead of silently draining the default one, which is the pool shared with
-    the owner's own sessions. Two empty outcomes mean opposite things and are kept apart. Usage
+    your own sessions. Two empty outcomes mean opposite things and are kept apart. Usage
     that was READ and is full everywhere returns None: refuse the spawn, because a lane on a full
     account dies on its first step. Usage that could not be read at all (the endpoint down, every
     account inside its 429 cooldown) falls back to "default" rather than blocking every spawn on

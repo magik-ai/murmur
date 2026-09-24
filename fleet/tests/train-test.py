@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train/DAG gate (P1-5) in isolation: a pending spec fires only once its dependency lane meets
+"""Train/DAG gate in isolation: a pending spec fires only once its dependency lane meets
 the condition. Stubbed gh + spawn; never touches the farm."""
 import json
 import os

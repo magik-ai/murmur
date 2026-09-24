@@ -81,9 +81,9 @@ function labelFor(id) {
   return found ? found[1] : id || "unknown";
 }
 
-/* A section is named by its heading alone. The sentence that used to follow every heading is
-   the heading's title now (owner audit 2026-09-23: less text), so it is one hover away and
-   never a second line of grey under a word that already said it. */
+/* A section is named by its heading alone. The sentence that explains it is the heading's
+   title, so it is one hover away and never a second line of grey under a word that already
+   said it. */
 export function sectionHead(title, note, ...extra) {
   return h("div", { class: "section-head" },
     h("h2", { title: note || null }, title),
@@ -329,7 +329,7 @@ function servicesSection(context) {
       empty: () => h("div", { class: "card-pad" }, emptyState({
         title: "This server does not report its services",
         body: "The page and the server are different versions, so this table has nothing to show.",
-        command: "fleet update && fleet dashboard restart",
+        command: "git -C <murmur checkout> pull && fleet dashboard restart",
       })),
       ready: (data) => [
         h("div", { class: "tablewrap", key: "table" }, h("table", { class: "m-services" },
@@ -392,9 +392,8 @@ function windowBars(account) {
 }
 
 /* The state, and then the server's sentence when there is something to do about it. A login
-   that is in needs no sentence (owner audit 2026-09-23: less text), so it keeps its sentence in
-   the title; one that is not in says what to do, in the row, because a tooltip is not
-   somewhere a person finds an instruction. */
+   that is in needs no sentence, so it keeps its sentence in the title; one that is not in says
+   what to do, in the row, because a tooltip is not somewhere a person finds an instruction. */
 function loginCell(states, name) {
   const found = states.find((row) => row.name === name);
   if (!found) return h("span", { class: "muted" }, "not read yet");
@@ -469,7 +468,7 @@ function removeAccountConfirm(context, name) {
 
 /* -------------------------------------------------------- adding an account */
 
-/* Adding an account is a dialog, not a form squeezed under the table (owner review 2026-09-22).
+/* Adding an account is a dialog, not a form squeezed under the table.
    Three screens in the drawer: pick the engine and name it, run one command and follow the
    steps, wait for the login, which the dialog notices by itself. */
 const ADD_KEY = "add-account";
@@ -720,8 +719,8 @@ function accountsSection(context) {
             h("th", { class: "m-col-read", title: "Last read" }, "Last read"),
             h("th", { class: "actions one", title: "Actions" }, "Actions"))),
           h("tbody", null, list(data.accounts).map((account) => h("tr", { key: account.name },
-            /* The engine rides at the right of the account as its vendor's mark, the way the
-               first farm page drew it (owner, 2026-09-24); an engine with no mark is a word. */
+            /* The engine rides at the right of the account as its vendor's mark; an engine
+               with no mark is a word. */
             h("td", { title: `${account.email || account.label || account.name}, folder ${account.name}, `
               + `${account.engine || "engine unknown"}` },
               h("span", { class: "m-account-row" },
@@ -841,7 +840,7 @@ function healthSection(context) {
       empty: () => h("div", { class: "card-pad" }, emptyState({
         title: "The server does not report its prerequisites",
         body: "The page and the server are different versions, so this table has nothing to show.",
-        command: "fleet update && fleet dashboard restart",
+        command: "git -C <murmur checkout> pull && fleet dashboard restart",
       })),
       ready: (data) => h("div", { class: "tablewrap" }, h("table", null,
         h("thead", null, h("tr", null,

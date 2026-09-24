@@ -45,8 +45,7 @@ ok("the page is a shell, not an application", () => {
 });
 
 /* The tab shows the murmur mark, the same file the landing uses, in both themes: a status
-   square in the tab read as a broken icon, and every murmur page should look like one product
-   (owner, 2026-09-24). */
+   square in the tab reads as a broken icon, and every murmur page should look like one product. */
 ok("the favicon is the murmur mark, drawn from the mark's own paths", () => {
   assert.match(html, /<link rel="icon" id="favicon" href="\/static\/favicon\.svg" type="image\/svg\+xml">/);
   const icon = read("static/favicon.svg");
@@ -82,8 +81,8 @@ const REQUIRED_FILES = [
   "static/views/board.js", "static/views/agents.js", "static/views/mail.js",
 ];
 
-/* The machine tab is written in another lane. It is checked like every other view once its
-   file is on the farm, and its absence is not a failure of this one. */
+/* The machine tab is loaded after the page, from a file of its own. It is checked like every
+   other view when that file is here. */
 const MACHINE = "static/views/machine.js";
 
 /* The Machine tab's count points at its Health section, so it is drawn only when that section
@@ -147,12 +146,11 @@ ok("every colour in the stylesheet is a token", () => {
   assert.deepEqual(stray, [], `a colour literal escaped the token blocks:\n${stray.join("\n")}`);
 });
 
-ok("the measurements the record fixes are tokens", () => {
-  // One height for every control on a screen (owner audit 2026-09-23), the Almanac's button.
+ok("the fixed measurements are tokens", () => {
+  // One height for every control on a screen, the Almanac's button.
   assert.match(css, /--control: 34px/);
   assert.match(css, /--control-sm: 28px/);
-  // The Starling Almanac design system (owner, 2026-09-23): cards and dialogs on the 12px step,
-  // controls on 7px. It replaced the 8px of dashboard-v2.md.
+  // The Starling Almanac design system: cards and dialogs on the 12px step, controls on 7px.
   assert.match(css, /--radius: 12px/);
   assert.match(css, /--radius-sm: 7px/);
   assert.match(css, /--head: 40px/);
@@ -479,7 +477,7 @@ ok("the header carries the power setting as a control, not as a word", () => {
   assert.ok(shell.includes('api.access.writable'), "the header control ignores a read-only page");
 });
 
-ok("the Board is the four things the amendment names", () => {
+ok("the Board is its four parts: checklist, machine strip, accounts strip, agents", () => {
   const board = read("static/views/board.js");
   assert.match(board, /setupChecklist/, "no setup checklist");
   assert.match(board, /machineStrip/, "no machine strip");
@@ -547,7 +545,7 @@ ok("stopping a lane and retiring it are asked about before they happen", () => {
   assert.match(source, /data-confirm-yes/, "there is no confirm step at all");
 });
 
-ok("every word the mail amendment fixes is on the page, and no jargon with it", () => {
+ok("every word the Mail tab promises is on the page, and no jargon with it", () => {
   const source = read("static/views/mail.js");
   for (const label of ["Conversations", "Everyone", "every agent on this farm",
     "Unread since you last looked", "Show all ", "Agents", "Here now",
@@ -555,7 +553,7 @@ ok("every word the mail amendment fixes is on the page, and no jargon with it", 
     "Everything the office did", "The office last answered "]) {
     assert.ok(source.includes(label), `the mail page never says "${label}"`);
   }
-  /* The words the amendment forbids, looked for in the sentences this page writes itself.
+  /* The jargon words, looked for in the sentences this page writes itself.
      A route it reads is not a sentence, and a class name is not either. */
   const said = [...source.matchAll(/"([^"\\]{8,})"|`([^`\\]{8,})`/g)]
     .map((found) => found[1] || found[2])
@@ -702,7 +700,7 @@ await okAsync("a snapshot that has never been taken says so instead of answering
   }
 });
 
-await okAsync("the prerequisites come back in the order the record fixes", async () => {
+await okAsync("the prerequisites come back in the order a person would fix them", async () => {
   const { body } = await get("/api/health");
   for (const field of ["at", "stale_since", "error", "pending"]) {
     assert.ok(field in body, `/api/health does not say its ${field}`);
@@ -901,7 +899,7 @@ await okAsync("the two write routes say what they did", async () => {
   assert.equal((await send("/api/mail/send", { to: "all", text: "" })).status, 400);
 
   const project = await send("/api/projects", { name: "newone", repo: "your-org/newone", port_base: 5300 });
-  // Registering clones the repository, so the answer is a job, not the row (amendment 7).
+  // Registering clones the repository, so the answer is a job, not the row.
   assert.equal(project.status, 202);
   assert.equal(project.body.job.action, "add_project");
   assert.ok(project.body.job.id);
@@ -936,7 +934,7 @@ await okAsync("a limit window is labelled by its own name", async () => {
   assert.match(read("static/core/fmt.js"), /Out of room/, "a subscription with nothing left does not say so");
 });
 
-await okAsync("the quiet farm carries what the live farm showed and no other state does", async () => {
+await okAsync("the quiet farm carries what a busy farm shows and no other state does", async () => {
   const lanes = (await get("/api/fleet", "quiet")).body;
   assert.ok(lanes.some((row) => String(row.slug).length > 48), "a lane name wider than a card");
   const names = (await get("/api/mail/boxes", "quiet")).body.boxes.map((row) => row.name);

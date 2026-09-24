@@ -2,7 +2,7 @@
 """Pin the account-picking rules on fixture payloads.
 
 The picker decides which subscription a lane burns, and the pool it must never silently drain is
-the owner's own working session. So both directions are pinned: a full account must not be picked,
+your own working session. So both directions are pinned: a full account must not be picked,
 and a picker too eager to skip would strand lanes with headroom available.
 
 Fixtures mirror the real /api/oauth/usage `limits` array — the same shapes the endpoint returned
@@ -197,7 +197,7 @@ check("the displayed pick prefers session headroom over weekly headroom",
       ca.pick_from(_deep) == "fresh")
 
 
-# N. an account is read by whose login it is, not by its folder (owner, 2026-09-23)
+# N. an account is read by whose login it is, not by its folder
 import json as _json  # noqa: E402
 import os as _os  # noqa: E402
 import tempfile as _tempfile  # noqa: E402

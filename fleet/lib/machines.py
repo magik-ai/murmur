@@ -646,7 +646,7 @@ ALL_PORTS = ("", "0", "all", "1-65535")
 
 def firewall_argv():
     """SSH in, everything out. A DigitalOcean firewall with no outbound rules also cuts the
-    farm off from GitHub and the model providers, which is the trap the research found."""
+    farm off from GitHub and the model providers."""
     return ["doctl", "compute", "firewall", "create",
             "--name", FIREWALL,
             "--tag-names", TAG_FARM,
@@ -1108,8 +1108,8 @@ def ensure_key_imported():
     rows, error = doctl_json("compute", "ssh-key", "list", "-o", "json", timeout=PROVIDER_TIMEOUT)
     if rows is None:
         raise Refused(f"DigitalOcean did not list this account's SSH keys: {error}")
-    # The JSON key names doctl prints for a key are UNVERIFIED in the research pass, so the
-    # fingerprint is matched first and the name is the fallback.
+    # The JSON key names doctl prints for a key are UNVERIFIED, so the fingerprint is matched
+    # first and the name is the fallback.
     wanted_name = "murmur-farm-" + farm_id()
     for row in rows:
         if fingerprint and str(row.get("fingerprint") or "").endswith(fingerprint):

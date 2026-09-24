@@ -120,8 +120,8 @@ export function titleCase(value) {
 /* Whether an account has room, in the same words on every tab. Out of room means a window every
    model shares (the session or the week) is used up, or the vendor says the limit is reached. A
    window scoped to one model (Fable) at 100 percent leaves every other model running, so it is
-   named on its own: "Fable used up", never "Out of room" (owner, 2026-09-23: the Machine tab
-   said logged in while the Board said out of room, for an account that only had Fable spent). */
+   named on its own: "Fable used up", never "Out of room": otherwise the Machine tab says
+   logged in while the Board says out of room, for an account that only has Fable spent. */
 export function room(account) {
   const one = account || {};
   const full = (value) => value != null && Number(value) >= 100;

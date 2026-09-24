@@ -90,11 +90,11 @@ for (const [route, hash, name] of [
 {
   const { page, context, thrown } = await open({
     hash: "#/board",
-    overrides: { "/api/fleet": JSON.stringify({ unavailable: "The farm state directory is not readable.", fix: "fleet doctor" }) },
+    overrides: { "/api/fleet": JSON.stringify({ unavailable: "The farm state directory is not readable.", fix: "fleet status" }) },
   });
   const body = await text(page);
   check("a route that answers \"unavailable\" does not break the tab", thrown.length === 0, thrown[0]);
-  check("the sentence and its command are shown", body.includes("not readable") && body.includes("fleet doctor"), body.slice(0, 80));
+  check("the sentence and its command are shown", body.includes("not readable") && body.includes("fleet status"), body.slice(0, 80));
   await context.close();
 }
 
@@ -205,7 +205,7 @@ for (const [from, wanted, name] of [
 }
 
 /* A panel that is drawn before its answer arrives has TWO shapes under one key: a grey
-   placeholder and the value that replaces it. The live farm showed both at once. */
+   placeholder and the value that replaces it. A slow farm shows both at once. */
 
 {
   const late = JSON.stringify([
@@ -380,8 +380,7 @@ for (const [from, wanted, name] of [
   }));
   check("a sortable column is a button", rows.header, JSON.stringify(rows));
   check("a table row can take focus", rows.row === "0", JSON.stringify(rows));
-  /* The table says what each lane runs on: the vendor's mark and the model with its effort
-     (owner, 2026-09-24). */
+  /* The table says what each lane runs on: the vendor's mark and the model with its effort. */
   const models = await page.evaluate(() => {
     const heads = [...document.querySelectorAll("thead th")].map((node) => node.textContent.trim());
     const at = heads.indexOf("Model");
@@ -530,8 +529,8 @@ for (const width of [700, 1024, 1280, 1440]) {
 }
 
 /* The search field is the only field in its box: it takes the whole width, and its focus is a
-   line along its own bottom edge rather than an outline the box's corners cut in half (owner,
-   2026-09-23: the field stopped at 200px and its focus ring was clipped on two sides). */
+   line along its own bottom edge rather than an outline the box's corners cut in half: a field
+   that stops at 200px, with its focus ring clipped on two sides, reads as broken. */
 {
   const { page, context } = await open({ hash: "#/board" });
   await page.keyboard.press("Meta+k");
@@ -566,7 +565,7 @@ for (const width of [700, 1024, 1280, 1440]) {
 }
 
 /* A tab left open across a deploy says so and offers a reload, instead of quietly running the
-   old code against the new data (owner, 2026-09-23). */
+   old code against the new data. */
 {
   let build = "1000";
   const { page, context } = await open({
@@ -671,8 +670,8 @@ for (const width of [700, 1024, 1280, 1440]) {
 
 /* One word, one meaning, on one screen. A farm with no room for another agent has a header
    pill that says "No room" and a power setting a few inches away whose top setting is called
-   "Full". The Capacity tile is gone (owner audit 2026-09-23: the header already says it), so
-   nothing on the Board may be a second capacity reading that could disagree with the pill. */
+   "Full". There is no Capacity tile (the header already says it), so nothing on the Board
+   may be a second capacity reading that could disagree with the pill. */
 {
   const { page, context } = await open({
     hash: "#/board",
@@ -704,7 +703,7 @@ for (const width of [700, 1024, 1280, 1440]) {
 }
 
 /* A graphics card that answers 0 degrees has given no temperature (a resting card can), and
-   the tile says there is no reading instead of drawing a freezing card (owner, 2026-09-24). */
+   the tile says there is no reading instead of drawing a freezing card. */
 {
   const { page, context } = await open({
     hash: "#/board",
@@ -903,8 +902,8 @@ for (const width of [700, 1024, 1280, 1440]) {
       marked: document.body.classList.contains("readonly"),
     };
   });
-  // The header's power setting is one select since 2026-09-24 (it was five buttons): the power
-  // select, the lane's endings and the composer's button and field.
+  // The header's power setting is one select: the power select, the lane's endings and the
+  // composer's button and field.
   check("a page with no token has every write control on the board switched off",
     off.count >= 4 && off.allOff, JSON.stringify(off));
   check("and it says why, in the server's own words", off.said && off.marked, JSON.stringify(off));
@@ -955,7 +954,7 @@ for (const width of [700, 1024, 1280, 1440]) {
   await context.close();
 }
 
-/* The power setting is a select at every width (owner audit 2026-09-24): at 1024 it has to be
+/* The power setting is a select at every width: at 1024 it has to be
    on screen, post what it says, and carry the write mark. */
 {
   const writes = [];
@@ -991,7 +990,7 @@ for (const width of [700, 1024, 1280, 1440]) {
   await context.close();
 }
 
-/* The header says whether the farm works, in three words (owner, 2026-09-24): on, paused or off,
+/* The header says whether the farm works, in three words: on, paused or off,
    and room is only mentioned when there is none. */
 {
   const services = (state) => JSON.stringify({ at: new Date().toISOString(), stale_since: null, error: null,
@@ -1403,7 +1402,7 @@ for (const [hash, name] of [["#/mail", "mail"], ["#/machine", "machine"]]) {
   await context.close();
 }
 
-/* The people pane and the conversation list give way on a small screen, per amendment 17. */
+/* The people pane and the conversation list give way on a small screen. */
 
 {
   const { page, context } = await open({ hash: "#/mail", size: { width: 1000, height: 800 } });

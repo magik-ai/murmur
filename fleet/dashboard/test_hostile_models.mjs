@@ -311,7 +311,7 @@ async function oneLine(page, selector) {
     /the last health call timed out/.test(seen.codex.why) && !/timed out/.test(seen.codex.text),
     `${seen.codex.why} | ${seen.codex.text.slice(0, 120)}`);
   {
-    // The owner's rule: a one-line table has one-line cells. Every row is the same height as
+    // The one-line table rule: a one-line table has one-line cells. Every row is the same height as
     // the first, whatever its cells hold, or a cell has wrapped.
     const heights = Object.values(seen).map((row) => row.lines);
     check("machine: every models row is one line high, none taller than its neighbours",
@@ -1246,7 +1246,7 @@ for (const width of [1024, 1280]) {
   await context.close();
 }
 
-/* The owner's table law, at a desktop and at a phone: every row of the providers table and of
+/* The one-line table rule, at a desktop and at a phone: every row of the providers table and of
    the sidebar list is one line, and nothing scrolls sideways at 390. */
 for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
   const long = {
@@ -1347,7 +1347,7 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
 
 /* Step one is the choice of service. A preset already in this farm's catalog is shown and not
    choosable: adding the same service twice writes a second entry the farm then has to tell
-   apart, and the owner's complaint was that nothing on this screen was clear. */
+   apart. */
 {
   const { page, context, thrown, sent } = await open({ view: "machine" });
   await page.click("[data-add-model]");

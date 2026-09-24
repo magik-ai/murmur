@@ -128,11 +128,10 @@ def catalog_standing(mid, m):
     """(in the catalog, the sentence that says how to take it out when it is not).
 
     murmur ships Claude Code and Codex, and model_presets.py carries a preset for each engine it
-    knows. A farm that added Gemini CLI, Grok Build or a Custom command before those presets were
-    removed (2026-09-24) still has that table in its models.toml, and nothing here deletes it: the
-    row is read as it always was and is marked as not in the catalog, with the one sentence that
-    says how its owner takes it out. A row with no preset is in the catalog when its engine is
-    one murmur ships."""
+    knows. A table in models.toml whose preset this checkout does not carry is still read, and
+    nothing here deletes it: it is marked as not in the catalog, with the one sentence that says
+    how to take it out. A row with no preset is in the catalog when its engine is one murmur
+    ships."""
     preset = str((m or {}).get("preset") or "").strip()
     engine = str((m or {}).get("engine") or "").strip()
     known = PRESETS.by_id(preset) is not None if preset else engine in SHIPPED_ENGINES

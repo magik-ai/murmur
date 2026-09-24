@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fleet event stream (P1-6): one append-only ~/.fleet/events.jsonl that replaces mtime-polling
+"""fleet event stream: one append-only ~/.fleet/events.jsonl that replaces mtime-polling
 of per-lane logs. Producers (the parsers, the supervisor, spawn) append typed events; consumers
 read them with `fleet events --since <cursor> [--follow] [--lane X] [--project P]`.
 

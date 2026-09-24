@@ -113,8 +113,8 @@ function counts(rows, context) {
   return { spawners, statuses };
 }
 
-/* Two selects and a search box, which is what the owner asked for in place of a row of
-   twenty chips: a farm with twenty code names cannot be filtered by pressing one of twenty. */
+/* Two selects and a search box in place of a row of twenty chips: a farm with twenty code
+   names cannot be filtered by pressing one of twenty. */
 function controls(rows, context, shown) {
   const { spawners, statuses } = counts(rows, context);
   const started = [["", `Anyone (${rows.length})`],

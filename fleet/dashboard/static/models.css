@@ -1,5 +1,5 @@
 /* The Models section: the providers table and a provider's sidebar list. Every cell is one line
-   (the owner's table law): a fixed layout shares the width out, and a long value is cut with an
+   (the one-line table rule): a fixed layout shares the width out, and a long value is cut with an
    ellipsis and carried whole in the cell's title. Colours are theme tokens only. */
 
 .mo-providers { table-layout: fixed; }
@@ -9,7 +9,7 @@
 .mo-providers th.mo-col-status { width: 14%; }
 .mo-providers th.mo-col-models { width: 10%; }
 .mo-providers th.mo-col-last { width: 10%; }
-/* The actions column is the same 276px as in every other table (owner, 2026-09-24). */
+/* The actions column is the same 276px as in every other table. */
 .mo-providers th.mo-col-actions { width: 276px; }
 .mo-providers .pill { max-width: 100%; }
 
