@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""A fake tailscale on the laptop: FAKE_LAPTOP_TAILSCALE=running|stopped|absent."""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fakelib import die, flag, out, record  # noqa: E402
+
+
+def main():
+    argv = record()
+    state = flag("FAKE_LAPTOP_TAILSCALE", "absent")
+    if state == "absent":
+        die("tailscale: command not found", 127)
+    if argv[1:] == ["status", "--json"]:
+        out(json.dumps({"BackendState": "Running" if state == "running" else "Stopped"}))
+        return 0
+    die("fake tailscale: not a call the laptop script makes")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

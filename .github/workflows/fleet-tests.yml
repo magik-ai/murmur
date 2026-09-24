@@ -31,10 +31,11 @@ jobs:
           cd fleet
           python3 dashboard/test_server.py
           python3 dashboard/test_github_access.py
+          node dashboard/test_token_fragment.mjs
           python3 tests/models-test.py
       - name: Hosting (scrub, machines, hosts)
         run: |
           cd fleet
-          for test in tests/scrub-test.py tests/hosting-test.py; do
+          for test in tests/scrub-test.py tests/hosting-test.py tests/one-click-farm-test.py; do
             if [ -f "$test" ]; then python3 "$test" || exit 1; fi
           done

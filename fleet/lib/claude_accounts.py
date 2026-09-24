@@ -18,6 +18,7 @@ never printed.
 
 CLI:
     list          every account with session/weekly utilization and token state
+    list --json   every account as {name, logged_in, email}, read from disk only
     pick          print the name of the account with the most headroom (exit 1 if none)
     dir NAME      print the account's CLAUDE_CONFIG_DIR (NAME may be `auto`)
     add NAME      create the directory and print the one-line login instruction
@@ -401,7 +402,19 @@ def collect() -> tuple[dict, dict]:
     return summaries, errors
 
 
-def cmd_list() -> int:
+def list_rows() -> list:
+    """Every account as a row a program reads: its name, whether its credentials file exists,
+    and the email it is signed in as. No network, and never a token."""
+    return [{"name": name,
+             "logged_in": os.path.exists(os.path.join(path, ".credentials.json")),
+             "email": account_email(name)}
+            for name, path in account_dirs().items()]
+
+
+def cmd_list(as_json: bool = False) -> int:
+    if as_json:
+        print(json.dumps(list_rows(), indent=2))
+        return 0
     summaries, errors = collect()
     best = pick_from(summaries)
     for name, path in account_dirs().items():
@@ -502,7 +515,7 @@ def cmd_add(name: str) -> int:
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else "list"
     if cmd == "list":
-        return cmd_list()
+        return cmd_list(as_json="--json" in argv[1:])
     if cmd == "pick":
         return cmd_pick()
     if cmd == "dir" and len(argv) > 1:

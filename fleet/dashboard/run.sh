@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Start, stop, restart and inspect the fleet dashboard, which runs in a detached tmux session.
+# Start, stop, restart and inspect the fleet dashboard. It runs as the systemd user unit
+# fleet-dashboard.service once `enable` has installed it (farm/install.sh does), so it survives a
+# reboot; until then, in a detached tmux session.
 #
 # Two things an operator expects to work, and which only work because of what is below:
 #
@@ -42,6 +44,9 @@ fi
 
 PORT="${FLEET_DASH_PORT:-7878}"
 BIND="${FLEET_DASH_BIND:-127.0.0.1}"
+UNIT="fleet-dashboard.service"
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+UNIT_FILE="$UNIT_DIR/$UNIT"
 ENV_TOKEN="${FLEET_DASH_TOKEN:-}"
 # What the page calls itself, and the name it signs office mail with. Both have defaults in the
 # server; they are forwarded only when set, so an unset one stays the server's business.
@@ -50,6 +55,17 @@ HQ_AGENT="${FLEET_DASH_HQ_AGENT:-}"
 TOKEN_FILE="$FLEET_CONFIG/dash-token"
 
 _loopback() { case "$1" in 127.*|::1|localhost) return 0;; *) return 1;; esac; }
+# The unit drives the dashboard once it is installed and a user manager answers.
+_unit() { [ -f "$UNIT_FILE" ] && systemctl --user show-environment >/dev/null 2>&1; }
+# FLEET_DASH_BIND=tailscale is resolved by the server at start; this is only what a person reads.
+_shown_bind() {
+  if [ "$BIND" = "tailscale" ]; then
+    local ip; ip=$(tailscale ip -4 2>/dev/null | head -1 || true)
+    printf '%s' "${ip:-tailscale}"
+  else
+    printf '%s' "$BIND"
+  fi
+}
 # An IPv6 literal needs brackets in a URL, or the port reads as part of the address.
 _url_host() { case "$1" in *:*) printf '[%s]' "$1";; *) printf '%s' "$1";; esac; }
 
@@ -108,15 +124,58 @@ PY
 _access_note() {
   local token; token="$(_token || true)"
   if [ -n "$token" ]; then
-    echo "  write access: bearer token required (open it once as http://$(_url_host "$BIND"):$PORT/?token=\$(fleet dashboard token))"
+    echo "  write access: bearer token required (open it once as http://$(_url_host "$(_shown_bind)"):$PORT/?token=\$(fleet dashboard token))"
   else
     echo "  write access: the server mints a token into $TOKEN_FILE on its first start; read it with 'fleet dashboard token'"
   fi
   if ! _loopback "$BIND"; then echo "  bound to $BIND, so reading needs the token too"; fi
 }
 
-_start() {
+# The same wait _start does for tmux: report the socket the kernel has, or say it is not there.
+_wait_live() {
+  local live=""
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    live="$(_live_socket || true)"
+    [ -n "$live" ] && break
+    sleep 0.5
+  done
+  printf '%s' "$live"
+}
+
+_enable() {
+  local py; py="$(command -v python3)"
+  [ -n "$py" ] || { echo "no python3 on PATH; the dashboard unit needs one" >&2; return 1; }
+  local fleet; fleet="$(dirname "$HERE")"       # this checkout, never another tree's code
+  mkdir -p "$UNIT_DIR"
+  sed "s#__FLEET__#$fleet#g; s#__PY__#$py#g" "$fleet/systemd/$UNIT" > "$UNIT_FILE"
+  systemctl --user daemon-reload
+  # A dashboard still in tmux holds the port the unit needs.
+  tmux kill-session -t "$SESSION" 2>/dev/null || true
+  for _ in 1 2 3 4 5; do _live_socket >/dev/null 2>&1 || break; sleep 1; done
+  systemctl --user enable --now "$UNIT" >/dev/null 2>&1 \
+    || { echo "could not enable $UNIT; see: systemctl --user status $UNIT" >&2; return 1; }
+  echo "dashboard unit installed and enabled: $UNIT_FILE"
+}
+
+_start_unit() {
   if tmux has-session -t "$SESSION" 2>/dev/null; then
+    tmux kill-session -t "$SESSION" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do _live_socket >/dev/null 2>&1 || break; sleep 1; done
+  fi
+  systemctl --user start "$UNIT" \
+    || { echo "could not start $UNIT; see: journalctl --user -u $UNIT" >&2; return 1; }
+  local live; live="$(_wait_live)"
+  if [ -z "$live" ]; then
+    echo "dashboard unit started, but nothing listens on port $PORT yet: journalctl --user -u $UNIT says why (with FLEET_DASH_BIND=tailscale it waits for a tailnet address)" >&2
+    return 1
+  fi
+  echo "dashboard up on $live ($UNIT)"
+}
+
+_start() {
+  if _unit; then
+    _start_unit || return 1
+  elif tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "dashboard already running (tmux $SESSION); 'fleet dashboard restart' to pick up new settings"
   else
     # -e keeps every value out of the command string. An explicit token is passed this way; a
@@ -156,17 +215,26 @@ _start() {
 
 case "${1:-start}" in
   start) _start ;;
+  enable) _enable && _start ;;
   stop)
-    tmux kill-session -t "$SESSION" 2>/dev/null && echo "dashboard stopped" || echo "not running"
+    if _unit; then
+      systemctl --user stop "$UNIT" && echo "dashboard stopped ($UNIT; it starts again at boot)"
+    else
+      tmux kill-session -t "$SESSION" 2>/dev/null && echo "dashboard stopped" || echo "not running"
+    fi
     ;;
   restart)
+    if _unit; then systemctl --user stop "$UNIT" 2>/dev/null && echo "dashboard stopped" || true; fi
     tmux kill-session -t "$SESSION" 2>/dev/null && echo "dashboard stopped" || true
     # The old server holds the port until its socket is released.
     for _ in 1 2 3 4 5; do _live_socket >/dev/null 2>&1 || break; sleep 1; done
     _start
     ;;
   status)
-    if tmux has-session -t "$SESSION" 2>/dev/null; then
+    if _unit; then
+      live="$(_live_socket || true)"
+      echo "$UNIT: $(systemctl --user is-active "$UNIT" 2>/dev/null || true)${live:+, listening on $live}"
+    elif tmux has-session -t "$SESSION" 2>/dev/null; then
       live="$(_live_socket || true)"
       if [ -n "$live" ]; then
         echo "running on $live"
@@ -190,5 +258,5 @@ case "${1:-start}" in
       exit 1
     fi
     ;;
-  *) echo "usage: run.sh start|stop|restart|status|token";;
+  *) echo "usage: run.sh start|stop|restart|status|token|enable";;
 esac

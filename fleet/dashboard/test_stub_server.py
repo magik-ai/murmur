@@ -1031,9 +1031,9 @@ def machine_plan(body):
          "--outbound-rules",
          "protocol:tcp,ports:0,address:0.0.0.0/0 protocol:udp,ports:0,address:0.0.0.0/0 "
          "protocol:icmp,address:0.0.0.0/0 protocol:tcp,ports:0,address:::/0 "
-         "protocol:udp,ports:0,address:::/0", "--context", "murmur"],
+         "protocol:udp,ports:0,address:::/0 protocol:icmp,address:::/0", "--context", "murmur"],
         ["doctl", "compute", "droplet", "create", name, "--size", size["slug"], "--region", region,
-         "--image", "ubuntu-24-04-x64", "--tag-names", "murmur,murmur-farm,murmur-by-quartz",
+         "--image", "ubuntu-24-04-x64", "--tag-names", "murmur-farm,murmur-by-quartz",
          "--user-data-file", "/tmp/xxxx.yaml", "-o", "json", "--context", "murmur"],
     ]
     cloud_init = "\n".join([

@@ -4,7 +4,8 @@
 
    Binding and write access are configuration, not a constant. FLEET_DASH_BIND
    defaults to 127.0.0.1: reaching the page from another machine (a tailnet, a
-   LAN) is a deliberate act.
+   LAN) is a deliberate act. FLEET_DASH_BIND=tailscale binds this machine's
+   Tailscale address, resolved at start, and refuses to start without one.
 
    Writing is gated by a bearer token, ALWAYS, loopback or not. "Loopback is
    trusted" was never true of a browser: any web page the operator happens to
@@ -4002,6 +4003,36 @@ def _ci_loop():
         time.sleep(60)
 
 
+def resolve_bind(value):
+    """(the address to bind, a refusal sentence). Only `tailscale` needs resolving.
+
+    FLEET_DASH_BIND=tailscale means this machine's Tailscale IPv4 address, asked of `tailscale
+    ip -4` at start. Without one the server refuses to start rather than bind anything wider:
+    under systemd it exits, and the unit tries again until the tailnet is up.
+    """
+    if (value or "").strip().lower() != "tailscale":
+        return value, ""
+    try:
+        done = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True,
+                              timeout=10, stdin=subprocess.DEVNULL)
+    except FileNotFoundError:
+        return "", ("FLEET_DASH_BIND=tailscale, and tailscale is not installed on this machine; "
+                    "install it, or set FLEET_DASH_BIND=127.0.0.1 and reach the page over ssh")
+    except (subprocess.TimeoutExpired, OSError):
+        return "", "FLEET_DASH_BIND=tailscale, and `tailscale ip -4` did not answer in 10 seconds"
+    for line in (done.stdout or "").splitlines():
+        candidate = line.strip()
+        try:
+            address = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if address.version == 4 and not address.is_unspecified:
+            return candidate, ""
+    return "", ("FLEET_DASH_BIND=tailscale, and Tailscale has no IPv4 address on this machine "
+                "yet (not up, or logged out), so the dashboard does not start rather than bind "
+                "anything wider")
+
+
 def bind_is_loopback(bind=None):
     """True when the server is reachable only from this machine. An empty bind, 0.0.0.0 or ::
     mean every interface, so they are NOT loopback."""
@@ -4411,7 +4442,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _answer_failure(self, method, exc):
         """A handler that raises must still answer. Dropping the connection hands the page no
         status and no sentence, which reads as a dead server rather than a broken request."""
-        print(f"fleet dashboard: {method} {self.path} failed: {type(exc).__name__}: {exc}",
+        # The path only, never the query: `?token=` is how a browser first hands the token over,
+        # and a log line is read by far more people than the token was meant for. A query value
+        # the exception itself repeats is taken out too.
+        parsed = urlparse(self.path)
+        said = str(exc)
+        for values in parse_qs(parsed.query).values():
+            for value in values:
+                if value:
+                    said = said.replace(value, "<query value>")
+        print(f"fleet dashboard: {method} {parsed.path} failed: {type(exc).__name__}: {said}",
               file=sys.stderr)
         try:
             self._send(500, json.dumps({"error": "this dashboard could not answer that "
@@ -4451,6 +4491,10 @@ def _mode_loop():
 
 
 if __name__ == "__main__":
+    BIND, refusal = resolve_bind(BIND)
+    if refusal:
+        print(f"fleet dashboard: {refusal}", file=sys.stderr, flush=True)
+        raise SystemExit(1)
     TOKEN = ensure_token()
     reach = "this machine only" if bind_is_loopback() else f"anything that can reach {BIND}"
     print(f"fleet dashboard on {BIND}:{PORT} ({reach})", flush=True)

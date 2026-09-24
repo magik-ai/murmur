@@ -1,6 +1,8 @@
 # One-click farm
 
-Status: design, for review before code. Owner ask of 2026-09-24: "a farm in the cloud in one click",
+Status: built against fakes (`plugin/scripts/murmur_farm.py`, `tests/test_murmur_farm.py`,
+`fleet/tests/one-click-farm-test.py`); the live run below is the orchestrator's, with the owner's
+typed price. Owner ask of 2026-09-24: "a farm in the cloud in one click",
 and move the owner's own farm onto the result so it is tested for real.
 
 ## In short
@@ -72,9 +74,20 @@ across all of them:
    $48 a month until you destroy it". Nothing is created.
 4. **Apply** only with the price typed back (the existing `--confirm-usd` rule), after the
    reconcile above. The firewall is checked, not trusted by name: `murmur-ssh-only` must allow
-   inbound tcp 22 only and carry the `murmur-farm` tag; a firewall by that name with any other
-   rule or without the tag is corrected, and if it cannot be, nothing is created
-   (`ensure_firewall` today returns on the name alone, `machines.py` :501). Then wait for the
+   inbound tcp 22 only, from anywhere (`0.0.0.0/0` and `::/0`, since the laptop's address is not
+   known and changes), let tcp, udp and icmp out on every port to `0.0.0.0/0` and `::/0` (a
+   DigitalOcean firewall lets nothing out that no rule allows), and carry the `murmur-farm` tag;
+   a firewall by that name with any other inbound rule, a tcp 22 rule narrowed to other sources,
+   empty or narrower outbound rules, or without the tag is corrected, and if it cannot be,
+   nothing is created
+   (`ensure_firewall` today returns on the name alone, `machines.py` :501). DigitalOcean adds
+   up the allow rules of every firewall over a droplet, so the name alone is not enough either
+   way: before any create, every firewall in the account is listed, and the set that will apply
+   to the new droplet (every firewall attached by a tag it will carry, or naming this farm's
+   droplets by id) must be exactly `murmur-ssh-only`. Any other firewall in that set stops the
+   run before the purchase and is named; the script never edits or detaches a firewall it does
+   not own, the person decides. A new droplet carries only `murmur-farm` (the tag the firewall
+   attaches by) and `murmur-by-<farm id>`, no generic tag another firewall could use. Then wait for the
    droplet to be active and cloud-init to finish (`machines.py` list states).
 5. **ssh config.** A `Host <name>` block inside a marked section of `~/.ssh/config` that the
    script owns (hosting.md section 6), user `farm`, the key from step 1. The droplet is new, so
@@ -95,10 +108,32 @@ across all of them:
    primes this one with its own first probe. ssh takes the first
    value it meets, so a name the person's config already answers would send the login and the
    install to the old machine, or take the old name over while that machine still works. So
-   the name is checked at the questions (step 2): `ssh -G <name>` must resolve to the bare name
-   with no host of its own, or to this script's own section; any other answer asks for a
-   different name. After writing the block, `ssh -G <name>` must resolve to the droplet's
-   address and user `farm` before any remote command runs.
+   the name is checked at the questions (step 2) by a literal claim, not a guess from what ssh
+   prints: `~/.ssh/config` and every file it Includes (found as ssh finds them: relative to
+   `~/.ssh`, globs in sorted order, nested to ssh's depth), then the system config
+   `/etc/ssh/ssh_config` that ssh reads after it and every file that Includes (relative to
+   `/etc/ssh`, such as `/etc/ssh/ssh_config.d/*.conf`), are scanned for a Host line, or a
+   Match line's `host` or `originalhost` criterion, that names the chosen name exactly, outside
+   this script's own section. Any such line makes the name taken, even when every setting in
+   it equals ssh's defaults, and the questions ask for another name, before any purchase;
+   `plan` and `apply` scan again, so a line added after the answer gets no quote either. A
+   wildcard (`Host *`, `Host f*`) names no name; what it gives the new name, the rehearsal at
+   `plan` sees. The plan then rehearses where ssh will really go, before any price is shown
+   (and `apply` again, just before the create): the person's config is copied to a scratch
+   file with the exact block `ssh-config` will write, at the exact place it will write it,
+   holding a placeholder address from 192.0.2.0/24, and the system config after it as ssh
+   reads it. The scratch file is read as a user config, so every Include in it and in the
+   scratch copies of the files it names is written as an absolute path where the real ssh
+   looks: a relative one under `~/.ssh` in the person's config, under `/etc/ssh` in the system
+   config, nested Includes included. `ssh -G -F <scratch>` with the script's host key options must report that
+   placeholder, port 22, user `farm`, the script's key as the first identity file, no
+   ProxyCommand, ProxyJump or HostKeyAlias, `accept-new` and the murmur known-hosts file. Any
+   difference refuses the plan with no quote, naming the setting and the line of the person's
+   config behind it (a top-level `Port 2222`, a `Host *` with another `User` in a file
+   Included above the section). The block writes `Port 22` itself, so a `Host *` below the
+   section cannot move the port. After writing the block, the same checks run on the real
+   config against the droplet's address before any remote command, and every ssh the script
+   runs or prints also carries `-p 22 -l farm`, as `machines.py` always carries `-p`.
 6. **Finish in two sessions.** First the person runs `ssh -t <name> gh auth login` in their
    own terminal (the script prints it; it cannot run it: no terminal, and the helper sends
    stdin to /dev/null, `machines.py` :343). The script verifies with `ssh <name> gh auth status`
@@ -309,9 +344,16 @@ by anyone but the person, and the runner skill (`/murmur:runner`, hosting.md sec
   still resolves (`ssh -G`) to `accept-new` and the murmur file.
 - The key: a passphrase key not in the agent stops at preflight with the `ssh-add` line and no
   purchase; after boot, a failing `BatchMode=yes` probe stops before any remote step.
-- A taken ssh name: a config whose earlier `Host farm` points elsewhere makes the questions ask
-  for another name, and a written block that `ssh -G` does not resolve to the droplet stops the
-  run before any remote command.
+- A taken ssh name: a Host or Match line naming `farm` exactly, in the config, the system
+  config, or a file either Includes, makes the questions ask for another name and nothing is bought, even a `Host farm`
+  whose settings equal ssh's defaults; a clean config, a wildcard, or a mention only in this
+  script's section passes. The rehearsal: a top-level `Port 2222`, a top-level `User`, a
+  `Host *` with another `User` Included above the section, an earlier `IdentityFile` or a
+  `Host *` proxy, or a `Host *` proxy in a file the system config Includes by a relative path
+  (directly or nested), refuses the plan with no quote and nothing bought, and `apply` refuses the
+  same when the config changed after the plan; a `Host *` below the section with another port
+  and user passes, and real `ssh -G` then says port 22 and user `farm`. A written block that
+  `ssh -G` does not resolve to the droplet stops the run before any remote command.
 - WSL: a fake `/proc/version` naming Microsoft offers the tunnel only.
 - Remote commands: every command the script runs or prints over ssh names its program by
   absolute path when it lives in `~/.local/bin` (system ones such as `gh` sit in `/usr/bin`) or
@@ -319,8 +361,8 @@ by anyone but the person, and the runner skill (`/murmur:runner`, hosting.md sec
   (a Bash client with `HOME=/home/laptop` prints the command and it still says `/home/farm`).
 - Codex: `--with-codex` installs with a `/home/farm/.local` prefix, `FLEET_CODEX_BIN` is written,
   and the one-line Codex lane runs on the fake engine.
-- The firewall: a fake list with the right name but a wide rule or no tag is corrected, and a
-  correction that fails creates nothing.
+- The firewall: a fake list with the right name but a wide rule, a tcp 22 rule narrowed to
+  `192.0.2.0/24`, or no tag is corrected, and a correction that fails creates nothing.
 - The token: the browser handoff file is 0600 and gone after use, the token is on no argv
   (the fake `open` records its argv), the page takes `#token=`, and a GET that raises with
   `?token=CANARY` leaves no canary in the log.

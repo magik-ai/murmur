@@ -6,6 +6,7 @@ init script once looked for the templates one level above the plugin, so /murmur
 with "Templates not found" for everyone who installed from the marketplace, while every run
 from a clone of this repository kept working.
 """
+import json
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,34 @@ class InstalledCopy(unittest.TestCase):
     def test_the_copy_holds_everything_the_scripts_read(self):
         self.assertTrue((self.plugin / "templates" / "CLAUDE.md").is_file())
         self.assertTrue((self.plugin / "hooks" / "generated-files.example.txt").is_file())
+
+    def test_the_copy_carries_the_machines_library_as_files(self):
+        for name in ("machines.py", "host_presets.py", "scrub.py"):
+            path = self.plugin / "lib" / name
+            self.assertTrue(path.is_file(), name)
+            self.assertFalse(path.is_symlink(), name)
+
+    def test_farm_plans_from_the_installed_copy(self):
+        # The answers a person gave, and their public key; no doctl on PATH, so the plan says
+        # it is the list price and would refuse to buy on it.
+        ssh = self.tmp / ".ssh"
+        ssh.mkdir(mode=0o700)
+        (ssh / "id_ed25519.pub").write_text(
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPERSONPERSONPERSON person@laptop\n")
+        murmur = self.tmp / ".config" / "murmur"
+        murmur.mkdir(parents=True, mode=0o700)
+        (murmur / "farm.json").write_text(json.dumps({"answers": {
+            "name": "farm", "size": "s-4vcpu-8gb", "region": "fra1", "access": "tunnel",
+            "codex": "no", "accounts": "", "hq_repo": "",
+            "key": str(ssh / "id_ed25519")}}))
+        result = self.run_script("murmur_farm.py", "plan")
+        said = result.stdout + result.stderr
+        self.assertNotIn("Traceback", said)
+        self.assertEqual(result.returncode, 0, said)
+        plan = json.loads(result.stdout)
+        self.assertEqual(plan["sentence"], "Create farm, $48 a month until you destroy it")
+        self.assertIn("#cloud-config", plan["cloud_init"])
+        self.assertIn("not a live price", plan["said"])
 
     def test_doctor_runs_from_the_installed_copy(self):
         result = self.run_script("murmur_doctor.py")

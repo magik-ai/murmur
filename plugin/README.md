@@ -41,6 +41,7 @@ also be called by name.
 | --- | --- | --- |
 | `init` | "set up murmur", "murmur init", "onboard this repo" | Seven questions with defaults, then the contract, the tracker rules, the pull request template, the lessons file and the guard list, never overwriting a file you have. |
 | `doctor` | "murmur doctor", "check my setup", "is this repo set up" | A table of checks and one word for where the setup stands, naming the optional pieces (a head office, an agent machine) that are not set up yet. |
+| `farm` | "murmur farm", "a farm in the cloud", "set up a farm" | From your laptop: checks doctl, your ssh key and GitHub, asks a few questions, prints the plan and the price, buys a DigitalOcean droplet only with the price typed back, installs murmur on it and opens its dashboard through a private tunnel or Tailscale. Every login is a command for your own terminal. |
 | `orchestrate` | "fan this out", "spawn lanes", "run this as a team", "split this across agents" | Splitting a batch into lanes with disjoint file manifests, identity and capacity checks before spawning, waiting for an explicit go, tracking workers through events rather than transcripts, assembling lanes into one pull request, merging only on the owner's word. |
 | `night-mode` | "night mode", "unattended run", "have it done by morning", "finish this while I sleep" | Driving the current scope to a defined finish with nobody watching: a frozen scope, a heartbeat checklist, decide alone and log every contested call, three allowed resting states, one report in the morning. |
 | `conductor` | "release manager", "keep the queue moving", "conductor", "ride this to production" | Owning the delivery road: queue watching that does not burn the shared API budget, the conveyor from green to deployed, ejection forensics, trains, freezes, the hold veto, and watching production after a wave. |
@@ -108,10 +109,15 @@ note and never a failed session.
 .claude-plugin/plugin.json   name, description, version
 commands/init.md             the /murmur:init command
 commands/doctor.md           the /murmur:doctor command
+commands/farm.md             the /murmur:farm command
 skills/init/SKILL.md
 skills/doctor/SKILL.md
+skills/farm/SKILL.md
 scripts/murmur_init.py       what init runs: asks nothing itself, writes every file
 scripts/murmur_doctor.py     what doctor runs: the checks and their table
+scripts/murmur_farm.py       what farm runs: one step per call, one JSON answer each
+lib/ -> ../fleet/lib/*       machines.py, host_presets.py, scrub.py: symlinks, so the farm
+                             skill and `fleet machines` are one implementation
 templates -> ../templates    the files init writes from
 skills/orchestrate/SKILL.md
 skills/night-mode/SKILL.md

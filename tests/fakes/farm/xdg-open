@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""A fake browser opener (xdg-open, open, wslview): records its argv and what it was handed.
+
+The handed file is read at once, as a browser would load it, and its mode is recorded, into
+$FAKE_OPENED (one JSON line per call: {argv, mode, body}).
+"""
+import json
+import os
+import stat
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fakelib import flag, record  # noqa: E402
+
+
+def main():
+    argv = record()
+    path = argv[-1]
+    body, mode = "", ""
+    try:
+        mode = oct(stat.S_IMODE(os.stat(path).st_mode))
+        with open(path, encoding="utf-8") as handle:
+            body = handle.read()
+    except OSError:
+        pass
+    with open(flag("FAKE_OPENED", os.devnull), "a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"argv": argv, "mode": mode, "body": body}) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

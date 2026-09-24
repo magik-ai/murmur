@@ -5,20 +5,29 @@ let tokenCache = null;
 
 /**
  * The write token. A browser cannot read an environment variable, so it arrives once in the
- * address bar, is kept for the tab and is stripped back out. Only the token is stripped:
- * anything else in the query belongs to whoever put it there.
+ * address bar, is kept for the tab and is stripped back out. It may come as `?token=` or as
+ * `#token=`; a fragment never reaches the server or its log, which is how `/murmur:farm open`
+ * hands it over. Only the token is stripped: anything else in the query or the fragment belongs
+ * to whoever put it there.
  */
 export function token() {
   if (tokenCache != null) return tokenCache;
   tokenCache = "";
   try {
     const query = new URLSearchParams(location.search);
-    const found = query.get("token");
+    const fragment = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+    const found = query.get("token") || fragment.get("token");
     if (found) {
       sessionStorage.setItem("murmur.token", found);
       query.delete("token");
       const rest = query.toString();
-      history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+      let hash = location.hash;
+      if (fragment.has("token")) {
+        fragment.delete("token");
+        const left = fragment.toString();
+        hash = left ? `#${left}` : "";
+      }
+      history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + hash);
       tokenCache = found;
     } else {
       tokenCache = sessionStorage.getItem("murmur.token") || "";

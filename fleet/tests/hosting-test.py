@@ -320,12 +320,25 @@ class Create(Farm):
                              "--size", "s-4vcpu-8gb", "--region", "fra1",
                              "--pubkey-file", self.pubkey, "--confirm-usd", "48",
                              FAKE_DOCTL_FAIL_AT="create")
+        # An error from the create itself is a lost answer, not a failure: the row stays
+        # pending with its price, and nothing is bought again on its own.
+        self.assertEqual(done.returncode, 3, done.stdout)
+        row = self.row("farm-1")
+        self.assertEqual(row["state"], "creating")
+        self.assertEqual(row["provider_id"], "")
+        self.assertIn("pending", row["detail"])
+        self.assertEqual(row["monthly_usd"], 48.0)
+        self.assertEqual(self.read_droplets(), [])
+
+    def test_a_refusal_before_the_create_call_is_failed_and_bills_nothing(self):
+        done = self.machines("create", "--provider", "do-droplet", "--name", "farm-1",
+                             "--size", "s-4vcpu-8gb", "--region", "fra1",
+                             "--pubkey-file", self.pubkey, "--confirm-usd", "48",
+                             FAKE_DOCTL_FAIL_AT="import")
         self.assertEqual(done.returncode, 1, done.stdout)
         row = self.row("farm-1")
         self.assertEqual(row["state"], "failed")
-        self.assertIn("destroy", row["detail"])
         self.assertIn("forget farm-1", row["detail"])
-        self.assertEqual(row["monthly_usd"], 48.0)
         self.assertEqual(self.read_droplets(), [])
 
     def test_a_live_name_is_never_bought_twice(self):
@@ -384,8 +397,11 @@ class Create(Farm):
         self.assertNotIn("--wait", argv)
         self.assertIn("--user-data-file", argv)
         tags = argv[argv.index("--tag-names") + 1].split(",")
-        self.assertEqual(tags[:2], ["murmur", "murmur-farm"])
-        self.assertTrue(tags[2].startswith("murmur-by-"), tags)
+        # Only the tag the murmur firewall attaches by and this farm's own: no generic tag
+        # another firewall could be attached by.
+        self.assertEqual(len(tags), 2, tags)
+        self.assertEqual(tags[0], "murmur-farm")
+        self.assertTrue(tags[1].startswith("murmur-by-"), tags)
         self.assertEqual(argv[argv.index("--image") + 1], "ubuntu-24-04-x64")
 
     def test_the_calls_that_make_things_name_the_farms_doctl_context(self):
@@ -497,6 +513,9 @@ class Walk(Farm):
             self.assertIn("ConnectTimeout=5", argv)
             self.assertIn("StrictHostKeyChecking=accept-new", argv)
             self.assertIn(f"UserKnownHostsFile={self.state}/machines/known_hosts", argv)
+            # A droplet's row names no port: 22 is still on the line, so no Port in a person's
+            # ssh config moves it.
+            self.assertEqual(argv[argv.index("-p") + 1], "22")
         forgotten = [argv for argv in self.argvs("ssh-keygen") if "-R" in argv]
         self.assertTrue(forgotten, "a recorded address forgets its old host key first")
         self.assertIn("192.0.2.10", forgotten[0])
@@ -577,7 +596,8 @@ class Walk(Farm):
         self.machines("create", "--provider", "do-droplet", "--name", "farm-2",
                       "--size", "s-4vcpu-8gb", "--region", "fra1",
                       "--pubkey-file", self.pubkey, "--confirm-usd", "48",
-                      FAKE_DOCTL_FAIL_AT="create")
+                      FAKE_DOCTL_FAIL_AT="import",
+                      FAKE_DOCTL_SSH_KEYS=os.path.join(self.home, "no-keys-yet.json"))
         self.assertEqual(self.row("farm-2")["state"], "failed")
         self.assertEqual(self.listing()["total_monthly_usd"], 48.0)
         self.assertIn("$48 a month runs until this droplet is destroyed",
@@ -702,7 +722,7 @@ class DestroyAndForget(Farm):
         self.machines("create", "--provider", "do-droplet", "--name", "farm-1",
                       "--size", "s-4vcpu-8gb", "--region", "fra1",
                       "--pubkey-file", self.pubkey, "--confirm-usd", "48",
-                      FAKE_DOCTL_FAIL_AT="create")
+                      FAKE_DOCTL_FAIL_AT="import")
         self.ok("forget", "farm-1")
         self.assertIsNone(self.row("farm-1"))
 

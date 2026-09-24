@@ -13,15 +13,20 @@
 #   1. system packages: git, tmux, python3 (3.11+), curl, GitHub's CLI
 #   2. user services survive logout (loginctl enable-linger), uv, the Claude Code CLI
 #   3. clones murmur (it carries the fleet and the head office CLI), installs both under ~/.local/bin
-#   4. asks a few questions and writes the config: head office repository, owner, dashboard reach
+#   4. asks a few questions and writes the config: head office repository, owner, dashboard reach,
+#      and runs the dashboard as a systemd user unit (fleet-dashboard.service) so it survives a reboot
 #   5. prints the two logins only you can do (GitHub, Claude) and the first spawn
 #
 # Flags:
-#   --yes            no questions, take every default (a single machine, dashboard on loopback)
+#   --yes            never ask: every question takes its default (the head office repository, or
+#                    --hq-repo; your code name; the ssh alias), a single machine unless --remote
+#   --hq-repo O/N    the head office repository to join (owner/name), instead of the default
+#                    <your GitHub login>/agent-hq-office; created if it does not exist
 #   --org NAME       GitHub owner (user or org) that holds the murmur repository; default magik-ai
 #   --no-tailscale   never offer to install Tailscale
-#   --remote         this box is driven from your laptop: the dashboard stays on loopback, no
-#                    Tailscale is offered, and the last line is the ssh tunnel that reaches it
+#   --remote         this box is driven from your laptop: the dashboard bind is left as it is
+#                    (loopback from first boot, or what /murmur:farm wrote), no Tailscale is
+#                    offered here, and the last line is the ssh tunnel that reaches it
 #   -h, --help       this text
 #
 # Windows: install WSL2 with Ubuntu first (wsl --install), then run this inside it.
@@ -29,6 +34,7 @@
 set -euo pipefail
 
 ORG="magik-ai"
+HQ_REPO=""
 YES=0
 OFFER_TAILSCALE=1
 REMOTE=0
@@ -38,7 +44,9 @@ while [ $# -gt 0 ]; do
     --org) ORG="$2"; shift;;
     --no-tailscale) OFFER_TAILSCALE=0;;
     --remote) REMOTE=1; OFFER_TAILSCALE=0;;
-    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    --hq-repo) [ $# -ge 2 ] || { echo "--hq-repo needs owner/name" >&2; exit 2; }
+               HQ_REPO="$2"; shift;;
+    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) echo "unknown flag: $1 (see --help)" >&2; exit 2;;
   esac
   shift
@@ -198,13 +206,23 @@ note "hq: linked into ~/.local/bin"
 # ---------------------------------------------------------------------------------------------
 say "4/5  Configuration"
 hq_conf="${XDG_CONFIG_HOME:-$HOME/.config}/hq/config.toml"
+if [ -n "$HQ_REPO" ] && ! printf '%s' "$HQ_REPO" | grep -qE '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
+  die "--hq-repo is owner/name, for example you/agent-hq-office; got: $HQ_REPO"
+fi
 if [ -f "$hq_conf" ]; then
   note "head office already configured in $hq_conf, left alone"
+  if [ -n "$HQ_REPO" ] && ! grep -qF "\"$HQ_REPO\"" "$hq_conf"; then
+    note "WARNING: --hq-repo $HQ_REPO is not the repository in $hq_conf; edit that file or run: hq init --repo $HQ_REPO"
+  fi
 else
   note "The head office is a small PRIVATE GitHub repository where agents register, claim branches and"
   note "leave each other mail. Everyone who can read it can read the mail, so keep it private."
-  office="$gh_user/agent-hq-office"
-  ask office "Head office repository (owner/name; created if missing)" "$office"
+  office="${HQ_REPO:-$gh_user/agent-hq-office}"
+  if [ -n "$HQ_REPO" ]; then
+    note "Head office repository: $office (--hq-repo)"
+  else
+    ask office "Head office repository (owner/name; created if missing)" "$office"
+  fi
   owner="$gh_user"
   ask owner "Your own code name as the owner (claims warn you instead of blocking you)" "$owner"
   if ! gh repo view "$office" >/dev/null 2>&1; then
@@ -246,12 +264,32 @@ if [ "$single" != "yes" ] && [ "$single" != "y" ] && [ "$OFFER_TAILSCALE" = 1 ];
     have tailscale || { curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1 || note "WARNING: Tailscale did not install; see https://tailscale.com/download"; }
     if have tailscale; then
       note "run once, and follow the link it prints:  sudo tailscale up"
-      grep -q '^FLEET_DASH_BIND=' "$fleet_env" 2>/dev/null || echo "FLEET_DASH_BIND=0.0.0.0" >> "$fleet_env"
-      note "dashboard will listen on every interface and ask for its token; on Tailscale that is only your devices"
+      # The Tailscale address only, resolved by the dashboard at start; never 0.0.0.0, which on
+      # a box with a public address would publish the page to the internet behind its token. An
+      # older install may have left 0.0.0.0 (or any other bind) here, and the unit loads this
+      # file, so every bind line goes and exactly one tailscale line takes its place.
+      bind_line='^[[:space:]]*(export[[:space:]]+)?FLEET_DASH_BIND[[:space:]]*='
+      old_bind=$(grep -E "$bind_line" "$fleet_env" 2>/dev/null | grep -vx 'FLEET_DASH_BIND=tailscale' | head -1 || true)
+      kept=$(grep -vE "$bind_line" "$fleet_env" 2>/dev/null || true)
+      { [ -z "$kept" ] || printf '%s\n' "$kept"; echo "FLEET_DASH_BIND=tailscale"; } > "$fleet_env"
+      [ -z "$old_bind" ] || note "replaced $old_bind in $fleet_env with FLEET_DASH_BIND=tailscale"
+      note "dashboard will listen on this box's Tailscale address only, and ask for its token"
     fi
   else
     note "dashboard stays on loopback; reach it with an ssh tunnel:  ssh -N -L 7878:127.0.0.1:7878 $farm_alias"
   fi
+fi
+
+# The dashboard as a user service, so it outlives this login and comes back after a reboot. It
+# reads the bind from $fleet_env, so every choice above is already in place when it starts.
+if systemctl --user show-environment >/dev/null 2>&1; then
+  if "$FLEET_SRC/dashboard/run.sh" enable >/tmp/murmur-dashboard.log 2>&1; then
+    note "dashboard: fleet-dashboard.service enabled and running"
+  else
+    note "dashboard: fleet-dashboard.service enabled, not answering yet ($(tail -1 /tmp/murmur-dashboard.log)); check: fleet dashboard status"
+  fi
+else
+  note "dashboard: no systemd user manager here, so it is not a service; start it with: fleet dashboard start"
 fi
 
 # ---------------------------------------------------------------------------------------------

@@ -11,12 +11,17 @@ import sys
 import time
 
 
-def record():
-    """Append this call to $FAKE_LOG and give back its argv (argv[0] is the bare name)."""
+def record(env_prefix=""):
+    """Append this call to $FAKE_LOG and give back its argv (argv[0] is the bare name). With
+    env_prefix, the environment variables that start with it are logged too, as "env"."""
     argv = [os.path.basename(sys.argv[0])] + sys.argv[1:]
     log = os.environ.get("FAKE_LOG")
     if log:
-        line = json.dumps({"argv": argv, "stdin": stdin_text()}, sort_keys=True)
+        row = {"argv": argv, "stdin": stdin_text()}
+        if env_prefix:
+            row["env"] = {key: value for key, value in os.environ.items()
+                          if key.startswith(env_prefix)}
+        line = json.dumps(row, sort_keys=True)
         with open(log, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
     return argv

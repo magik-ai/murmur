@@ -1855,11 +1855,11 @@ cmd_autosweep() { # on [minutes] | off | status — periodic `fleet sweep` via a
 
 cmd_logs() { tail -n 40 -f "$FLEET_STATE/logs/$1.jsonl"; }
 
-cmd_dashboard() { # start|stop|restart|status|token
+cmd_dashboard() { # start|stop|restart|status|token|enable
   local action="${1:-start}"
   case "$action" in
-    start|stop|restart|status|token) "$FLEET_HOME/dashboard/run.sh" "$action" ;;
-    *) echo "usage: fleet dashboard start|stop|restart|status|token"; return 1 ;;
+    start|stop|restart|status|token|enable) "$FLEET_HOME/dashboard/run.sh" "$action" ;;
+    *) echo "usage: fleet dashboard start|stop|restart|status|token|enable"; return 1 ;;
   esac
 }
 
@@ -1983,7 +1983,9 @@ fleet — headless Claude agent fleet on the farm
                                   it is registered on first spawn and the registry
                                   wins after that, so all of an orchestrator's
                                   agents carry the same emoji and colour.
-  fleet dashboard start|stop|restart|status|token
+  fleet dashboard start|stop|restart|status|token|enable
+                                  `enable` installs the user unit fleet-dashboard.service, so the
+                                  page survives a reboot; start/stop/restart then drive the unit
                                   web dashboard on 127.0.0.1:7878; FLEET_DASH_BIND widens it
                                   (and then its token gates reads too). Every write needs the
                                   bearer token `fleet dashboard token` prints; `restart` is how

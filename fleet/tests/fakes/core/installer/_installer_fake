@@ -19,6 +19,11 @@ mkdir -p "${FLEET_CONFIG:-$HOME/.config/fleet}"
 printf '%s\\n' "$*" >> "$HOME/fleet-install.txt"
 """
 
+# The stand-in dashboard script records how the installer called it and starts nothing.
+DASHBOARD_RUN = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$HOME/dashboard-run.txt"
+"""
+
 
 def gh(args):
     if args[:1] == ["--version"]:
@@ -37,6 +42,11 @@ def gh(args):
         os.chmod(path, 0o755)
         with open(os.path.join(target, "hq", "bin", "hq"), "w", encoding="utf-8") as handle:
             handle.write("raise SystemExit(0)\n")
+        os.makedirs(os.path.join(target, "fleet", "dashboard"), exist_ok=True)
+        path = os.path.join(target, "fleet", "dashboard", "run.sh")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(DASHBOARD_RUN)
+        os.chmod(path, 0o755)
     elif args[:2] == ["repo", "view"]:
         out("{}")
     else:

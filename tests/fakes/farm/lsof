@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""A fake lsof: the listeners the fake ssh's tunnels hold, from $FAKE_LAPTOP/listeners.json."""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fakelib import flag, out, record, value_after  # noqa: E402
+
+
+def main():
+    argv = record()
+    wanted = ""
+    for word in argv[1:]:
+        if word.startswith("-iTCP:"):
+            wanted = word[len("-iTCP:"):]
+    try:
+        with open(os.path.join(flag("FAKE_LAPTOP"), "listeners.json"), encoding="utf-8") as h:
+            rows = json.load(h)
+    except (OSError, ValueError):
+        rows = {}
+    if wanted not in rows:
+        return 1
+    address = rows[wanted]
+    shown = "*" if address in ("0.0.0.0", "::", "") else address
+    out("COMMAND  PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME")
+    out(f"ssh     4242 me    5u  IPv4 0x0      0t0  TCP {shown}:{wanted} (LISTEN)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
