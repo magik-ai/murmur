@@ -1,90 +1,163 @@
-# fleet sweep — the farm janitor and how not to lose work to it
+# fleet sweep
 
-`fleet sweep` runs automatically every 10 minutes (`fleet-sweep.timer`) and keeps
-the farm free of dead worktrees and stale dashboard cards. It is deliberately
-aggressive about the obviously dead, so every agent must know its contract.
+`fleet sweep` cleans up after finished lanes. A lane is one agent doing one
+task on its own branch, in its own git worktree under `~/.fleet/worktrees/`.
+The sweep removes worktrees that are no longer needed, and it archives the
+dashboard cards of lanes that are done. A card is the lane's entry on the
+dashboard; it comes from the lane's state record, `~/.fleet/state/<slug>.json`.
+`<slug>` is the lane's unique id, printed by `fleet spawn`.
+
+The sweep removes what is clearly finished, on a timer, without asking. Read
+this page to know what it keeps, what it removes and what it saves first.
+
+## When it runs
+
+`./install.sh` turns on the timer with `fleet autosweep on` (skip this with
+`./install.sh --no-autosweep`). The timer is the systemd user unit
+`fleet-sweep.timer`. It runs `fleet sweep` every 10 minutes, and it never
+passes `--force`.
+
+```bash
+fleet sweep --dry-run          # print what the next pass would do; remove nothing
+fleet sweep                    # one pass over every registered project
+fleet sweep --project <name>   # one project only
+fleet sweep --force            # also remove worktrees with uncommitted changes
+fleet autosweep status         # the timer: its next run and the last result
+fleet autosweep on 15          # run every 15 minutes instead of 10
+fleet autosweep off            # stop the timer
+```
 
 ## What it removes
 
-**Pass A — git worktrees.** A worktree is removed when its branch's PR is
-MERGED (GitHub is the authority; squash-merge makes ancestry checks useless).
-Kept: worktrees of live agents, branches with an OPEN PR, branches whose PR was
-CLOSED unmerged (owner's call), and merged-but-dirty trees (tracked changes)
-unless `--force`.
+The sweep goes through the registered projects one at a time. It never touches
+a live lane. A lane is live when its record says `starting` or `running`, and
+either the record changed in the last 15 minutes or the lane's systemd unit is
+still active. A record that says `running` but has not changed for 15 minutes,
+with no unit behind it, belongs to a lane that died.
 
-**Pass B — dashboard cards (`~/.fleet/state/*.json`).** A card is reaped when
-its PR is merged, its status is `killed`, or it is terminal
-(`done_no_pr` / `delivered` / `failed`) and older than the grace period.
+### Part A: worktrees
+
+The sweep looks at each git worktree of the project that lives under
+`~/.fleet/worktrees/`. It skips any other worktree, and any worktree with a
+detached HEAD. For each branch it asks GitHub for the pull request, because a
+squash merge leaves no trace in git history.
+
+| The branch | What the sweep does |
+|---|---|
+| a live lane uses it | keeps it |
+| GitHub did not answer | keeps it |
+| its pull request is open | keeps it |
+| its pull request was closed without a merge | keeps it (but see part B) |
+| its pull request was merged | removes the worktree and the local branch |
+| no pull request, but already in `origin/<base>` | removes the worktree and the local branch |
+| no pull request, not in `origin/<base>` | keeps it |
+
+`<base>` is the project's base branch, `main` unless `projects.toml` says
+otherwise. Two more rules apply before a worktree is removed:
+
+- **Uncommitted changes keep it.** This counts tracked and untracked files
+  alike. Files your `.gitignore` covers do not count. Only `fleet sweep
+  --force` removes such a worktree, and it saves the changes first.
+- **Commits that were never pushed are rescued first.** The sweep pushes them
+  to `refs/fleet-salvage/<slug>` on `origin`, then removes the worktree.
+
+### Part B: cards
+
+The sweep then looks at the state records of the project's lanes that are not
+live. It keeps a card when the lane's pull request is open, or when GitHub did
+not answer. It archives the card in any of these cases:
+
+- the lane's pull request was merged;
+- the lane was killed with `fleet kill`;
+- the record has not changed for 15 minutes (`GRACE`).
+
+If the lane's worktree still exists, part B removes it before it archives the
+card, with the same two rules: uncommitted changes keep both the worktree and
+the card (unless `--force`), and unpushed commits are rescued first. Part B
+does not delete the branch.
+
+So the worktree of a lane whose pull request was closed, or that never opened
+one, does not stay for ever. Part A keeps it, and part B removes it 15 minutes
+after the lane's record last changed. The branch stays: in the project's
+checkout, and on GitHub if it was pushed.
 
 ## Parameters
 
 | Parameter | Value | Meaning |
 |---|---|---|
-| `GRACE` | 900 s (15 min) | A just-finished card stays visible this long |
-| `--force` | off | The only way a worktree with tracked uncommitted changes is removed, and its dirt is snapshotted first. There is no age at which the janitor does this on its own |
-| autosweep | every 10 min | `fleet autosweep status` / `off` / `on [minutes]` |
+| `GRACE` | 900 s (15 min) | How long a finished card stays on the board. Also how long a `running` record may go without a change before a lane with no unit counts as dead |
+| `--force` | off | The only way to remove a worktree with uncommitted changes. The changes are saved first. The timer never passes it |
+| autosweep | every 10 min | `fleet autosweep on [minutes]`, `off`, `status` |
 
-## What counts as "dirty"
+## What is saved before anything is removed
 
-Only **tracked** uncommitted modifications protect a worktree, and they protect
-it for as long as they exist: nothing buries them on a timer, only
-`fleet sweep --force` does, after an autopsy snapshot. Untracked scratch files
-protect NOTHING, every agent leaves untracked noise, so it cannot be a keep
-signal. The harness-owned `.fleet-hooks/` directory never counts.
+- **Cards** move to `~/.fleet/state-archive/<YYYY-MM>/`.
+- **Uncommitted changes**, when `--force` removes their worktree, are saved in
+  the same folder first. `<slug>.dirt.txt` holds `git status` and the unstaged
+  and staged diffs, cut at 200,000 bytes. `<slug>.untracked.tar` holds the
+  untracked files.
+- **Commits that were never pushed** go to `refs/fleet-salvage/<slug>` on
+  `origin`. This ref does not show in the branch list. A later pass deletes it
+  once its last commit is part of `origin/<base>`. After a squash merge that
+  never happens, so delete the ref yourself when you no longer need it:
+  `git push origin --delete refs/fleet-salvage/<slug>`. If the push to the
+  salvage ref is refused, the sweep removes the worktree anyway, so this is a
+  safety net and not a place to keep work.
+- **Everything else** in a removed worktree is gone: ignored files, build
+  output, installed dependencies.
 
-## Nothing is deleted outright
+## When a state record cannot be read
 
-- Reaped cards move to `~/.fleet/state-archive/<YYYY-MM>/`.
-- When a dirty-but-long-dead tree is buried, its dirt is snapshotted first to
-  `<slug>.dirt.txt` in the archive (git status + first 200 KB of diff).
-- **Committed-but-unpushed commits are rescued before burial.** A terminal
-  worktree carrying local commits that were never pushed (branch not merged, not
-  in origin) reads as clean to the dirt check, so it used to be removed and the
-  commits lost. The sweep now pushes such commits to a hidden ref namespace,
-  `refs/fleet-salvage/<slug>`, before it removes the worktree. The ref does not
-  show up in the branch list; a later pass drops it automatically once the same
-  work lands in `origin/<base>` (the lane's PR merged), so the namespace never
-  becomes a graveyard. Recover with `git fetch origin '+refs/fleet-salvage/*:refs/fleet-salvage/*'`.
-- Removed worktree contents are otherwise GONE. Uncommitted changes get only the
-  `.dirt.txt` autopsy; commit and push to be truly safe.
+If a state record in `~/.fleet/state/` is not valid JSON, the sweep cannot
+tell whether that lane is live. It then removes no worktree and archives no
+card, in any project, and prints:
 
-## When a state record is unreadable
+```text
+  ABORT   1 unreadable state record(s): <name>.json
+          refusing to remove anything - liveness cannot be established.
+```
 
-The sweep refuses to run for the whole project and prints
+A record that is being written at that moment can look like this. So one
+ABORT is normal, and the next pass usually reads the record without trouble.
 
-    ABORT   1 unreadable state record(s): <name>.json
-            refusing to remove anything - liveness cannot be established.
+A record that stays unreadable for 15 minutes (going by its file time) is not
+being written. The sweep moves it to
+`~/.fleet/state-archive/<YYYY-MM>/<name>.json.corrupt` and carries on with the
+same pass. It keeps the file because it may be the only trace of what that
+lane did.
 
-That is deliberate. A torn record may belong to a RUNNING lane, and the janitor
-would have no way to tell — so it deletes nothing rather than risk deleting a
-live worktree. Expect it while a lane is mid-write; the next pass is normally
-clean.
+If that move fails, the sweep aborts again and prints the reason:
 
-A record that stays unparseable past the grace window is not in flight, it is
-debris. That pass still aborts, and the file is retired to
-`~/.fleet/state-archive/<YYYY-MM>/<name>.json.corrupt` — archived, never deleted,
-because it may be the only trace of what that lane was doing. The pass after
-that sees a clean state directory and the janitor resumes on its own.
+```text
+  quarantine  FAILED for <name>.json: <reason>
+```
 
-So: **one ABORT is normal, a repeating ABORT clears itself within one grace
-window.** If it survives longer than that, the state directory is not writable —
-that is the thing to investigate, not the record.
+So an ABORT that repeats for more than 15 minutes means the record cannot be
+moved. When the timer ran the sweep, its output is in
+`journalctl --user -u fleet-sweep.service`.
 
 ## How to keep your work safe (agents, read this)
 
-1. **Running lanes are never touched.** The janitor only looks at terminal
-   states.
-2. **Commit and push; open a PR.** An OPEN PR protects both your worktree and
-   your card indefinitely. Tracked-but-uncommitted changes are kept until
-   somebody sweeps with `--force`, which is not a plan: nobody reviews a dirty
-   worktree. Untracked files buy you nothing. Committed-but-unpushed commits are now caught by the
-   salvage pass (`refs/fleet-salvage/<slug>`), but that is a safety net, not a
-   plan — push, so your work is on a real branch with a real PR.
-3. **Finish loudly.** Once your status is terminal, your card disappears after
-   ~15 minutes — put durable output in the PR, the issue, or your report, never
-   only in the worktree.
-4. **Preview before panicking:** `fleet sweep --dry-run` shows exactly what the
-   next pass would take.
-5. **Recovery:** check `~/.fleet/state-archive/` for the card and the `.dirt.txt`
-   autopsy; if the work was pushed, the branch is still on origin; if it was
-   committed but never pushed, look for `refs/fleet-salvage/<slug>` on origin.
+1. **Live lanes are never touched.** The sweep only acts on lanes that
+   finished or died.
+2. **Commit, push and open a pull request.** An open pull request keeps both
+   your worktree and your card, however long it stays open.
+3. **Do not leave work uncommitted.** Uncommitted changes keep the worktree
+   only until someone runs `fleet sweep --force`, and nobody reviews a
+   worktree. The salvage ref catches commits you did not push, but it is a
+   safety net, not a plan: push, so your work is on a real branch with a real
+   pull request.
+4. **Put results where people read them.** Your card leaves the board about
+   15 minutes after you finish, or at the next pass if your pull request was
+   merged or your lane was killed. Put durable output in the pull request, the
+   issue or your report, never only in the worktree.
+5. **Preview before you worry.** `fleet sweep --dry-run` prints what the next
+   pass would take.
+6. **To recover work**, look in `~/.fleet/state-archive/` for the card and for
+   the `.dirt.txt` and `.untracked.tar` files. Pushed work is still on its
+   branch on GitHub. Commits that were never pushed are in the salvage ref:
+
+   ```bash
+   git fetch origin '+refs/fleet-salvage/*:refs/fleet-salvage/*'
+   git switch -c rescue refs/fleet-salvage/<slug>
+   ```
