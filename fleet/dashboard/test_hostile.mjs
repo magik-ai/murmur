@@ -857,6 +857,51 @@ for (const [from, wanted, name] of [
   await context.close();
 }
 
+/* The header says whether the farm works, in three words (owner, 2026-09-24): on, paused or off,
+   and room is only mentioned when there is none. */
+{
+  const services = (state) => JSON.stringify({ at: new Date().toISOString(), stale_since: null, error: null,
+    services: [{ id: "agent_runner", label: "Agent runner", state, since: Date.now() / 1000 - 600, actions: ["start", "stop", "restart"] }] });
+  const read = async (overrides) => {
+    const { page, context } = await open({ hash: "#/board", overrides });
+    const seen = await page.evaluate(() => ({
+      farm: document.querySelector("#farmState .pill-text").textContent,
+      why: document.getElementById("farmState").title,
+      room: document.getElementById("capacity").hidden,
+    }));
+    await context.close();
+    return seen;
+  };
+  const on = await read({ "/api/services": services("active") });
+  check("a working farm reads Farm on, and says nothing about room", on.farm === "Farm on" && on.room, JSON.stringify(on));
+  const off = await read({ "/api/services": services("inactive") });
+  check("a stopped agent runner reads Farm off, and says what to do", off.farm === "Farm off" && /Start it/.test(off.why), JSON.stringify(off));
+  const empty = await read({ "/api/services": JSON.stringify({ at: new Date().toISOString(), stale_since: null, error: null, services: [] }) });
+  check("a farm that lists no agent runner is not called on", empty.farm !== "Farm on", JSON.stringify(empty));
+  const failed = await read({ "/api/services": (handler) => handler.fulfill({ status: 500, contentType: "application/json", body: '{"error":"no user service manager"}' }) });
+  check("a farm whose services cannot be read is not called on", failed.farm !== "Farm on", JSON.stringify(failed));
+  const noMode = await read({ "/api/services": services("active"),
+    "/api/mode": (handler) => handler.fulfill({ status: 500, contentType: "application/json", body: '{"error":"no power profile"}' }) });
+  check("an active runner with an unreadable power setting is not called on", noMode.farm !== "Farm on" && /may be Paused/.test(noMode.why), JSON.stringify(noMode));
+  /* A runner that answered active once and then stopped answering: the cache keeps the old
+     data, and an old active is not Farm on. */
+  {
+    let calls = 0;
+    const { page, context } = await open({ hash: "#/board", overrides: {
+      "/api/services": (handler) => (calls++ === 0
+        ? handler.fulfill({ status: 200, contentType: "application/json", body: services("active") })
+        : handler.fulfill({ status: 500, contentType: "application/json", body: '{"error":"gone"}' })),
+    } });
+    await page.waitForTimeout(8000);
+    const later = await page.evaluate(() => document.querySelector("#farmState .pill-text").textContent);
+    check("a services answer that goes stale after an active one is not Farm on", later !== "Farm on" && calls > 1, `${later} after ${calls} reads`);
+    await context.close();
+  }
+  const paused = await read({ "/api/services": services("active"),
+    "/api/mode": JSON.stringify({ setting: "hard", effective: "hard", slice: true }) });
+  check("power on Paused reads Farm paused", paused.farm === "Farm paused", JSON.stringify(paused));
+}
+
 /* A project name may be forty characters. At 1024 the header still fits: the project filter is
    what gives way, never Search or the theme. */
 {

@@ -33,7 +33,7 @@ const BY_ID = new Map(VIEWS.map((view) => [view.id, view]));
 /* Asked for on every tab: the page cannot draw its chrome without them, and the jump
    palette can only offer a conversation it has heard of. */
 const ALWAYS = ["/api/config", "/api/access", "/api/identities", "/api/health",
-  "/api/metrics", "/api/mode", "/api/mail/boxes", "/api/version", "/api/sweep"];
+  "/api/metrics", "/api/mode", "/api/mail/boxes", "/api/version", "/api/sweep", "/api/services"];
 const TICK = 3000;
 
 /* An address the old seven tabs answered on, and where that reader is taken now. A bookmark
@@ -241,6 +241,7 @@ function paintChrome() {
   paintNav();
   paintFreshness();
   paintSweep();
+  paintFarmState();
   paintCapacity();
   paintPower();
   paintProjects();
@@ -329,6 +330,43 @@ function paintSweep() {
   }
 }
 
+/* The header says whether the farm is working, in the owner's words (2026-09-24): on, paused or
+   off. Off is the agent runner stopped, so nothing starts or restarts; paused is the power
+   setting on Paused, so nothing new starts; on is everything else. */
+function paintFarmState() {
+  const node = document.getElementById("farmState");
+  if (!node) return;
+  /* Only a fresh answer counts: a request that failed after an earlier success keeps the old
+     data in the cache, and a snapshot the farm could not refresh says so with stale_since. An
+     old "active" is not evidence the runner is still running. */
+  const fresh = (res) => (res.data && !res.error && !res.data.stale_since ? res.data : null);
+  const services = api.list((fresh(api.resource("/api/services")) || {}).services);
+  const runner = services.find((row) => row && row.id === "agent_runner");
+  const mode = fresh(api.resource("/api/mode"));
+  const paused = Boolean(mode) && (mode.setting === "hard" || (mode.setting === "auto" && mode.effective === "hard"));
+  let meaning = "pause";
+  let word = "Farm";
+  let why = "The farm has not said whether its agent runner is running.";
+  if (runner && runner.state !== "active") {
+    [meaning, word] = ["fail", "Farm off"];
+    why = "The agent runner is stopped, so no agent starts or restarts. Start it on the Machine tab.";
+  } else if (paused) {
+    [meaning, word] = ["pause", "Farm paused"];
+    why = "Power is on Paused, so no new agent starts and the running ones are held back.";
+  } else if (runner && mode) {
+    /* On only when both are known: the runner itself says active, and the power setting has
+       answered and is not Paused. A missing or failed answer from either is not evidence that
+       agents can start, so it stays the plain word with its reason. */
+    [meaning, word] = ["run", "Farm on"];
+    why = `The agents may start and run. Power is ${powerLabel(mode.setting === "auto" ? mode.effective : mode.setting)}.`;
+  } else if (runner) {
+    why = "The agent runner is active, but the power setting has not answered, so it may be Paused.";
+  }
+  node.className = `pill ${meaning}`;
+  node.querySelector(".pill-text").textContent = word;
+  node.title = why;
+}
+
 function paintCapacity() {
   const node = document.getElementById("capacity");
   if (!node) return;
@@ -337,6 +375,7 @@ function paintCapacity() {
     node.className = "pill pause";
     node.querySelector(".pill-text").textContent = "capacity";
     node.title = "The machine has not answered yet.";
+    node.hidden = true;
     return;
   }
   const blocks = metrics.block_reasons || [];
@@ -348,6 +387,8 @@ function paintCapacity() {
   node.className = `pill ${meaning}`;
   node.querySelector(".pill-text").textContent = word;
   node.title = [...blocks, ...warnings].join("\n") || "There is room for another agent.";
+  /* Room is said only when there is none: "Ready" beside "Farm on" read as a second on switch. */
+  node.hidden = metrics.can_spawn !== false;
 }
 
 /* The power setting is a control, not a word: the reader changes it from the header of every

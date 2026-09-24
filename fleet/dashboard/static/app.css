@@ -598,6 +598,30 @@ thead th:has(.sortby) { padding: 0; }
    Three buttons at most; a destructive one is always last, in the danger ink. */
 th.actions, td.actions { width: 276px; min-width: 276px; max-width: 276px; text-align: right; }
 th.actions.one, td.actions.one { width: 104px; min-width: 104px; max-width: 104px; }
+/* Between a phone and a 1600px window the widest tables lay out in fixed columns, so
+   they fit the window instead of scrolling sideways: a cell that does not fit is cut, with its
+   whole text on the title, and the machines lose their Last check column (owner, 2026-09-24).
+   A phone keeps the sideways scroll: six columns do not share 358px. */
+@media (min-width: 641px) and (max-width: 1599px) {
+  table.h-machines, table.h-runners, table.m-services { table-layout: fixed; }
+  table.h-machines th, table.h-runners th, table.m-services th { overflow: hidden; text-overflow: ellipsis; }
+  table.h-machines .h-col-last { display: none; }
+  table.h-runners th:first-child { width: 26%; }
+  table.m-services .m-col-svc { width: 17%; }
+  table.m-services .m-col-svc-state { width: 11%; }
+  table.m-services .m-col-change { width: 12%; }
+}
+/* Accounts need the fixed columns only below 1440: at 1440 its three subscription windows fit
+   the natural layout, and fixed columns would cut the third. */
+@media (min-width: 641px) and (max-width: 1439px) {
+  table.m-accounts { table-layout: fixed; }
+  table.m-accounts th { overflow: hidden; text-overflow: ellipsis; }
+  table.m-accounts .m-col-account { width: 15%; }
+  table.m-accounts .m-col-engine { width: 9%; }
+  table.m-accounts .m-col-login { width: 20%; }
+  table.m-accounts .m-col-read { width: 12%; }
+  table.m-accounts td.m-windows { max-width: none; }
+}
 td.actions .row, td.actions > .p-inline { justify-content: flex-end; flex-wrap: nowrap; gap: 6px; }
 td.actions .button, td.actions .ghost-button {
   width: 80px; height: var(--control-sm); padding: 0 6px; justify-content: center;

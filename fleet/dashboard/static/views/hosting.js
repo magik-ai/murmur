@@ -280,6 +280,17 @@ function stopPoll() {
 
 /* ------------------------------------------------------------ the machines table */
 
+/* A state cell's title: the word it shows, then why. */
+function stateWords(row) {
+  const [, label] = MACHINE_STATE[row.state] || ["pause", fmt.titleCase(row.state || "unknown")];
+  return [label, row.detail || "", billedLine(row)].filter(Boolean).join(". ");
+}
+
+function loginWords(row) {
+  const [, label] = LOGIN_STATE[String(row.login_state || "")] || ["pause", "Cannot tell"];
+  return [label, LOGIN_TITLE[String(row.login_state || "")] || "", row.detail || ""].filter(Boolean).join(". ");
+}
+
 function statePill(row) {
   const [meaning, label] = MACHINE_STATE[row.state] || ["pause", fmt.titleCase(row.state || "unknown")];
   const title = [row.detail || "", billedLine(row)].filter(Boolean).join(" ");
@@ -425,26 +436,26 @@ function destroyConfirm(context, rows, name) {
    reading this on, and there is nothing here to check, destroy or forget. */
 function thisFarmRow(context, here) {
   return h("tr", { key: "this-farm", class: "h-this" },
-    h("td", null, h("div", { class: "h-name" },
+    h("td", { title: `${here.name || "this farm"}, this farm` }, h("div", { class: "h-name" },
       h("b", null, here.name || "this farm"),
       h("span", { class: "muted" }, "This farm"))),
-    h("td", null, "This machine"),
+    h("td", { title: "This machine" }, "This machine"),
     h("td", { class: "mono", title: here.address || "" }, here.address || "not known"),
-    h("td", null, "Not billed here"),
-    h("td", null, pill("done", "Ready", "You are reading this page on it.")),
-    h("td", null, "now"),
+    h("td", { title: "Not billed here" }, "Not billed here"),
+    h("td", { title: "Ready. You are reading this page on it." }, pill("done", "Ready", "You are reading this page on it.")),
+    h("td", { class: "h-col-last" }, "now"),
     h("td", { class: "h-do-cell actions" }, ""));
 }
 
 function machineRow(context, row) {
   return h("tr", { key: row.name },
     h("td", { title: row.name }, row.name),
-    h("td", null, providerLabel(context, row.provider)),
-    h("td", { class: "mono", title: row.address || "" },
+    h("td", { title: providerLabel(context, row.provider) }, providerLabel(context, row.provider)),
+    h("td", { class: "mono", title: row.address ? `${row.user ? `${row.user}@` : ""}${row.address}` : "not yet" },
       row.address ? `${row.user ? `${row.user}@` : ""}${row.address}` : "not yet"),
     h("td", { title: sizeLine(context, row) }, sizeLine(context, row)),
-    h("td", null, statePill(row)),
-    h("td", null, row.checked_at ? fmt.ago(row.checked_at) : "not checked"),
+    h("td", { title: stateWords(row) }, statePill(row)),
+    h("td", { class: "h-col-last" }, row.checked_at ? fmt.ago(row.checked_at) : "not checked"),
     h("td", { class: "h-do-cell actions" }, machineActions(context, row)));
 }
 
@@ -472,13 +483,13 @@ function machinesCard(context) {
       staleNote(data, "stale-machines"),
       h("div", { class: "tablewrap", key: "table" }, h("table", { class: "h-machines" },
         h("thead", null, h("tr", null,
-          h("th", null, "Name"),
-          h("th", null, "Provider"),
-          h("th", null, "Address"),
-          h("th", null, "Size and price"),
-          h("th", null, "State"),
-          h("th", null, "Last check"),
-          h("th", { class: "actions" }, "Actions"))),
+          h("th", { title: "Name" }, "Name"),
+          h("th", { title: "Provider" }, "Provider"),
+          h("th", { title: "Address" }, "Address"),
+          h("th", { title: "Size and price" }, "Size and price"),
+          h("th", { title: "State" }, "State"),
+          h("th", { class: "h-col-last", title: "Last check" }, "Last check"),
+          h("th", { class: "actions", title: "Actions" }, "Actions"))),
         h("tbody", null,
           data.this ? thisFarmRow(context, data.this) : null,
           list(data.machines).filter(Boolean).map((row) => machineRow(context, row))))),
@@ -515,13 +526,26 @@ function secretsCell(row) {
   /* The label stored with the token, so a person can see which subscription a lane would
      spend. The farm's Accounts windows cannot see a cloud agent's usage at all. */
   const account = (stored.find((item) => item.account) || {}).account || "";
-  const title = secrets.length
-    ? secrets.map((item) => `${item.name}: ${item.stored ? "stored" : "not stored"}`
-      + `${item.account ? ` (${item.account})` : ""}`).join(". ")
-    : "This provider needs no secret.";
+  /* The title starts with what the cell shows, so a narrow window that cuts it loses nothing. */
+  const title = [`${stored.length} of ${secrets.length}${account ? ` ${account}` : ""}`,
+    secrets.length
+      ? secrets.map((item) => `${item.name}: ${item.stored ? "stored" : "not stored"}`
+        + `${item.account ? ` (${item.account})` : ""}`).join(". ")
+      : "This provider needs no secret."].join(". ");
   return h("div", { class: "h-cell", title },
     h("span", null, `${stored.length} of ${secrets.length}`),
     account ? h("span", { class: "muted cell-text" }, account) : null);
+}
+
+/* The Test cell in words, for its title: a narrow window cuts the cell (fixed columns). */
+function testWords(row) {
+  const tested = row.tested;
+  if (!tested) return `Not tested, ${NOT_LIVE}`;
+  const seconds = Number(tested.seconds);
+  const when = tested.at ? fmt.ago(tested.at) : "";
+  return tested.ok
+    ? `Passed${Number.isFinite(seconds) && seconds > 0 ? `, in ${fmt.duration(seconds)}` : ""}${when ? `, last run ${when}` : ""}`
+    : `Failed, ${NOT_LIVE}${tested.detail ? `. ${tested.detail}` : ""}`;
 }
 
 function testCell(row) {
@@ -587,13 +611,14 @@ function runnerActions(context, row) {
 
 function runnerRow(context, row) {
   return h("tr", { key: row.id },
-    h("td", null, h("div", { class: "h-name" },
+    h("td", { title: `${row.label || row.id}, ${stageWord(row)}` }, h("div", { class: "h-name" },
       h("b", null, row.label || row.id),
       h("span", { class: "muted" }, stageWord(row)))),
-    h("td", { title: row.install || "" }, cliCell(context, row)),
-    h("td", null, loginPill(row)),
+    h("td", { title: row.cli_installed ? `Installed ${row.cli || ""}`.trim()
+      : `Not installed${row.install ? `. Install: ${row.install}` : ""}` }, cliCell(context, row)),
+    h("td", { title: loginWords(row) }, loginPill(row)),
     h("td", null, secretsCell(row)),
-    h("td", null, testCell(row)),
+    h("td", { title: testWords(row) }, testCell(row)),
     h("td", { class: "h-do-cell actions" }, runnerActions(context, row)));
 }
 
@@ -612,12 +637,12 @@ function runnersCard(context) {
       staleNote(data, "stale-runners"),
       h("div", { class: "tablewrap", key: "table" }, h("table", { class: "h-runners" },
         h("thead", null, h("tr", null,
-          h("th", null, "Provider"),
-          h("th", null, "CLI"),
-          h("th", null, "Login"),
-          h("th", null, "Secrets"),
-          h("th", null, "Test"),
-          h("th", { class: "actions" }, "Actions"))),
+          h("th", { title: "Provider" }, "Provider"),
+          h("th", { title: "CLI" }, "CLI"),
+          h("th", { title: "Login" }, "Login"),
+          h("th", { title: "Secrets" }, "Secrets"),
+          h("th", { title: "Test" }, "Test"),
+          h("th", { class: "actions", title: "Actions" }, "Actions"))),
         h("tbody", null, list(data.providers)
           .filter((row) => row && row.job === "runner")
           .map((row) => runnerRow(context, row))))),

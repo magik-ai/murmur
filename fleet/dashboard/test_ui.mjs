@@ -47,7 +47,7 @@ ok("the page is a shell, not an application", () => {
 });
 
 ok("the page carries the chrome the views expect", () => {
-  for (const id of ["sidebar", "navlinks", "topbar", "productTitle", "viewTitle", "capacity",
+  for (const id of ["sidebar", "navlinks", "topbar", "productTitle", "viewTitle", "capacity", "farmState",
     "projectFilter", "freshness", "themeSwitch", "paletteOpen", "palette", "paletteInput",
     "paletteList", "view", "drawer", "drawerTitle", "drawerBody", "drawerScrim", "toasts",
     "favicon", "sidebarTitle", "powerField", "powerPick"]) {

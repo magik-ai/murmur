@@ -331,17 +331,17 @@ function servicesSection(context) {
         command: "fleet update && fleet dashboard restart",
       })),
       ready: (data) => [
-        h("div", { class: "tablewrap", key: "table" }, h("table", null,
+        h("div", { class: "tablewrap", key: "table" }, h("table", { class: "m-services" },
           h("thead", null, h("tr", null,
-            h("th", null, "Service"),
-            h("th", null, "State"),
-            h("th", null, "Last change"),
-            h("th", null, "What it does"),
-            h("th", { class: "actions" }, "Actions"))),
+            h("th", { class: "m-col-svc", title: "Service" }, "Service"),
+            h("th", { class: "m-col-svc-state", title: "State" }, "State"),
+            h("th", { class: "m-col-change", title: "Last change" }, "Last change"),
+            h("th", { title: "What it does" }, "What it does"),
+            h("th", { class: "actions", title: "Actions" }, "Actions"))),
           h("tbody", null, list(data.services).map((row) => h("tr", { key: row.id },
-            h("td", null, row.label || row.id),
-            h("td", null, pill(serviceMeaning(row.state), fmt.titleCase(row.state || "unknown"), row.detail || "")),
-            h("td", { class: "num" }, row.since ? fmt.ago(row.since) : "not known"),
+            h("td", { title: row.label || row.id }, row.label || row.id),
+            h("td", { title: fmt.titleCase(row.state || "unknown") }, pill(serviceMeaning(row.state), fmt.titleCase(row.state || "unknown"), row.detail || "")),
+            h("td", { class: "num", title: row.since ? fmt.ago(row.since) : "not known" }, row.since ? fmt.ago(row.since) : "not known"),
             h("td", { title: row.what || "" }, row.what || ""),
             h("td", { class: "actions" }, list(row.actions).length
               ? h("div", { class: "row" }, list(row.actions).map((action) => h("button", {
@@ -400,7 +400,7 @@ function loginCell(states, name) {
   const [meaning, word] = LOGIN[found.state] || ["pause", fmt.titleCase(found.state || "unknown")];
   const sentence = found.sentence || "";
   const quiet = found.state === "logged_in";
-  return h("div", { class: "m-login", title: sentence },
+  return h("div", { class: "m-login", title: [word, sentence].filter(Boolean).join(". ") },
     pill(meaning, word, sentence),
     sentence && !quiet ? h("span", { class: "muted cell-text" }, sentence) : null);
 }
@@ -711,22 +711,22 @@ function accountsSection(context) {
         command: "fleet accounts add <name>",
       })),
       ready: (data) => [
-        h("div", { class: "tablewrap", key: "table" }, h("table", null,
+        h("div", { class: "tablewrap", key: "table" }, h("table", { class: "m-accounts" },
           h("thead", null, h("tr", null,
-            h("th", null, "Account"),
-            h("th", null, "Engine"),
-            h("th", null, "Login"),
-            h("th", null, "Windows"),
-            h("th", null, "Last read"),
-            h("th", { class: "actions one" }, "Actions"))),
+            h("th", { class: "m-col-account", title: "Account" }, "Account"),
+            h("th", { class: "m-col-engine", title: "Engine" }, "Engine"),
+            h("th", { class: "m-col-login", title: "Login" }, "Login"),
+            h("th", { title: "Windows" }, "Windows"),
+            h("th", { class: "m-col-read", title: "Last read" }, "Last read"),
+            h("th", { class: "actions one", title: "Actions" }, "Actions"))),
           h("tbody", null, list(data.accounts).map((account) => h("tr", { key: account.name },
             h("td", { title: `${account.email || account.label || account.name}, folder ${account.name}` },
               h("span", { class: "m-account" }, account.label || account.name,
                 fmt.room(account) ? pill(fmt.room(account).meaning, fmt.room(account).word, "") : null)),
-            h("td", null, account.engine || "unknown"),
+            h("td", { title: account.engine || "unknown" }, account.engine || "unknown"),
             h("td", null, loginCell(states, account.name)),
             h("td", { class: "m-windows" }, windowBars(account)),
-            h("td", { class: "num" }, account.read_at ? fmt.ago(account.read_at) : "never"),
+            h("td", { class: "num", title: account.read_at ? fmt.ago(account.read_at) : "never" }, account.read_at ? fmt.ago(account.read_at) : "never"),
             h("td", { class: "actions one" }, h("button", {
               class: "ghost-button small danger",
               "data-remove-account": account.name,

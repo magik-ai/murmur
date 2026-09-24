@@ -344,6 +344,41 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
   await context.close();
 }
 
+/* A laptop window of 1280 or 1366 holds every Machine table without a sideways scroll: the
+   widest three switch to fixed columns and cut their cells (owner, 2026-09-24). The fixed
+   columns start at 641, so 700 is checked for titles too, where the cuts are deepest. */
+for (const width of [700, 1024, 1280, 1366, 1440]) {
+  const { page, context } = await open({ size: { width, height: 900 } });
+  await page.waitForTimeout(800);
+  if (width >= 1024) {
+    const wide = await page.evaluate(() => [...document.querySelectorAll("#view .tablewrap")]
+      .map((node) => [node.querySelector("table").className || "table", node.scrollWidth - node.clientWidth])
+      .filter(([, over]) => over > 1));
+    check(`machine: no table scrolls sideways at ${width}`, wide.length === 0, JSON.stringify(wide));
+  }
+  /* A cell the fixed columns cut keeps its whole text on a title, on the cell or on the one
+     element that fills it: cutting is only fair when the words are one hover away. */
+  const untitled = await page.evaluate(() => {
+    const out = [];
+    /* Headings too: a fixed column cuts its name as it cuts its cells, and a cut name must
+       neither run into the next one nor lose its words. */
+    for (const cell of document.querySelectorAll("#view :is(table.h-machines, table.h-runners, table.m-accounts, table.m-services) :is(td, th):not(.actions)")) {
+      const cut = [cell, ...cell.querySelectorAll("*")].some((node) => node.scrollWidth > node.clientWidth + 1);
+      /* The title has to carry what the cell shows, not just any sentence: the visible words,
+         whitespace folded, must all be in it. */
+      const words = cell.innerText.replace(/\s+/g, " ").trim();
+      const title = [cell.title, cell.firstElementChild && cell.firstElementChild.title].filter(Boolean).join(" ").replace(/\s+/g, " ");
+      const titled = Boolean(title) && words.toLowerCase().split(" ")
+        .every((word) => title.toLowerCase().includes(word.replace(/\u2026$/, "")));
+      if (cut && !titled) out.push(`${cell.closest("table").className}: ${cell.innerText.replace(/\s+/g, " ").slice(0, 40)}`);
+      if (cut && getComputedStyle(cell).overflowX === "visible") out.push(`${cell.closest("table").className}: ${words.slice(0, 40)} spills into the next column`);
+    }
+    return out;
+  });
+  check(`machine: every cut cell carries its text on a title at ${width}`, untitled.length === 0, untitled.join(" | "));
+  await context.close();
+}
+
 const KNOWN_WRAPPING = { 1440: ["m-models"], 390: ["Accounts"] };
 
 for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
