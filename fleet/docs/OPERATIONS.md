@@ -1017,7 +1017,7 @@ true.
 | `/api/hosts` | the hosting providers, from `fleet hosts list --json`, each with a `login_state`: `logged_in`, `logged_out`, `not_installed` or `no_answer` (a slow provider is `no_answer`, never `logged_out`) |
 | `/api/mail/boxes` | the head office mailboxes, with a count for the last day |
 | `/api/mail/thread?box=<name>&since=<stamp>` | one mailbox's messages, newest last |
-| `/api/mail/feed?hours=24` | the whole office as one timeline, newest first |
+| `/api/mail/feed?hours=24` | the whole office as one timeline, newest first; `hours` is rounded up to 1, 3, 6, 12, 24, 48, 168 or 720 |
 | `/api/mail/who` | who is online, from `hq who` |
 | `/api/power/preview?action=<action>` | what throttle, drain or resume would do, with the lanes a drain would stop |
 | `/api/jobs`, `/api/jobs/<id>` | the long actions in flight, and one action's record |

@@ -105,7 +105,10 @@ In the mail rows, `...` stands for the four snapshot fields.
 The mail routes read a snapshot of the head office that the server refreshes every 45 seconds.
 When GitHub fails, the last good snapshot stays and `stale_since` says since when. A mailbox
 whose issue has not changed since the last pass is not read again. After a send, the server wakes
-its refresher, so the message shows in seconds instead of at the next pass.
+its refresher, so the message shows in seconds instead of at the next pass. A read that asks for
+something the snapshot does not hold yet, such as a new timeline window, wakes it too, but reads
+wake it at most once every 45 seconds. `hours` is rounded up to one of eight fixed windows, so a
+caller cannot make a new window on every request.
 
 The dashboard signs mail as `FLEET_DASH_HQ_AGENT` (default `dashboard`), never as a name taken
 from the request. Sending to a name that has no mailbox would create one, so `to` must already

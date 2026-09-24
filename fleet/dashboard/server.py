@@ -816,6 +816,26 @@ _snapshot_lock = threading.Lock()
 # Set by a request that wants a snapshot nobody has asked for yet, so the refresher can pick it
 # up in a moment instead of at the end of its next sleep.
 _refresh_wake = threading.Event()
+# A read wakes the refresher at most once in this many seconds. A pass reads the head office
+# with gh and hq, from the GitHub allowance every agent on the farm shares. Without the limit, a
+# caller that asks for something new on every request would run those passes back to back.
+READ_WAKE_COOLDOWN = REFRESH_SECONDS
+_read_wake_lock = threading.Lock()
+_read_wake_at = {"at": None}
+
+
+def _wake_for_read():
+    """Wake the refresher for a read, unless a read already did so within READ_WAKE_COOLDOWN
+    seconds. True when it woke it. A read that may not wake it is answered by the next regular
+    pass instead."""
+    now = time.monotonic()
+    with _read_wake_lock:
+        last = _read_wake_at["at"]
+        if last is not None and now - last < READ_WAKE_COOLDOWN:
+            return False
+        _read_wake_at["at"] = now
+    _refresh_wake.set()
+    return True
 
 
 def _now_iso():
@@ -3320,11 +3340,14 @@ def mail_thread(box, since=""):
 
 
 _who_snapshot = _blank_snapshot(sessions=[])
+# The windows a timeline can cover, in hours. A request for any other number gets the smallest
+# window that covers it, or the largest. The set is fixed so that a caller cannot register a new
+# window, and a new pass over the office, on every request.
+FEED_WINDOWS = (1.0, 3.0, 6.0, 12.0, 24.0, 48.0, 168.0, 720.0)
 # One feed per window asked for, the default always among them. A window nobody has asked for is
-# registered on the first request and filled by the next pass, which the request wakes.
+# registered on the first request and filled by the next pass, which the request may wake.
 _feed_snapshots = {}
 _feed_windows = [float(MAIL_WINDOW_HOURS)]
-FEED_WINDOWS_TRACKED = 8
 # The timeline is ASSEMBLED HERE, never by running `hq feed`. That command re-reads every
 # mailbox in the office for itself: an office of about a hundred mailboxes takes well over a
 # minute, which is past any timeout a page can wait behind, so the route would answer an error
@@ -3452,11 +3475,15 @@ def _parse_who(out, now=None):
 
 
 def _feed_window(hours):
+    """The window in FEED_WINDOWS that answers a request for `hours`."""
     try:
-        window = float(hours) if str(hours or "").strip() else float(MAIL_WINDOW_HOURS)
+        wanted = float(hours) if str(hours or "").strip() else float(MAIL_WINDOW_HOURS)
     except (TypeError, ValueError):
-        window = float(MAIL_WINDOW_HOURS)
-    return max(0.1, min(720.0, window))
+        wanted = float(MAIL_WINDOW_HOURS)
+    for window in FEED_WINDOWS:
+        if wanted <= window:
+            return window
+    return FEED_WINDOWS[-1]
 
 
 def _feed_key(window):
@@ -3525,18 +3552,11 @@ def mail_feed(hours=None):
         if entry is None:
             entry = _blank_snapshot(events=[], hours=window)
             _feed_snapshots[key] = entry
-            _feed_windows.append(window)
-            while len(_feed_windows) > FEED_WINDOWS_TRACKED:
-                for candidate in _feed_windows:
-                    if candidate != float(MAIL_WINDOW_HOURS):
-                        _feed_windows.remove(candidate)
-                        _feed_snapshots.pop(_feed_key(candidate), None)
-                        break
-                else:
-                    break
+            if window not in _feed_windows:
+                _feed_windows.append(window)
         copy = json.loads(json.dumps(entry))
     if not copy["tried"]:
-        _refresh_wake.set()
+        _wake_for_read()
     return _envelope(copy, {"events": copy.get("events") or [], "hours": window})
 
 
@@ -3546,7 +3566,7 @@ def mail_who():
         return {"unavailable": unavailable[0], "fix": unavailable[1]}
     snapshot = _copy_snapshot(_who_snapshot)
     if not snapshot["tried"]:
-        _refresh_wake.set()
+        _wake_for_read()
     return _envelope(snapshot, {"sessions": snapshot.get("sessions") or []})
 
 

@@ -3226,6 +3226,10 @@ class DashboardMailTest(unittest.TestCase):
                                     [float(dashboard.MAIL_WINDOW_HOURS)])
         windows.start()
         self.addCleanup(windows.stop)
+        # No read has woken the refresher yet, whatever an earlier test's reads did.
+        cooldown = mock.patch.dict(dashboard._read_wake_at, {"at": None})
+        cooldown.start()
+        self.addCleanup(cooldown.stop)
         dashboard._refresh_wake.clear()
         self.addCleanup(dashboard._refresh_wake.clear)
 
@@ -3542,9 +3546,51 @@ class DashboardMailTest(unittest.TestCase):
             self.assertFalse(dashboard.mail_feed()["pending"])
             for hours in range(1, 20):
                 dashboard.mail_feed(str(hours))
-            self.assertLessEqual(len(dashboard._feed_windows),
-                                 dashboard.FEED_WINDOWS_TRACKED)
+            self.assertLessEqual(len(dashboard._feed_windows), len(dashboard.FEED_WINDOWS))
             self.assertIn(float(dashboard.MAIL_WINDOW_HOURS), dashboard._feed_windows)
+
+    def test_a_request_is_answered_from_one_of_a_few_fixed_windows(self):
+        # A window nobody has asked for costs a pass over the office, so a caller cannot pick its
+        # own. It gets the smallest fixed window that covers what it asked for.
+        with self.office():
+            dashboard._refresh_once()
+            for asked, got in (("6", 6.0), ("5", 6.0), ("0.01", 1.0), ("-3", 1.0), ("25", 48.0),
+                               ("100000", 720.0), ("", 24.0), ("junk", 24.0)):
+                self.assertEqual(dashboard.mail_feed(asked)["hours"], got, asked)
+            for step in range(500):
+                dashboard.mail_feed(f"{0.05 + step * 1.7:g}")
+            self.assertLessEqual(set(dashboard._feed_windows), set(dashboard.FEED_WINDOWS))
+            self.assertEqual(len(dashboard._feed_windows), len(set(dashboard._feed_windows)))
+
+    def test_a_burst_of_reads_for_new_windows_wakes_the_office_reader_once(self):
+        # Every window nobody had asked for used to wake the refresher at once. A caller that
+        # changed ?hours= on every request, with no token on a loopback bind, ran one office pass
+        # (gh, hq who, hq claims) after another, from the GitHub allowance every agent shares.
+        passes = []
+        stop = threading.Event()
+        with self.office(), mock.patch.object(dashboard, "_refresh_wake", threading.Event()), \
+                mock.patch.object(dashboard, "_refresh_once",
+                                  lambda: passes.append(time.monotonic())), \
+                mock.patch.object(dashboard, "BIND", "127.0.0.1"), running_server() as base:
+            thread = threading.Thread(target=dashboard._refresher, args=(30, stop), daemon=True)
+            thread.start()
+            try:
+                deadline = time.monotonic() + 5
+                while not passes and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                for step in range(40):
+                    status, _raw, _type = fetch(base, f"/api/mail/feed?hours={0.5 + step * 3.3:g}")
+                    self.assertEqual(status, 200)
+                    self.assertEqual(fetch(base, "/api/mail/who")[0], 200)
+                    time.sleep(0.01)
+                time.sleep(0.3)
+            finally:
+                # A refresher left running past this test would run tools in the tests after it.
+                stop.set()
+                dashboard._refresh_wake.set()
+                thread.join(timeout=5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(passes), 2, "the first pass, and one early pass for all the reads")
 
     def test_an_unreadable_office_keeps_the_last_timeline_and_says_since_when(self):
         """The timeline is only as good as the office read behind it, and it says so. An
