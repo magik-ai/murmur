@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""The services a person can add as a model, one dict each.
+"""The engines a person can add as a model, one dict each.
 
-The shipped catalog (config/models.example.toml) carries the two models a farm starts with,
-claude and codex. Everything else a person might run is a PRESET here: a description complete
-enough that adding it is picking a card, naming it, and pasting one command. `fleet models add`
-and the dashboard's Add a model dialog both read this list, and POST /api/models/add turns one
-preset plus a few answers into a catalog entry.
+murmur ships the two engines it has run for real, Claude Code and Codex, and the shipped catalog
+(config/models.example.toml) already carries both. The other presets that once sat here (Gemini
+CLI, Qwen Code, Kimi Code, Grok Build, OpenCode, Aider, Ollama and the free-form Custom command)
+were removed on 2026-09-24 by the owner's decision.
+
+The list is still the mechanism an engine is added by: a preset is a description complete enough
+that adding it is picking a card, naming it, and pasting one command. The dashboard's Add a model
+dialog reads this list, POST /api/models/add turns one preset plus a few answers into a catalog
+entry (entry_from below), and a catalog entry whose engine is "generic" is launched by
+bin/fleet from its `bin`, `run` and `auth_env` (models.py launchcmd, parse_generic.py). So a
+contributor adds an engine by adding one dict here; CONTRIBUTING.md says which fields and which
+test to extend.
 
 Fields, all present on every preset so a reader never has to guess:
 
   id            the preset's own name, and the default catalog id
   label         the human name, as the vendor writes it
   color         the provider's glyph colour on the models table
-  kind          subscription | key | local: what the operator has to arrange
+  kind          subscription | key | local: what the operator has to arrange. A key engine is
+                given `fleet models auth <id>` in the dialog, a local one its pull_hint
   engine        the launcher path: "claude", "codex", or "generic" (a CLI template)
   bin           the command, as it must appear on this farm's PATH
   install_hint  the one command that puts that binary there
@@ -81,161 +89,7 @@ PRESETS = [
         "variants": [],
         "docs": "https://developers.openai.com/codex/cli",
     },
-    {
-        "id": "gemini",
-        "label": "Gemini CLI",
-        "color": "#4285F4",
-        "kind": "key",
-        "engine": "generic",
-        "bin": "gemini",
-        "install_hint": "npm install -g @google/gemini-cli",
-        "pull_hint": "",
-        "auth_env": "GEMINI_API_KEY",
-        "run": "{bin} -m {variant} -p {task} --output-format json",
-        "health": HEALTH,
-        "tos": "a documented non-interactive mode (-p with --output-format json); the free "
-               "Google-login tier is interactive sign-in on one machine, so a farm wants the key",
-        "access": "an API key in GEMINI_API_KEY, or a Google login on its free tier",
-        "variants": ["gemini-2.5-pro", "gemini-2.5-flash"],
-        "docs": "https://github.com/google-gemini/gemini-cli",
-    },
-    {
-        "id": "qwen",
-        "label": "Qwen Code",
-        "color": "#7C5CFC",
-        "kind": "key",
-        "engine": "generic",
-        "bin": "qwen",
-        "install_hint": "npm install -g @qwen-code/qwen-code",
-        "pull_hint": "",
-        "auth_env": "QWEN_CODE_API_KEY",
-        "run": "{bin} --model {variant} -p {task} --output-format stream-json",
-        "health": HEALTH,
-        "tos": "LOW: a documented headless mode, and the plan is sold for agentic use",
-        "access": "an API key in QWEN_CODE_API_KEY; a flat request quota, no per-token billing",
-        "variants": ["qwen3-coder-plus", "qwen3-coder-next", "qwen3.7-plus"],
-        "docs": "https://github.com/QwenLM/qwen-code",
-    },
-    {
-        "id": "kimi",
-        "label": "Kimi Code",
-        "color": "#6D5AE6",
-        "kind": "key",
-        "engine": "generic",
-        "bin": "kimi",
-        "install_hint": "install the vendor's Kimi CLI so that `kimi` is on this farm's PATH "
-                        "(the package name is the vendor's to give: see docs)",
-        "pull_hint": "",
-        "auth_env": "KIMI_API_KEY",
-        "run": "{bin} -m {variant} -p {task} --output-format stream-json",
-        "health": HEALTH,
-        "tos": "its subscription terms forbid non-interactive use, an API key plan is the "
-               "permitted path. The install command and the exact headless flags could not be "
-               "confirmed here: check both against the vendor's docs before enabling",
-        "access": "an API key in KIMI_API_KEY, billed per token. Not the subscription: that one "
-                  "is for interactive use only",
-        "variants": ["kimi-code/kimi-for-coding"],
-        "docs": "https://platform.moonshot.ai/docs",
-    },
-    {
-        "id": "grok",
-        "label": "Grok Build",
-        "color": "#8A8F98",
-        "kind": "key",
-        "engine": "generic",
-        "bin": "grok",
-        "install_hint": "curl -fsSL https://x.ai/cli/install.sh | bash",
-        "pull_hint": "",
-        "auth_env": "XAI_API_KEY",
-        "run": "{bin} --no-auto-update --always-approve -p {task} -m {variant} "
-               "--output-format streaming-json",
-        "health": HEALTH,
-        "tos": "xAI's own CLI with a documented headless mode (-p, --no-auto-update for "
-               "scripts). Headless it asks before every edit and command and nobody answers, so "
-               "the lane runs with --always-approve, as xAI's own automation examples do; its "
-               "output is one event per line (streaming-json), which the farm reads as it comes. "
-               "A farm wants the API key: the plan sign-in needs `grok login --device-auth` once "
-               "by hand. A community grok-cli also installs a `grok` binary: this preset is xAI's",
-        "access": "an API key in XAI_API_KEY, billed per token",
-        "variants": ["grok-4.7", "grok-build-0.1"],
-        "docs": "https://docs.x.ai/build/cli/headless-scripting",
-    },
-    {
-        "id": "opencode",
-        "label": "OpenCode",
-        "color": "#4C8DF6",
-        "kind": "key",
-        "engine": "generic",
-        "bin": "opencode",
-        "install_hint": "curl -fsSL https://opencode.ai/install | bash",
-        "pull_hint": "",
-        "auth_env": "OPENAI_API_KEY",
-        "run": "{bin} run -m {variant} {task}",
-        "health": HEALTH,
-        "tos": "open source, and `opencode run` is its own documented non-interactive command",
-        "access": "an API key, billed per token: OPENAI_API_KEY, or ANTHROPIC_API_KEY when you "
-                  "point it at a Claude model (set the one your model needs)",
-        "variants": ["openai/gpt-6-sol", "anthropic/claude-sonnet-5"],
-        "docs": "https://opencode.ai/docs/cli",
-    },
-    {
-        "id": "aider",
-        "label": "Aider",
-        "color": "#4FA07A",
-        "kind": "key",
-        "engine": "generic",
-        "bin": "aider",
-        "install_hint": "pip install aider-chat",
-        "pull_hint": "",
-        "auth_env": "OPENAI_API_KEY",
-        "run": "{bin} --model {variant} --message {task} --yes",
-        "health": HEALTH,
-        "tos": "open source; --message runs one instruction and exits, --yes answers its "
-               "confirmations. It edits and commits in the working tree it is started in",
-        "access": "an API key, billed per token: OPENAI_API_KEY (or the provider variable the "
-                  "model you choose needs)",
-        "variants": ["openai/gpt-6-sol", "anthropic/claude-sonnet-5"],
-        "docs": "https://aider.chat/docs/usage.html",
-    },
-    {
-        "id": "ollama",
-        "label": "Ollama local",
-        "color": "#8A8F98",
-        "kind": "local",
-        "engine": "generic",
-        "bin": "ollama",
-        "install_hint": "curl -fsSL https://ollama.com/install.sh | sh",
-        "pull_hint": "ollama pull <variant>",
-        "auth_env": "",
-        "run": "{bin} run {variant} {task}",
-        "health": HEALTH,
-        "tos": "runs on this machine, so there are no service terms to keep and no key to hold. "
-               "The cost is the farm's own GPU and memory",
-        "access": "nothing: it runs on this farm's own hardware",
-        "variants": ["llama3.1", "qwen2.5-coder", "deepseek-coder"],
-        "docs": "https://github.com/ollama/ollama",
-    },
-    {
-        "id": "custom",
-        "label": "Custom command",
-        "color": "#8A8F98",
-        "kind": "key",
-        "engine": "generic",
-        "bin": "",
-        "install_hint": "",
-        "pull_hint": "",
-        "auth_env": "",
-        "run": "",
-        "health": HEALTH,
-        "tos": "whatever the command you name allows: nobody here has read its terms for you",
-        "access": "however the command you name is paid for",
-        "variants": [],
-        "docs": "",
-    },
 ]
-
-# The preset that is never "already added": a farm can carry any number of custom commands.
-CUSTOM = "custom"
 
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
 # The one model rule: every model name that reaches a command line passes it, whichever engine
@@ -285,14 +139,11 @@ def entry_from(preset_id, overrides=None):
         if value:
             entry[field] = value
 
-    # What the row is called. "Custom command" is the name of the CARD, not of a farm's own
-    # command: three of them would be three identical rows, separable only by the mono id under
-    # them, so the custom preset hands the naming over. A name given here wins for any preset,
-    # and models.add_model() falls back to the id when there is none.
+    # What the row is called. A name given here wins over the preset's own label.
     label = str(given.get("label") or "").strip()
     if len(label) > 60:
         return None, "a name longer than 60 characters is not a name a table row can show"
-    if label or preset["id"] == CUSTOM:
+    if label:
         entry["label"] = label
     if entry["auth_env"] and not ENV_RE.match(entry["auth_env"]):
         return None, (f"{entry['auth_env']} is not an environment variable name: capitals, "

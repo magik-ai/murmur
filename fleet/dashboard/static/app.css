@@ -603,10 +603,9 @@ th.actions.one, td.actions.one { width: 104px; min-width: 104px; max-width: 104p
    whole text on the title, and the machines lose their Last check column (owner, 2026-09-24).
    A phone keeps the sideways scroll: six columns do not share 358px. */
 @media (min-width: 641px) and (max-width: 1599px) {
-  table.h-machines, table.h-runners, table.m-services { table-layout: fixed; }
-  table.h-machines th, table.h-runners th, table.m-services th { overflow: hidden; text-overflow: ellipsis; }
+  table.h-machines, table.m-services { table-layout: fixed; }
+  table.h-machines th, table.m-services th { overflow: hidden; text-overflow: ellipsis; }
   table.h-machines .h-col-last { display: none; }
-  table.h-runners th:first-child { width: 26%; }
   table.m-services .m-col-svc { width: 17%; }
   table.m-services .m-col-svc-state { width: 11%; }
   table.m-services .m-col-change { width: 12%; }

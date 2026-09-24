@@ -7,8 +7,6 @@ import json
 import os
 import pathlib
 import secrets
-import shutil
-import signal
 import socket
 import sys
 import tempfile
@@ -495,7 +493,7 @@ class StreamTextTest(unittest.TestCase):
     """What a lane's log shows for one event of its stream."""
 
     def test_a_generic_engine_shows_its_words_not_its_event_type(self):
-        # Grok Build's streaming-json keeps the words under "data"; the log used to print
+        # A streaming-json CLI may keep the words under "data"; the log used to print
         # "[text]" for every one of them.
         self.assertEqual(dashboard._stream_text({"type": "text", "data": "Opened the pull request"}),
                          "Opened the pull request")
@@ -1638,7 +1636,7 @@ class EnginesTest(unittest.TestCase):
          "health": "ok", "health_detail": "claude CLI present", "checked_at": 1790000000},
         {"id": "codex", "label": "Codex", "engine": "codex", "enabled": True,
          "health": "unchecked", "health_detail": "", "checked_at": 0},
-        {"id": "qwen", "label": "Qwen Code", "engine": "generic", "bin": "qwen",
+        {"id": "democli", "label": "Demo CLI", "engine": "generic", "bin": "democli",
          "enabled": False, "health": "unchecked", "health_detail": "", "checked_at": 0},
     ]
 
@@ -1665,12 +1663,12 @@ class EnginesTest(unittest.TestCase):
         rows, _home = self.rows(installed=["claude"])
         self.assertTrue(rows["claude"]["installed"])
         self.assertTrue(rows["claude"]["path"].endswith("/claude"))
-        for missing in ("codex", "qwen"):
+        for missing in ("codex", "democli"):
             self.assertFalse(rows[missing]["installed"], missing)
             self.assertEqual(rows[missing]["path"], "", missing)
             self.assertTrue(rows[missing]["install_hint"], missing)
         # a generic engine is looked for under its own command, not under its id
-        self.assertIn("qwen", rows["qwen"]["install_hint"])
+        self.assertIn("democli", rows["democli"]["install_hint"])
 
     def test_the_bin_override_is_the_path_that_counts(self):
         with tempfile.TemporaryDirectory() as elsewhere:
@@ -1687,9 +1685,9 @@ class EnginesTest(unittest.TestCase):
             self.assertTrue(rows["claude"]["path"].endswith("/claude"))
 
     def test_the_row_carries_the_switch_and_the_last_test(self):
-        rows, _home = self.rows(installed=["claude", "codex", "qwen"])
+        rows, _home = self.rows(installed=["claude", "codex", "democli"])
         self.assertIs(rows["claude"]["enabled"], True)
-        self.assertIs(rows["qwen"]["enabled"], False)
+        self.assertIs(rows["democli"]["enabled"], False)
         self.assertIsNotNone(dashboard.parse_iso(rows["claude"]["last_test"]))
         self.assertIsNone(rows["codex"]["last_test"], "never tested is not a time")
 
@@ -1701,7 +1699,7 @@ class EnginesTest(unittest.TestCase):
             with running_server() as base:
                 status, body = fetch_json(base, "/api/engines")
         self.assertEqual(status, 200)
-        self.assertEqual([row["id"] for row in body], ["claude", "codex", "qwen"])
+        self.assertEqual([row["id"] for row in body], ["claude", "codex", "democli"])
         for row in body:
             for key in ("installed", "path", "install_hint", "enabled", "last_test"):
                 self.assertIn(key, row, row["id"])
@@ -1736,40 +1734,103 @@ def read_toml(path):
         return tomllib.load(handle)
 
 
+# A contributor adds an engine by appending one dict to lib/model_presets.py's PRESETS. murmur
+# itself ships only claude and codex, so the writes behind "Add a model" are checked on fictional
+# contributions, put into the list for one test and taken out again.
+DEMO_PRESETS = [
+    {"id": "democli", "label": "Demo CLI", "color": "#3A6EA5", "kind": "key",
+     "engine": "generic", "bin": "democli",
+     "install_hint": "install democli so that `democli` is on this farm's PATH", "pull_hint": "",
+     "auth_env": "DEMOCLI_API_KEY", "run": "{bin} -m {variant} -p {task} --output-format json",
+     "health": dashboard.MODEL_PRESETS.HEALTH, "tos": "a documented non-interactive mode",
+     "access": "an API key in DEMOCLI_API_KEY, billed per token",
+     "variants": ["demo-large", "demo-small"], "docs": "https://example.invalid/democli"},
+    {"id": "demo-local", "label": "Demo local", "color": "#4FA07A", "kind": "local",
+     "engine": "generic", "bin": "demolocal",
+     "install_hint": "install demolocal so that `demolocal` is on this farm's PATH",
+     "pull_hint": "demolocal pull <variant>", "auth_env": "", "run": "{bin} run {variant} {task}",
+     "health": dashboard.MODEL_PRESETS.HEALTH,
+     "tos": "runs on this machine, so there are no service terms to keep",
+     "access": "nothing: it runs on this farm's own hardware",
+     "variants": ["demo-7b", "demo-13b"], "docs": "https://example.invalid/demolocal"},
+    # A contribution that leaves the command to the operator.
+    {"id": "demo-bare", "label": "Demo template", "color": "#8A8F98", "kind": "key",
+     "engine": "generic", "bin": "", "install_hint": "", "pull_hint": "", "auth_env": "",
+     "run": "", "health": dashboard.MODEL_PRESETS.HEALTH,
+     "tos": "whatever the command you name allows",
+     "access": "however the command you name is paid for", "variants": [],
+     "docs": "https://example.invalid/demo-bare"},
+]
+
+
+@contextlib.contextmanager
+def contributed():
+    """model_presets.PRESETS with the fictional contributions appended, for one test."""
+    shipped = dashboard.MODEL_PRESETS.PRESETS
+    with mock.patch.object(dashboard.MODEL_PRESETS, "PRESETS",
+                           shipped + [dict(p) for p in DEMO_PRESETS]):
+        yield
+
+
 class ModelPresetsRouteTest(unittest.TestCase):
     """GET /api/models/presets: the services a person can add, and which this farm already has."""
+
+    CARD_FIELDS = ("label", "color", "kind", "access", "tos", "install_hint", "variants", "docs",
+                   "added")
 
     def test_every_card_the_dialog_draws_is_served_with_what_it_needs_to_say(self):
         with own_catalog(), running_server() as base:
             status, rows = fetch_json(base, "/api/models/presets")
         self.assertEqual(status, 200)
-        self.assertEqual([row["id"] for row in rows],
-                         ["claude", "codex", "gemini", "qwen", "kimi", "grok", "opencode", "aider",
-                          "ollama", "custom"])
+        self.assertEqual([row["id"] for row in rows], ["claude", "codex"])
         for row in rows:
-            for key in ("label", "color", "kind", "access", "tos", "install_hint", "variants",
-                        "docs", "added"):
+            for key in self.CARD_FIELDS:
                 self.assertIn(key, row, row["id"])
             self.assertTrue(row["access"].strip(), row["id"])
             self.assertTrue(row["tos"].strip(), row["id"])
 
+    def test_a_contributed_preset_is_one_more_card_with_everything_it_needs(self):
+        with own_catalog(), contributed(), running_server() as base:
+            status, rows = fetch_json(base, "/api/models/presets")
+        self.assertEqual(status, 200)
+        self.assertEqual([row["id"] for row in rows],
+                         ["claude", "codex", "democli", "demo-local", "demo-bare"])
+        for row in rows:
+            for key in self.CARD_FIELDS:
+                self.assertIn(key, row, row["id"])
+
     def test_a_service_this_farm_already_has_is_not_offered_again(self):
         # No catalog of its own: the farm runs on the shipped example, which is claude and codex.
-        with own_catalog(), running_server() as base:
+        with own_catalog(), contributed(), running_server() as base:
             _status, rows = fetch_json(base, "/api/models/presets")
         added = {row["id"]: row["added"] for row in rows}
         self.assertTrue(added["claude"])
         self.assertTrue(added["codex"])
-        self.assertFalse(added["gemini"])
+        self.assertFalse(added["democli"])
+
+    def test_claude_and_codex_are_marked_added_when_this_farm_s_own_catalog_holds_them(self):
+        both = ('[claude]\nlabel = "Claude Code"\nengine = "claude"\n\n'
+                '[codex]\nlabel = "Codex"\nengine = "codex"\n')
+        with own_catalog(both), running_server() as base:
+            status, rows = fetch_json(base, "/api/models/presets")
+        self.assertEqual(status, 200)
+        self.assertEqual({row["id"]: row["added"] for row in rows},
+                         {"claude": True, "codex": True})
+        with own_catalog('[claude]\nlabel = "Claude Code"\nengine = "claude"\n'), \
+                running_server() as base:
+            _status, rows = fetch_json(base, "/api/models/presets")
+        self.assertEqual({row["id"]: row["added"] for row in rows},
+                         {"claude": True, "codex": False},
+                         "a farm that took codex out is offered it again")
 
     def test_a_row_added_from_a_preset_marks_that_preset_whatever_it_was_named(self):
-        catalog = ('[mine]\nlabel = "My Gemini"\nengine = "generic"\nbin = "gemini"\n'
-                   'run = "{bin} -p {task}"\npreset = "gemini"\nsource = "added"\n')
-        with own_catalog(catalog), running_server() as base:
+        catalog = ('[mine]\nlabel = "My Demo"\nengine = "generic"\nbin = "democli"\n'
+                   'run = "{bin} -p {task}"\npreset = "democli"\nsource = "added"\n')
+        with own_catalog(catalog), contributed(), running_server() as base:
             _status, rows = fetch_json(base, "/api/models/presets")
         added = {row["id"]: row["added"] for row in rows}
-        self.assertTrue(added["gemini"], "the card must say it is already here")
-        self.assertFalse(added["custom"], "a farm may hold any number of its own commands")
+        self.assertTrue(added["democli"], "the card must say it is already here")
+        self.assertFalse(added["demo-bare"])
 
     def test_reading_the_services_never_starts_anything(self):
         with own_catalog(), \
@@ -1782,6 +1843,11 @@ class ModelPresetsRouteTest(unittest.TestCase):
 class ModelAddRemoveTest(unittest.TestCase):
     """POST /api/models/add and /api/models/remove: the writes behind "Add a model"."""
 
+    def setUp(self):
+        patcher = contributed()
+        patcher.__enter__()
+        self.addCleanup(patcher.__exit__, None, None, None)
+
     def add(self, base, body):
         return fetch_json(base, "/api/models/add", token="s3cret", method="POST", body=body)
 
@@ -1791,36 +1857,38 @@ class ModelAddRemoveTest(unittest.TestCase):
     def test_adding_a_preset_writes_the_catalog_and_answers_the_new_row(self):
         with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
                 running_server() as base:
-            status, payload = self.add(base, {"preset": "gemini", "id": "gemini",
-                                              "variant": "gemini-2.5-pro"})
+            status, payload = self.add(base, {"preset": "democli", "id": "democli",
+                                              "variant": "demo-large"})
             self.assertEqual(status, 200, payload)
             row = payload["model"]
             written = read_toml(dashboard.MODELS.CONFIG)
-        self.assertEqual(row["id"], "gemini")
+        self.assertEqual(row["id"], "democli")
         self.assertEqual(row["source"], "added")
-        self.assertEqual(row["variant"], "gemini-2.5-pro")
-        self.assertEqual(row["command"], "gemini")
+        self.assertEqual(row["variant"], "demo-large")
+        self.assertEqual(row["command"], "democli")
         self.assertTrue(row["access"].strip())
         self.assertIn(row["status"], dashboard.MODEL_STATUSES)
+        self.assertIs(row["in_catalog"], True, "a row from a preset this farm has is in the catalog")
         # the shipped example came across on the first write, so nothing was lost
-        self.assertEqual(set(written), {"claude", "codex", "gemini"})
+        self.assertEqual(set(written), {"claude", "codex", "democli"})
         # the model picked in step 2 is on the command line, not only in the row's variant field
-        self.assertEqual(written["gemini"]["run"],
+        self.assertEqual(written["democli"]["run"],
                          "{bin} -m {variant} -p {task} --output-format json")
-        self.assertEqual(written["gemini"]["variant"], "gemini-2.5-pro")
+        self.assertEqual(written["democli"]["variant"], "demo-large")
+        self.assertEqual(written["democli"]["preset"], "democli")
 
     def test_a_key_in_the_body_is_refused_before_anything_is_written(self):
         with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
                 running_server() as base:
-            status, payload = self.add(base, {"preset": "gemini", "id": "gemini",
+            status, payload = self.add(base, {"preset": "democli", "id": "democli",
                                               "key": "sk-live-not-a-real-key"})
             self.assertEqual(status, 400)
             self.assertEqual(payload["error"],
-                             "A key never goes through this page. Run: fleet models auth gemini")
+                             "A key never goes through this page. Run: fleet models auth democli")
             self.assertFalse(os.path.exists(dashboard.MODELS.CONFIG), "nothing was written")
             self.assertNotIn("sk-live", json.dumps(payload), "the key is never echoed back")
             for field in ("api_key", "secret", "credential"):
-                status, payload = self.add(base, {"preset": "gemini", "id": "gemini",
+                status, payload = self.add(base, {"preset": "democli", "id": "democli",
                                                   field: "sk-live-not-a-real-key"})
                 self.assertEqual(status, 400, field)
                 self.assertIn("never goes through this page", payload["error"], field)
@@ -1836,8 +1904,8 @@ class ModelAddRemoveTest(unittest.TestCase):
                 running_server() as base:
             for field in ("apiKey", "API_KEY", "Api-Key", "KEY", "Token", "access_token",
                           "Secret", "CREDENTIAL", "x-api-key"):
-                status, payload = self.add(base, {"preset": "gemini", "id": "g1",
-                                                  "variant": "gemini-2.5-pro",
+                status, payload = self.add(base, {"preset": "democli", "id": "g1",
+                                                  "variant": "demo-large",
                                                   field: "sk-live-not-a-real-key"})
                 self.assertEqual(status, 400, field)
                 self.assertIn("never goes through this page", payload["error"], field)
@@ -1850,11 +1918,11 @@ class ModelAddRemoveTest(unittest.TestCase):
         with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
                 running_server() as base:
             for body in (
-                {"preset": "custom", "id": "c1", "bin": "echo",
+                {"preset": "demo-bare", "id": "c1", "bin": "echo",
                  "run": "{bin} --api-key sk-live-not-a-real-key -p {task}"},
-                {"preset": "custom", "id": "c2", "bin": "echo",
+                {"preset": "demo-bare", "id": "c2", "bin": "echo",
                  "run": "{bin} --token AAAABBBBCCCCDDDD -p {task}"},
-                {"preset": "custom", "id": "c3", "bin": "echo",
+                {"preset": "demo-bare", "id": "c3", "bin": "echo",
                  "run": "{bin} -p {task} # sk-ant-0123456789abcdef"},
             ):
                 status, payload = self.add(base, body)
@@ -1870,7 +1938,7 @@ class ModelAddRemoveTest(unittest.TestCase):
         with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
                 running_server() as base:
             status, payload = self.add(base, {
-                "preset": "custom", "id": "mine", "bin": "mycli",
+                "preset": "demo-bare", "id": "mine", "bin": "mycli",
                 "run": "{bin} --api-key $MY_API_KEY --output-format json -p {task}",
                 "auth_env": "MY_API_KEY"})
             self.assertEqual(status, 200, payload)
@@ -1883,13 +1951,17 @@ class ModelAddRemoveTest(unittest.TestCase):
             for body, expect in (
                 ({}, "pick a service"),
                 ({"preset": "nope", "id": "nope"}, "no such preset"),
-                ({"preset": "gemini", "id": "Gemini", "variant": "gemini-2.5-pro"}, "model id"),
-                ({"preset": "gemini", "id": "gemini"}, "gemini-2.5-pro"),
-                ({"preset": "custom", "id": "mine", "bin": "x", "run": "x {task}",
-                  "variant": "qwen3-coder"}, "{variant}"),
-                ({"preset": "ollama", "id": "local"}, "llama3.1"),
-                ({"preset": "custom", "id": "mine"}, "bin"),
-                ({"preset": "custom", "id": "mine", "bin": "x", "run": "x --go"}, "{task}"),
+                ({"preset": "gemini", "id": "gemini", "variant": "gemini-2.5-pro"},
+                 "no such preset"),
+                ({"preset": "custom", "id": "mine", "bin": "x", "run": "x {task}"},
+                 "no such preset"),
+                ({"preset": "democli", "id": "Democli", "variant": "demo-large"}, "model id"),
+                ({"preset": "democli", "id": "democli"}, "demo-large"),
+                ({"preset": "demo-bare", "id": "mine", "bin": "x", "run": "x {task}",
+                  "variant": "demo-coder"}, "{variant}"),
+                ({"preset": "demo-local", "id": "local"}, "demo-7b"),
+                ({"preset": "demo-bare", "id": "mine"}, "bin"),
+                ({"preset": "demo-bare", "id": "mine", "bin": "x", "run": "x --go"}, "{task}"),
                 ({"preset": "claude", "id": "claude"}, "already"),
             ):
                 status, payload = self.add(base, body)
@@ -1897,30 +1969,27 @@ class ModelAddRemoveTest(unittest.TestCase):
                 self.assertIn(expect, payload["error"], (body, payload))
                 self.assertNotIn("Traceback", json.dumps(payload))
 
-    def test_two_custom_commands_are_two_rows_with_two_names(self):
-        """"Custom command" is the name of the card, not of a farm's own command."""
+    def test_a_row_is_called_what_the_person_named_it_or_what_its_preset_is_called(self):
         with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
                 running_server() as base:
-            self.add(base, {"preset": "custom", "id": "nightly", "bin": "mycli",
-                            "run": "{bin} --do {task}"})
-            self.add(base, {"preset": "custom", "id": "triage", "bin": "othercli",
-                            "run": "{bin} {task}"})
-            status, payload = self.add(base, {"preset": "custom", "id": "notes",
+            status, payload = self.add(base, {"preset": "democli", "id": "nightly",
+                                              "variant": "demo-large"})
+            self.assertEqual(status, 200, payload)
+            status, payload = self.add(base, {"preset": "demo-bare", "id": "notes",
                                               "bin": "thirdcli", "run": "{bin} {task}",
                                               "label": "Release notes"})
             self.assertEqual(status, 200, payload)
             _status, rows = fetch_json(base, "/api/engines")
         names = {row["id"]: row["label"] for row in rows}
-        self.assertEqual(names["nightly"], "nightly")
-        self.assertEqual(names["triage"], "triage")
+        self.assertEqual(names["nightly"], "Demo CLI", "no name given: the preset's own label")
         self.assertEqual(names["notes"], "Release notes")
         self.assertEqual(names["claude"], "Claude Code", "a preset keeps its own label")
 
     def test_a_model_this_farm_added_can_be_removed_and_a_shipped_one_cannot(self):
         with own_catalog(), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
                 running_server() as base:
-            self.add(base, {"preset": "gemini", "id": "gemini", "variant": "gemini-2.5-pro"})
-            secret = pathlib.Path(dashboard.MODELS._secret_path("gemini"))
+            self.add(base, {"preset": "democli", "id": "democli", "variant": "demo-large"})
+            secret = pathlib.Path(dashboard.MODELS._secret_path("democli"))
             secret.parent.mkdir(parents=True, exist_ok=True)
             secret.write_text("sk-not-a-real-key\n")
 
@@ -1928,13 +1997,13 @@ class ModelAddRemoveTest(unittest.TestCase):
             self.assertEqual(status, 400)
             self.assertIn("came with fleet", payload["error"])
 
-            status, payload = self.remove(base, {"id": "gemini"})
+            status, payload = self.remove(base, {"id": "democli"})
             self.assertEqual(status, 200, payload)
-            self.assertEqual(payload, {"ok": True, "removed": "gemini"})
+            self.assertEqual(payload, {"ok": True, "removed": "democli"})
             self.assertEqual(set(read_toml(dashboard.MODELS.CONFIG)), {"claude", "codex"})
             self.assertFalse(secret.exists(), "the stored key goes with the row")
 
-            status, payload = self.remove(base, {"id": "gemini"})
+            status, payload = self.remove(base, {"id": "democli"})
             self.assertEqual(status, 404)
             self.assertIn("no such model", payload["error"])
             self.assertEqual(self.remove(base, {})[0], 400)
@@ -1944,12 +2013,12 @@ class ModelAddRemoveTest(unittest.TestCase):
                 running_server() as base:
             for path in ("/api/models/add", "/api/models/remove"):
                 status, payload = fetch_json(base, path, method="POST",
-                                             body={"preset": "gemini", "id": "gemini"})
+                                             body={"preset": "democli", "id": "democli"})
                 self.assertEqual(status, 403, path)
                 self.assertIn("token", payload["error"], path)
                 # a page in another tab cannot post it with a token it happens to know either
                 status, _payload = fetch_json(base, path, token="s3cret", method="POST",
-                                              body={"preset": "gemini", "id": "gemini"},
+                                              body={"preset": "democli", "id": "democli"},
                                               headers={"Sec-Fetch-Site": "cross-site"})
                 self.assertEqual(status, 403, path)
             self.assertFalse(os.path.exists(dashboard.MODELS.CONFIG))
@@ -1960,8 +2029,77 @@ class ModelAddRemoveTest(unittest.TestCase):
                 mock.patch.object(dashboard.subprocess, "run",
                                   side_effect=AssertionError("adding a model ran a command")), \
                 running_server() as base:
-            self.assertEqual(self.add(base, {"preset": "aider", "id": "aider",
-                                             "variant": "openai/gpt-6-sol"})[0], 200)
+            self.assertEqual(self.add(base, {"preset": "democli", "id": "democli",
+                                             "variant": "demo-small"})[0], 200)
+
+
+class ModelOrphanTest(unittest.TestCase):
+    """A row murmur no longer ships: GET /api/engines lists it, marked, and never 500s.
+
+    A farm that added Grok Build, or wrote a Gemini CLI table by hand, before those presets were
+    removed still has that table in its own models.toml. The catalog below also holds a top-level
+    key that is not a table and a field of the wrong type, the way a hand edit leaves one.
+    """
+
+    CATALOG = (
+        'stray = "on"\n\n'
+        '[claude]\nlabel = "Claude Code"\nengine = "claude"\ndefault_on = true\n\n'
+        '[codex]\nlabel = "Codex"\nengine = "codex"\ndefault_on = true\n\n'
+        '[grok]\nlabel = "Grok Build"\nengine = "generic"\npreset = "grok"\nbin = "grok"\n'
+        'run = "{bin} -p {task} -m {variant}"\nvariant = "grok-4.7"\nauth_env = "XAI_API_KEY"\n'
+        'source = "added"\n\n'
+        '[gemini]\nengine = "generic"\nbin = "gemini"\nrun = "{bin} -p {task}"\nrole = 7\n'
+    )
+    STATE = {"grok": "not a record", "gemini": {"enabled": True, "health": "ok"}}
+    NOTE = "Not in murmur's catalog: murmur ships Claude Code and Codex."
+
+    def check_rows(self, rows, config):
+        rows = {row["id"]: row for row in rows}
+        self.assertEqual(sorted(rows), ["claude", "codex", "gemini", "grok"])
+        for mid in ("claude", "codex"):
+            self.assertIs(rows[mid]["in_catalog"], True, mid)
+            self.assertEqual(rows[mid]["catalog_note"], "", mid)
+        for mid in ("grok", "gemini"):
+            self.assertIs(rows[mid]["in_catalog"], False, mid)
+            self.assertTrue(rows[mid]["catalog_note"].startswith(self.NOTE), mid)
+            self.assertIn(f"delete its [{mid}] table from {config}", rows[mid]["catalog_note"])
+            self.assertIn(rows[mid]["status"], dashboard.MODEL_STATUSES, mid)
+        self.assertIn("press Remove on its row", rows["grok"]["catalog_note"])
+        self.assertNotIn("Remove", rows["gemini"]["catalog_note"])
+        self.assertEqual(rows["gemini"]["role"], 7)
+
+    def test_engines_lists_the_rows_it_no_longer_ships_with_the_note(self):
+        with own_catalog(self.CATALOG, self.STATE) as room:
+            before = (room / "config" / "models.toml").read_bytes()
+            rows = dashboard.engines()
+            self.check_rows(rows, dashboard.MODELS.CONFIG)
+            self.assertEqual((room / "config" / "models.toml").read_bytes(), before,
+                             "reading the rows never rewrites the catalog")
+
+    def test_the_routes_answer_over_http_and_never_500(self):
+        with own_catalog(self.CATALOG, self.STATE) as room, running_server() as base:
+            before = (room / "config" / "models.toml").read_bytes()
+            status, body = fetch_json(base, "/api/engines")
+            self.assertEqual(status, 200, body)
+            self.check_rows(body, dashboard.MODELS.CONFIG)
+            status, listing = fetch_json(base, "/api/models")
+            self.assertEqual(status, 200, listing)
+            self.assertEqual(sorted(row["id"] for row in listing),
+                             ["claude", "codex", "gemini", "grok"])
+            status, cards = fetch_json(base, "/api/models/presets")
+            self.assertEqual(status, 200, cards)
+            self.assertEqual({row["id"]: row["added"] for row in cards},
+                             {"claude": True, "codex": True})
+            self.assertEqual((room / "config" / "models.toml").read_bytes(), before)
+
+    def test_an_orphan_this_farm_added_can_still_be_removed_from_the_page(self):
+        with own_catalog(self.CATALOG, self.STATE), mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                running_server() as base:
+            status, payload = fetch_json(base, "/api/models/remove", token="s3cret",
+                                         method="POST", body={"id": "grok"})
+            self.assertEqual(status, 200, payload)
+            written = read_toml(dashboard.MODELS.CONFIG)
+        self.assertEqual(set(written), {"stray", "claude", "codex", "gemini"})
 
 
 class ModelStatusTest(unittest.TestCase):
@@ -2024,7 +2162,7 @@ class ModelStatusTest(unittest.TestCase):
     def test_a_key_in_the_environment_or_on_the_farm_settles_the_key_question(self):
         rows = self.rows(["keyless"], env={"KEYLESS_API_KEY": "sk-not-a-real-key"})
         self.assertEqual(rows["keyless"]["status"], "off", "keyed, switched off")
-        with self.farm(["keyless"]) as room:
+        with self.farm(["keyless"]):
             secret = pathlib.Path(dashboard.MODELS._secret_path("keyless"))
             secret.parent.mkdir(parents=True, exist_ok=True)
             secret.write_text("sk-not-a-real-key\n")
@@ -3344,21 +3482,6 @@ elif command == "hosts":
         print("%s: logged in as ada@example.com" % positional[0])
     else:
         sys.exit("fleet hosts: unknown verb " + sub)
-elif command == "runner":
-    sub, tail = (rest[0] if rest else ""), rest[1:]
-    record("fleet-argv " + json.dumps(argv))
-    if sub == "test":
-        parser = argparse.ArgumentParser(prog="fleet runner test")
-        parser.add_argument("provider")
-        parser.add_argument("--project", required=True)
-        args = parser.parse_args(tail)
-        parsed("runner test", vars(args))
-        leak = os.environ.get("FLEET_FAKE_LEAK", "")
-        if leak:
-            print("railway: " + leak, file=sys.stderr)
-        print("%s runner passed in 31s" % args.provider)
-    else:
-        sys.exit("fleet runner: unknown verb " + sub)
 elif command == "models":
     sub = rest[0] if rest else "list"
     if sub not in ("list", "enable", "disable", "test", "auth"):
@@ -4404,7 +4527,12 @@ class ModelsContractTest(unittest.TestCase):
     def test_every_preset_and_every_row_carries_a_terms_word(self):
         for preset in dashboard.MODEL_PRESETS.presets():
             self.assertIn(preset.get("tos_kind"), ("safe", "check", "blocked"), preset["id"])
-        for row in dashboard.engines():
+        # Read from a throwaway farm, never this machine's own catalog. It holds the shipped
+        # rows and two this farm wrote before their presets were removed, one with no terms.
+        with own_catalog(ModelOrphanTest.CATALOG, ModelOrphanTest.STATE):
+            rows = dashboard.engines()
+        self.assertEqual(len(rows), 4)
+        for row in rows:
             self.assertIn(row.get("tos_kind"), ("safe", "check", "blocked"), row.get("id"))
 
     def test_the_terms_word_reads_the_sentence(self):
@@ -4444,24 +4572,15 @@ HOSTS_JSON = {
         {"id": "do-droplet", "label": "DigitalOcean Droplet", "job": "machine", "stage": "ga",
          "cli_installed": True, "login_state": "logged_in", "account": "ada@example.com",
          "detail": "", "checked_at": "2026-09-23T08:00:00Z",
-         "secrets": [], "tested": None, "login": "doctl auth init --context murmur",
+         "login": "doctl auth init --context murmur",
          "install": "snap install doctl", "terms": "billed per second",
          "pricing": "$48 a month for 4 vCPU", "sizes": [], "regions": ["fra1"]},
-        {"id": "railway", "label": "Railway sandboxes", "job": "runner",
-         "stage": "early access", "cli_installed": True, "login_state": "logged_in",
-         "account": "ada", "detail": "", "checked_at": "2026-09-23T08:00:00Z",
-         "secrets": [{"name": "CLAUDE_CODE_OAUTH_TOKEN", "stored": True, "account": "personal"},
-                     {"name": "GITHUB_TOKEN", "stored": True, "account": ""}],
-         "tested": {"ok": True, "at": "2026-09-23T07:00:00Z", "seconds": 31, "detail": ""},
-         "login": "railway login --browserless", "install": "npm i -g @railway/cli",
-         "terms": "$50 per vCPU-month", "pricing": "$50 per vCPU-month", "sizes": [],
-         "regions": []},
-        {"id": "vercel", "label": "Vercel Sandbox", "job": "runner", "stage": "ga",
-         "cli_installed": False, "login_state": "not_installed", "account": "",
-         "detail": "sandbox is not on this farm", "checked_at": "2026-09-23T08:00:00Z",
-         "secrets": [{"name": "CLAUDE_CODE_OAUTH_TOKEN", "stored": False, "account": ""}],
-         "tested": None, "login": "sandbox login", "install": "npm i -g @vercel/sandbox",
-         "terms": "45 minutes a session on Hobby", "pricing": "about $0.13 an hour",
+        {"id": "ssh", "label": "Your own machine", "job": "machine", "stage": "ga",
+         "cli_installed": False, "login_state": "not_installed", "account": None,
+         "detail": "ssh is not on this farm's PATH", "checked_at": "2026-09-23T08:00:00Z",
+         "login": "none: your own SSH key reaches the machine",
+         "install": "ssh comes with every Linux and macOS; nothing to install",
+         "terms": "your own machine", "pricing": "whatever you already pay for the box",
          "sizes": [], "regions": []},
     ],
 }
@@ -4513,7 +4632,7 @@ class HostingCase(unittest.TestCase):
                     "FLEET_FAKE_HOSTS": str(self.hosts_file)}
         settings.update({name: value for name, value in env.items() if value is not None})
         providers = {name: 'exit 0\n' for name in
-                     ("doctl", "railway", "sandbox", "vercel", "ssh", "scp", "ssh-keygen")}
+                     ("doctl", "ssh", "scp", "ssh-keygen")}
         with fake_tools(dict(providers, fleet=FLEET_FAKE), env=settings) as box:
             with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
                 self.box = box
@@ -4608,9 +4727,8 @@ class HostingSnapshotTest(HostingCase):
         self.assertEqual(machines["machines"][1]["state"], "needs-login")
         hosts = dashboard.hosting_hosts()
         self.assertFalse(hosts["pending"])
-        self.assertEqual([row["id"] for row in hosts["providers"]],
-                         ["do-droplet", "railway", "vercel"])
-        self.assertEqual(hosts["providers"][2]["login_state"], "not_installed")
+        self.assertEqual([row["id"] for row in hosts["providers"]], ["do-droplet", "ssh"])
+        self.assertEqual(hosts["providers"][1]["login_state"], "not_installed")
 
     def test_the_amended_fields_reach_the_page_untouched(self):
         """The contract amendment: machine rows carry `provider_id`, provider rows carry `cli`,
@@ -4669,7 +4787,7 @@ class HostingSnapshotTest(HostingCase):
             self.assertNotIn("Traceback", json.dumps(answer))
         # and the rows a person was looking at are still there, now labelled stale
         self.assertEqual(len(dashboard.hosting_machines()["machines"]), 3)
-        self.assertEqual(len(dashboard.hosting_hosts()["providers"]), 3)
+        self.assertEqual(len(dashboard.hosting_hosts()["providers"]), 2)
 
     def test_a_listing_that_is_not_json_is_a_sentence_and_not_a_traceback(self):
         self.machines_file.write_text("doctl: command not found\n")
@@ -4696,27 +4814,10 @@ class HostingSnapshotTest(HostingCase):
                 status, config = fetch_json(base, "/api/config")
                 self.assertEqual(status, 200)
             self.assertEqual(box.calls.read_text(), "")
-        self.assertEqual(config["hosting"], {"machines": 3, "runners_connected": 1})
-
-    def test_a_runner_counts_as_connected_only_with_its_secrets_stored(self):
-        """Login and Secrets are separate columns on the page, and a lane can be spawned only
-        with both: logged in with a secret missing is not connected."""
-        listing = json.loads(self.hosts_file.read_text())
-        listing["providers"].append(
-            {"id": "do-agents", "job": "runner", "login_state": "logged_in",
-             "secrets": [{"name": "CLAUDE_CODE_OAUTH_TOKEN", "stored": True, "account": ""},
-                         {"name": "GITHUB_TOKEN", "stored": False, "account": ""}]})
-        listing["providers"].append(
-            {"id": "elsewhere", "job": "runner", "login_state": "logged_in"})
-        self.hosts_file.write_text(json.dumps(listing))
-        with self.farm():
-            dashboard.hosting_refresh()
-        # railway alone: logged in and both secrets stored
-        self.assertEqual(dashboard.hosting_counts()["runners_connected"], 1)
+        self.assertEqual(config["hosting"], {"machines": 3})
 
     def test_the_config_counts_are_zero_before_the_first_pass(self):
-        self.assertEqual(dashboard.config_payload()["hosting"],
-                         {"machines": 0, "runners_connected": 0})
+        self.assertEqual(dashboard.config_payload()["hosting"], {"machines": 0})
 
     def test_the_refresher_thread_passes_and_can_be_stopped(self):
         stop = threading.Event()
@@ -4875,82 +4976,25 @@ class HostingWriteTest(HostingCase):
 
     def test_checking_a_provider_is_keyed_by_the_provider(self):
         with self.farm() as box:
-            status, payload = dashboard.hosts_check({"provider": "railway"})
+            status, payload = dashboard.hosts_check({"provider": "do-droplet"})
             record = self.done(status, payload)
-            self.assertEqual(self.argv(box)[0], ["hosts", "check", "railway"])
-        self.assertEqual(record["key"], "host:railway")
-        self.assertEqual(payload["provider"], "railway")
+            self.assertEqual(self.argv(box)[0], ["hosts", "check", "do-droplet"])
+        self.assertEqual(record["key"], "host:do-droplet")
+        self.assertEqual(payload["provider"], "do-droplet")
 
-    def test_testing_a_runner_runs_the_runner_verb_with_the_project(self):
+    def test_the_runner_routes_are_gone(self):
+        """Runners were removed on 2026-09-24: no route tests one, and no provider the server
+        guards is one."""
+        self.assertFalse(hasattr(dashboard, "hosts_test"))
+        self.assertNotIn("runner", dashboard.HOSTING_PROVIDERS.values())
         with self.farm() as box:
-            status, payload = dashboard.hosts_test({"provider": "railway", "project": "alpha",
-                                                    "confirm": True})
-            record = self.done(status, payload)
-            self.assertEqual(self.argv(box)[0],
-                             ["runner", "test", "railway", "--project", "alpha"])
-        self.assertEqual(record["state"], "done", record)
-        self.assertEqual(record["key"], "host:railway")
-
-    def test_a_runner_test_that_hangs_is_asked_to_stop_before_it_is_killed(self):
-        """A test past its timeout still holds a paid sandbox. A SIGKILL would give `fleet
-        runner test` no chance to run its own delete, so it is sent SIGTERM first and given a
-        grace period; only a tool that ignores that is killed."""
-        marker = self.root / "cleaned-up"
-        hung = f'''#!{sys.executable}
-import os, signal, sys, time
-def tidy(signum, frame):
-    with open({str(marker)!r}, "w") as handle:
-        handle.write("deleted the sandbox")
-    sys.exit(143)
-signal.signal(signal.SIGTERM, tidy)
-with open(os.environ["TOOL_CALLS"], "a") as handle:
-    handle.write("fleet " + " ".join(sys.argv[1:]) + "\\n")
-time.sleep(30)
-'''
-        with self.farm() as box:
-            (box.bin / "fleet").write_text(hung)
-            with mock.patch.object(dashboard, "HOSTING_TEST_TIMEOUT", 1), \
-                    mock.patch.object(dashboard, "HOSTING_TEST_GRACE", 10):
-                status, payload = dashboard.hosts_test(
-                    {"provider": "railway", "project": "alpha", "confirm": True})
-                record = self.done(status, payload, seconds=20)
-        self.assertEqual(record["state"], "failed", record)
-        self.assertEqual(marker.read_text(), "deleted the sandbox")
-        self.assertIn("did not answer within 1s and stopped when asked", record["error"])
-
-    def test_a_tool_that_ignores_the_stop_is_killed_after_the_grace(self):
-        started = time.time()
-        with fake_tools({"stubborn": f'''#!{sys.executable}
-import signal, time
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-time.sleep(30)
-'''}):
-            rc, _out, err = dashboard.run_tool(["stubborn"], timeout=1, grace=1)
-        self.assertEqual(rc, 124)
-        self.assertIn("did not answer within 1s and was killed after a 1s grace", err)
-        self.assertLess(time.time() - started, 10)
-
-    def test_a_detached_grandchild_holding_the_pipes_does_not_hold_the_job(self):
-        """A descendant that left the process group survives the SIGKILL and keeps the pipes
-        open. Reading until they close would never return, and the job would keep its key."""
-        pidfile = self.root / "detached.pid"
-        started = time.time()
-        setsid, sleep = shutil.which("setsid"), shutil.which("sleep")
-        if not setsid or not sleep:
-            self.skipTest("this machine has no setsid to detach a grandchild with")
-        with fake_tools({"leaver": f'#!/bin/sh\n{setsid} {sleep} 40 &\necho $! > "{pidfile}"\n'
-                                   f'{sleep} 30\n'}):
-            try:
-                rc, _out, err = dashboard.run_tool(["leaver"], timeout=1, grace=1)
-            finally:
-                if pidfile.exists():
-                    try:
-                        os.kill(int(pidfile.read_text()), signal.SIGKILL)
-                    except (OSError, ValueError):
-                        pass
-        self.assertEqual(rc, 124)
-        self.assertIn("did not answer within 1s", err)
-        self.assertLess(time.time() - started, 12)
+            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                    mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+                status, _raw, _ = fetch(
+                    base, "/api/hosts/test", token="s3cret", method="POST",
+                    body={"provider": "railway", "project": "alpha", "confirm": True})
+            self.assertEqual(status, 404)
+            self.assertEqual(box.calls.read_text(), "")
 
     def test_a_second_machine_may_be_added_while_the_first_one_boots(self):
         """The interlock is the machine, not the verb: one droplet booting must not stop the
@@ -4993,9 +5037,7 @@ time.sleep(30)
                   ("/api/machines/destroy", {"name": "nursery", "confirm": "nursery"}),
                   ("/api/machines/adopt", {"name": "nursery"}),
                   ("/api/machines/forget", {"name": "nursery"}),
-                  ("/api/hosts/check", {"provider": "railway"}),
-                  ("/api/hosts/test", {"provider": "railway", "project": "alpha",
-                                       "confirm": True})]
+                  ("/api/hosts/check", {"provider": "do-droplet"})]
         with self.farm() as box:
             with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
                     mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
@@ -5050,17 +5092,17 @@ class HostingRefusalTest(HostingCase):
                       [{}, {"provider": ""}, {"provider": "aws"}, {"provider": "--help"},
                        {"provider": "do droplet"}])
 
-    def test_a_runner_is_not_a_machine_and_a_machine_is_not_a_runner(self):
-        self.refusals(dashboard.machines_plan,
-                      [{"provider": "railway", "name": "nursery", "size": "s-4vcpu-8gb",
-                        "region": "fra1"}])
-        self.refusals(dashboard.hosts_test,
-                      [{"provider": "do-droplet", "project": "alpha", "confirm": True}])
+    def test_a_removed_runner_is_not_a_provider_any_more(self):
+        for provider in ("railway", "vercel", "do-agents"):
+            self.refusals(dashboard.machines_plan,
+                          [{"provider": provider, "name": "nursery", "size": "s-4vcpu-8gb",
+                            "region": "fra1"}])
+            self.refusals(dashboard.hosts_check, [{"provider": provider}])
 
-    def test_a_listed_provider_without_a_job_is_neither_a_machine_nor_a_runner(self):
+    def test_a_listed_provider_without_a_job_is_not_a_machine(self):
         """`fleet hosts list` may report an id this server has never heard of, and the snapshot
-        accepts it; a row without a `job` is still refused by both the machine and the runner
-        routes, because an empty job is not a match for either."""
+        accepts it; a row without a `job` is still refused by the machine routes, because an
+        empty job is not a match."""
         listing = json.loads(self.hosts_file.read_text())
         listing["providers"].append({"id": "hetzner", "label": "Hetzner"})
         self.hosts_file.write_text(json.dumps(listing))
@@ -5073,8 +5115,6 @@ class HostingRefusalTest(HostingCase):
         self.refusals(dashboard.machines_create,
                       [{"provider": "hetzner", "name": "nursery", "size": "s-4vcpu-8gb",
                         "region": "fra1", "ssh_public": PUBKEY, "confirm_usd": 48}])
-        self.refusals(dashboard.hosts_test,
-                      [{"provider": "hetzner", "project": "alpha", "confirm": True}])
 
     def test_a_size_or_a_region_that_is_not_a_slug_is_refused(self):
         base = {"provider": "do-droplet", "name": "nursery", "size": "s-4vcpu-8gb",
@@ -5129,7 +5169,7 @@ class HostingRefusalTest(HostingCase):
                 for route in (dashboard.machines_check, dashboard.machines_adopt,
                               dashboard.machines_forget, dashboard.machines_plan,
                               dashboard.machines_create, dashboard.hosts_check,
-                              dashboard.hosts_test, dashboard.machines_destroy,
+                              dashboard.machines_destroy,
                               lambda sent: dashboard.machines_destroy(
                                   dict(sent, confirm=sent["name"]))):
                     # destroy twice: without its confirmation, and with a matching one, so the
@@ -5151,9 +5191,7 @@ class HostingRefusalTest(HostingCase):
         cases = [(dashboard.machines_plan, dict(base, size=secret)),
                  (dashboard.machines_plan, dict(base, region=secret)),
                  (dashboard.machines_plan, dict(base, provider=secret)),
-                 (dashboard.hosts_check, {"provider": secret}),
-                 (dashboard.hosts_test, {"provider": "railway", "project": secret,
-                                         "confirm": True})]
+                 (dashboard.hosts_check, {"provider": secret})]
         with self.farm() as box:
             for route, body in cases:
                 status, payload = route(body)
@@ -5168,16 +5206,6 @@ class HostingRefusalTest(HostingCase):
                        {"name": "nursery", "confirm": "yes"},
                        {"name": "nursery", "confirm": "granite"},
                        {"name": "", "confirm": ""}, {"confirm": "nursery"}])
-
-    def test_a_runner_test_is_refused_without_the_confirmation_and_a_real_project(self):
-        self.refusals(dashboard.hosts_test,
-                      [{"provider": "railway", "project": "alpha"},
-                       {"provider": "railway", "project": "alpha", "confirm": "true"},
-                       {"provider": "railway", "project": "alpha", "confirm": 1},
-                       {"provider": "railway", "project": "alpha", "confirm": False},
-                       {"provider": "railway", "project": "ghost", "confirm": True},
-                       {"provider": "railway", "project": "", "confirm": True},
-                       {"provider": "railway", "project": "../alpha", "confirm": True}])
 
     def test_a_price_that_is_not_a_number_is_refused(self):
         base = {"provider": "do-droplet", "name": "orchard", "size": "s-4vcpu-8gb",
@@ -5233,7 +5261,7 @@ class HostingRefusalTest(HostingCase):
         """Every route, against a body of the wrong shape entirely."""
         routes = (dashboard.machines_plan, dashboard.machines_create, dashboard.machines_check,
                   dashboard.machines_destroy, dashboard.machines_adopt,
-                  dashboard.machines_forget, dashboard.hosts_check, dashboard.hosts_test)
+                  dashboard.machines_forget, dashboard.hosts_check)
         with self.farm() as box:
             for route in routes:
                 for body in ({}, None, {"name": None}, {"provider": None},

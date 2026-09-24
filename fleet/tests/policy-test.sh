@@ -170,6 +170,25 @@ is "codex: the env file's FLEET_CODEX_BIN and FLEET_CODEX_MODEL are used" "$got"
 got=$(CODEX_BIN=/explicit/codex; FLEET_CODEX_BIN=/opt/codex/bin/codex; eval "$codex_lines"; echo "$CODEX_BIN")
 is "codex: an explicit CODEX_BIN still wins" "$got" "/explicit/codex"
 
+echo "=== fleet kill rewrites the lane record whole ==="
+# The dashboard reads a lane's record while `fleet kill` marks it killed. A bare truncate and
+# write would let that read see half a file; the mark is written to a temporary file and swapped
+# in with os.replace, which shows as a new inode. systemctl and tmux are fakes, so no unit on this
+# box is touched.
+KILL_STATE="$ROOT/kill-state"; mkdir -p "$KILL_STATE/state" "$ROOT/killbin"
+printf '#!/bin/sh\nexit 0\n' > "$ROOT/killbin/systemctl"; chmod +x "$ROOT/killbin/systemctl"
+cp "$ROOT/killbin/systemctl" "$ROOT/killbin/tmux"
+record="$KILL_STATE/state/demo-lane-1.json"
+printf '{"slug": "demo-lane-1", "project": "demo", "lane": "lane", "status": "running"}' > "$record"
+before=$(stat -c %i "$record")
+out=$(FLEET_STATE="$KILL_STATE" PATH="$ROOT/killbin:$PATH" "$FLEET_BIN" kill demo-lane-1 2>&1)
+is "kill: the command says it killed the lane" "$out" "killed demo-lane-1"
+[ "$(stat -c %i "$record")" != "$before" ] && ok "kill: the record is a new file, swapped in whole" \
+  || no "kill: the record was rewritten in place" "inode $before"
+is "kill: and it says killed, keeping its other fields" \
+  "$($PY -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["status"], d["lane"])' "$record")" "killed lane"
+is "kill: no temporary file is left behind" "$(ls "$KILL_STATE/state" | grep -c '\.tmp$')" "0"
+
 echo "RESULT pass=$P fail=$F"
 
 [ "$F" = 0 ]

@@ -39,18 +39,18 @@ case "$out" in
 esac
 
 echo "=== a generic engine that streams one event per line, its text under data ==="
-# Grok Build's streaming-json. Its plain json is ONE pretty-printed object over many lines, which
-# no single line parses, so every Grok lane read as "never started": the preset streams instead.
-GROK_EVENTS='{"type":"text","data":"Reading the repository"}
+# A CLI's streaming-json. Its plain json can be ONE pretty-printed object over many lines, which
+# no single line parses, so such a lane read as "never started": a preset streams instead.
+STREAM_EVENTS='{"type":"text","data":"Reading the repository"}
 {"type":"text","data":"Opened the pull request"}
 {"type":"end","stopReason":"end_turn","usage":{"input_tokens":1200,"output_tokens":80}}
 '
-out=$(run_parser parse_generic.py worked-grok "$GROK_EVENTS")
+out=$(run_parser parse_generic.py worked-stream "$STREAM_EVENTS")
 case "$out" in
   ended*|pr_open*) ok "parse_generic.py: a streaming lane settles to $(echo "$out" | cut -d' ' -f1)";;
   *) no "parse_generic.py: a streaming lane must not be failed" "$out";;
 esac
-act=$(python3 -c "import json;print(json.load(open('$B/state/worked-grok.json')).get('last_activity'))")
+act=$(python3 -c "import json;print(json.load(open('$B/state/worked-stream.json')).get('last_activity'))")
 [ "$act" = "Opened the pull request" ] && ok "parse_generic.py: the card shows the event's text, not its JSON" \
   || no "parse_generic.py: last activity should be the text under data" "$act"
 
@@ -59,23 +59,23 @@ USAGE_EVENTS='{"type":"text","data":"Opened the pull request"}
 {"type":"usage","messageId":"resp_1","usage":{"input_tokens":1200,"output_tokens":80}}
 {"type":"end","stopReason":"end_turn"}
 '
-run_parser parse_generic.py grok-usage "$USAGE_EVENTS" >/dev/null
-act=$(python3 -c "import json;print(json.load(open('$B/state/grok-usage.json')).get('last_activity'))")
+run_parser parse_generic.py stream-usage "$USAGE_EVENTS" >/dev/null
+act=$(python3 -c "import json;print(json.load(open('$B/state/stream-usage.json')).get('last_activity'))")
 [ "$act" = "Opened the pull request" ] && ok "parse_generic.py: a usage line does not replace the agent's words" \
   || no "parse_generic.py: last activity should stay on the words" "$act"
 
 echo "=== a stream-json CLI that nests its words in a message ==="
 NESTED='{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the tests"}]}}
 '
-run_parser parse_generic.py qwen-nested "$NESTED" >/dev/null
-act=$(python3 -c "import json;print(json.load(open('$B/state/qwen-nested.json')).get('last_activity'))")
+run_parser parse_generic.py cli-nested "$NESTED" >/dev/null
+act=$(python3 -c "import json;print(json.load(open('$B/state/cli-nested.json')).get('last_activity'))")
 [ "$act" = "Reading the tests" ] && ok "parse_generic.py: words nested in a message reach the card" \
   || no "parse_generic.py: nested words should reach the card" "$act"
 
 echo "=== an engine that answers only with an error did not start ==="
-ERR_ONLY='{"type":"error","message":"Could not set model grok-4.7: unknown model id"}
+ERR_ONLY='{"type":"error","message":"Could not set model some-model-1: unknown model id"}
 '
-out=$(run_parser parse_generic.py grok-error "$ERR_ONLY")
+out=$(run_parser parse_generic.py cli-error "$ERR_ONLY")
 case "$out" in
   failed*"could not start"*) ok "parse_generic.py: an error-only launch is failed and says why";;
   *) no "parse_generic.py: an error-only launch must be failed" "$out";;

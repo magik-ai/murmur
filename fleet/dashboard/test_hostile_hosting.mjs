@@ -98,11 +98,9 @@ const bodyOf = (sent, route) => {
 /* Every control that writes, and the ones that only put a command on the clipboard. A read-only
    dashboard switches off the first group and keeps the second: copying a command into your own
    terminal is exactly how this section is meant to be used when the page cannot write. */
-const WRITE_CONTROLS = "[data-add-machine], [data-connect-runner], [data-machine-check],"
-  + " [data-machine-destroy], [data-machine-adopt], [data-machine-forget], [data-host-check],"
-  + " [data-host-open-test]";
-const COPY_CONTROLS = "[data-machine-finish], [data-machine-tunnel], [data-host-install],"
-  + " [data-host-spawn]";
+const WRITE_CONTROLS = "[data-add-machine], [data-machine-check],"
+  + " [data-machine-destroy], [data-machine-adopt], [data-machine-forget]";
+const COPY_CONTROLS = "[data-machine-finish], [data-machine-tunnel]";
 
 const READ_ONLY = JSON.stringify({
   writable: false,
@@ -143,8 +141,10 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
       total: (head.querySelector("[data-hosting-total]") || {}).textContent || "",
       columns: [...document.querySelectorAll("#view .h-machines thead th")]
         .map((node) => node.textContent).join("|"),
-      runners: [...document.querySelectorAll("#view .h-runners thead th")]
-        .map((node) => node.textContent).join("|"),
+      text: head.innerText,
+      note: (head.querySelector("h2") || {}).title || "",
+      runners: document.querySelectorAll(
+        "#view .h-runners, #view [data-connect-runner], #view [data-runner-gap]").length,
     };
   });
   check("hosting: the machines table has the seven columns of the design record",
@@ -201,94 +201,45 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
   check("hosting: a destroyed row is not offered a check or a destroy",
     !seen.rows.genoa.actions.includes("Check") && !seen.rows.genoa.actions.includes("Destroy"),
     seen.rows.genoa.actions.join(","));
-  check("hosting: the runners table has the six columns of the design record",
-    seen.runners === "Provider|CLI|Login|Secrets|Test|Actions", seen.runners);
+  /* Runners were removed on 2026-09-24 by the owner's decision: murmur runs on your own
+     machine or a DigitalOcean Droplet, and the tab says nothing else. */
+  check("hosting: there is no runners table, no Connect a runner button and no Runners heading",
+    seen.runners === 0 && !/runner|sandbox/i.test(seen.text), seen.text.slice(0, 300));
+  check("hosting: the head names the two places a farm runs",
+    /your own machine over SSH, or a DigitalOcean Droplet/.test(seen.note)
+    && !/runner|sandbox/i.test(seen.note), seen.note);
   check("hosting: nothing threw drawing the section", thrown.length === 0, thrown[0]);
   await context.close();
 }
 
-/* The runners table: one row per provider, the login states kept apart, and the gap in what
-   this farm can see said out loud. */
-{
-  const { page, context, thrown } = await open();
-  const seen = await page.evaluate(() => {
-    const rows = {};
-    for (const row of document.querySelectorAll("#view .h-runners tbody tr")) {
-      const id = (row.querySelector("[data-host-check]") || {}).getAttribute
-        ? row.querySelector("[data-host-check]").getAttribute("data-host-check") : "?";
-      rows[id] = {
-        cells: [...row.querySelectorAll("td")].map((cell) => cell.innerText.trim()),
-        login: (row.querySelector("td:nth-child(3) .pill-text") || {}).textContent || "",
-        loginWhy: (row.querySelector("td:nth-child(3) .pill") || {}).title || "",
-        test: (row.querySelector("td:nth-child(5) .pill-text") || {}).textContent || "",
-        secretsTitle: (row.querySelector("td:nth-child(4) .h-cell") || {}).title || "",
-        height: Math.round(row.getBoundingClientRect().height),
-      };
-    }
-    const section = [...document.querySelectorAll("#view .section")]
-      .find((node) => node.innerText.startsWith("Hosting"));
-    return { rows, text: section.innerText };
-  });
-  check("hosting: the three runners are drawn, each with its stage",
-    Object.keys(seen.rows).join(",") === "do-agents,railway,vercel"
-    && /preview/.test(seen.rows["do-agents"].cells[0])
-    && /early access/.test(seen.rows.railway.cells[0]),
-    Object.keys(seen.rows).join(","));
-  // The install command is the Install button in the actions column since 2026-09-24, and it
-  // takes the spawn line's place: without the CLI that line spawns nothing.
-  check("hosting: a provider whose CLI is missing offers the command that installs it",
-    /Not installed/.test(seen.rows["do-agents"].cells[1]) && /^Install/.test(seen.rows["do-agents"].cells[5])
-    && !/Spawn/.test(seen.rows["do-agents"].cells[5])
-    && /Installed/.test(seen.rows.railway.cells[1]) && /Spawn/.test(seen.rows.railway.cells[5]),
-    `${seen.rows["do-agents"].cells[1]} | ${seen.rows["do-agents"].cells[5]} | ${seen.rows.railway.cells[5]}`);
-  check("hosting: the three login states are three different pills",
-    seen.rows["do-agents"].login === "Not installed" && seen.rows.railway.login === "Logged in"
-    && seen.rows.vercel.login === "Not logged in",
-    Object.entries(seen.rows).map(([id, row]) => `${id}:${row.login}`).join(" "));
-  check("hosting: secrets are counted, and the account a token was stored for is named",
-    seen.rows.railway.cells[3].startsWith("2 of 2")
-    && /work subscription/.test(seen.rows.railway.cells[3])
-    && seen.rows.vercel.cells[3].startsWith("1 of 2"),
-    `${seen.rows.railway.cells[3]} | ${seen.rows.vercel.cells[3]}`);
-  check("hosting: and the state of each secret by name is on the cell's title",
-    /CLAUDE_CODE_OAUTH_TOKEN: stored \(work subscription\)/.test(seen.rows.railway.secretsTitle)
-    && /CLAUDE_CODE_OAUTH_TOKEN: not stored/.test(seen.rows.vercel.secretsTitle)
-    && /GITHUB_TOKEN: stored/.test(seen.rows.vercel.secretsTitle),
-    `${seen.rows.railway.secretsTitle} | ${seen.rows.vercel.secretsTitle}`);
-  check("hosting: a runner that has never been tested says it has not run live",
-    seen.rows["do-agents"].test === "Not tested"
-    && /not run live/.test(seen.rows["do-agents"].cells[4]),
-    seen.rows["do-agents"].cells[4]);
-  check("hosting: a test that passed and one that failed are two pills",
-    seen.rows.railway.test === "Passed" && seen.rows.vercel.test === "Failed",
-    `${seen.rows.railway.test} | ${seen.rows.vercel.test}`);
-  check("hosting: the gap in what the Accounts windows can see is said beside the runners heading",
-    seen.text.includes("Usage by cloud agents is not in the Accounts windows yet"), seen.text.slice(0, 200));
-  check("hosting: nothing threw drawing the runners", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
 /* A provider that was slow to answer is not a provider you are logged out of. The quiet farm is
-   the state that produces that reading, and a long name is cut rather than wrapped. */
+   the state that produces that reading, on the droplet's login step, and a long name is cut
+   rather than wrapped. */
 {
   const { page, context, thrown } = await open({ state: "quiet" });
+  await page.click("[data-add-machine]");
+  await page.waitForTimeout(500);
+  await page.click("#drawer [data-machine-provider='do-droplet']");
+  await page.waitForTimeout(400);
+  const login = await page.evaluate(() => {
+    const pill = document.querySelector("#drawer .m-wait .pill");
+    return { login: pill ? pill.textContent : "", why: pill ? pill.title : "" };
+  });
+  await page.click("#drawerClose");
+  await page.waitForTimeout(300);
   const seen = await page.evaluate(() => {
-    const row = [...document.querySelectorAll("#view .h-runners tbody tr")]
-      .find((node) => node.innerText.includes("Managed Agents"));
     const long = [...document.querySelectorAll("#view .h-machines tbody tr")]
       .find((node) => node.innerText.includes("the-second-farm"));
     const cell = long ? long.querySelector("td:first-child") : null;
     return {
-      login: row.querySelector("td:nth-child(3) .pill-text").textContent,
-      why: row.querySelector("td:nth-child(3) .pill").title,
       height: long ? Math.round(long.getBoundingClientRect().height) : 0,
       cut: cell ? cell.scrollWidth > cell.clientWidth : false,
       title: cell ? cell.title : "",
     };
   });
   check("hosting: a provider that did not answer wears its own pill, never Not logged in",
-    seen.login === "No answer" && /did not come back in time/.test(seen.why),
-    `${seen.login} | ${seen.why}`);
+    /No answer/.test(login.login) && /did not come back in time/.test(login.why),
+    `${login.login} | ${login.why}`);
   check("hosting: a name too long for its cell is cut, and the cell carries all of it",
     seen.cut && /the-second-farm-for-the-checkout-rewrite/.test(seen.title),
     JSON.stringify(seen).slice(0, 200));
@@ -362,7 +313,7 @@ for (const width of [700, 1024, 1280, 1366, 1440]) {
     const out = [];
     /* Headings too: a fixed column cuts its name as it cuts its cells, and a cut name must
        neither run into the next one nor lose its words. */
-    for (const cell of document.querySelectorAll("#view :is(table.h-machines, table.h-runners, table.m-accounts, table.m-services) :is(td, th):not(.actions)")) {
+    for (const cell of document.querySelectorAll("#view :is(table.h-machines, table.m-accounts, table.m-services) :is(td, th):not(.actions)")) {
       const cut = [cell, ...cell.querySelectorAll("*")].some((node) => node.scrollWidth > node.clientWidth + 1);
       /* The title has to carry what the cell shows, not just any sentence: the visible words,
          whitespace folded, must all be in it. */
@@ -407,9 +358,8 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   }
   check(`hosting: the tab has tables to hold to that rule at ${size.width}`,
     Object.keys(tables).length >= 3, Object.keys(tables).join(", "));
-  check(`hosting: both hosting tables are among them at ${size.width}`,
-    Object.keys(tables).some((name) => name.includes("h-machines"))
-    && Object.keys(tables).some((name) => name.includes("h-runners")),
+  check(`hosting: the machines table is among them at ${size.width}`,
+    Object.keys(tables).some((name) => name.includes("h-machines")),
     Object.keys(tables).join(", "));
   check(`hosting: nothing threw at ${size.width}`, thrown.length === 0, thrown[0]);
   await context.close();
@@ -419,13 +369,27 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
 
 const PENDING = JSON.stringify({ at: "now", pending: "now", providers: [], machines: [] });
 
+/* The machines table is on the tab; the providers list is read by the Add a machine dialog, so
+   its four states are read there. */
+async function openStates(overrides, route) {
+  const opened = await open({ overrides });
+  if (route === "/api/hosts") {
+    await opened.page.click("[data-add-machine]");
+    await opened.page.waitForTimeout(600);
+  }
+  return opened;
+}
+
+const statesText = (page, route) => (route === "/api/hosts"
+  ? page.evaluate(() => document.getElementById("drawerBody").innerText) : hosting(page));
+
 for (const [route, table] of [["/api/machines", "machines"], ["/api/hosts", "hosts"]]) {
   {
-    const { page, context, thrown } = await open({ overrides: { [route]: PENDING } });
-    const seen = await page.evaluate(() => ({
-      skeletons: document.querySelectorAll("#view .skeleton").length,
-      text: document.getElementById("view").innerText,
-    }));
+    const { page, context, thrown } = await openStates({ [route]: PENDING }, route);
+    const seen = await page.evaluate((where) => ({
+      skeletons: document.querySelectorAll(`${where} .skeleton`).length,
+      text: document.querySelector(where).innerText,
+    }), route === "/api/hosts" ? "#drawer" : "#view");
     check(`hosting: ${table} before the farm's first pass is a placeholder, not an error`,
       seen.skeletons > 0 && !/reported a problem/.test(seen.text), `${seen.skeletons} placeholders`);
     check(`hosting: nothing threw while ${table} was pending`, thrown.length === 0, thrown[0]);
@@ -436,12 +400,12 @@ for (const [route, table] of [["/api/machines", "machines"], ["/api/hosts", "hos
       ? JSON.stringify({ at: "now", this: { name: "quartz", address: "127.0.0.1" },
         total_monthly_usd: 0, machines: [] })
       : JSON.stringify({ at: "now", providers: [] });
-    const { page, context, thrown } = await open({ overrides: { [route]: empty } });
-    const text = await hosting(page);
+    const { page, context, thrown } = await openStates({ [route]: empty }, route);
+    const text = await statesText(page, route);
     check(`hosting: an empty ${table} answer says what is missing and how to fill it`,
       route === "/api/machines"
         ? /No machine but this one/.test(text) && /fleet machines list/.test(text)
-        : /This server lists no runner/.test(text) && /fleet update/.test(text),
+        : /lists no provider a machine can run on/.test(text) && /fleet hosts list/.test(text),
       text.slice(0, 300));
     check(`hosting: and the button that fills it is still there (${table})`,
       await page.evaluate(() => Boolean(document.querySelector("[data-add-machine]"))), "");
@@ -449,35 +413,32 @@ for (const [route, table] of [["/api/machines", "machines"], ["/api/hosts", "hos
     await context.close();
   }
   {
-    const { page, context, thrown } = await open({
-      overrides: {
-        [route]: (handler) => handler.fulfill({
-          status: 500, contentType: "application/json",
-          body: JSON.stringify({ error: `${route} did not answer within sixty seconds` }),
-        }),
-      },
-    });
-    const text = await hosting(page);
+    const { page, context, thrown } = await openStates({
+      [route]: (handler) => handler.fulfill({
+        status: 500, contentType: "application/json",
+        body: JSON.stringify({ error: `${route} did not answer within sixty seconds` }),
+      }),
+    }, route);
+    const text = await statesText(page, route);
     check(`hosting: a ${table} route that fails is an error card, not an empty table`,
       /did not answer within sixty seconds|reported a problem/.test(text), text.slice(0, 300));
     check(`hosting: nothing threw while ${table} failed`, thrown.length === 0, thrown[0]);
     await context.close();
   }
   {
-    const { page, context, thrown } = await open({
-      overrides: {
-        [route]: (handler) => handler.fulfill({
-          status: 200, contentType: "application/json",
-          body: JSON.stringify({ at: "now", providers: "not a list", machines: "not a list",
-            this: null }),
-        }),
-      },
-    });
-    const text = await hosting(page);
+    const { page, context, thrown } = await openStates({
+      [route]: (handler) => handler.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({ at: "now", providers: "not a list", machines: "not a list",
+          this: null }),
+      }),
+    }, route);
+    const text = await statesText(page, route);
     check(`hosting: a ${table} answer whose list is not a list leaves the section standing`,
       thrown.length === 0 && text.length > 0, thrown[0]);
     check(`hosting: and it reads as empty, not as a broken table (${table})`,
-      /No machine but this one|This server lists no runner/.test(text), text.slice(0, 200));
+      /No machine but this one|lists no provider a machine can run on/.test(text),
+      text.slice(0, 200));
     await context.close();
   }
 }
@@ -491,7 +452,6 @@ for (const [route, table] of [["/api/machines", "machines"], ["/api/hosts", "hos
   const seen = await page.evaluate(() => ({
     machines: [...document.querySelectorAll("#view .h-machines tbody tr")]
       .map((row) => row.innerText.split(/\s/)[0]),
-    runners: document.querySelectorAll("#view .h-runners tbody tr").length,
     notes: [...document.querySelectorAll("#view [data-hosting-stale]")]
       .map((node) => node.textContent),
     total: (document.querySelector("#view [data-hosting-total]") || {}).textContent || "",
@@ -499,13 +459,11 @@ for (const [route, table] of [["/api/machines", "machines"], ["/api/hosts", "hos
   check("hosting: a stale machines snapshot still draws the rows it last read",
     seen.machines.includes("athens") && seen.machines.includes("haifa"),
     seen.machines.join(","));
-  check("hosting: and says under both tables since when the list is old, and why",
-    seen.notes.length === 2
+  check("hosting: and says under the table since when the list is old, and why",
+    seen.notes.length === 1
     && seen.notes.every((note) => /has not refreshed this list since/.test(note))
     && /fleet machines list did not answer within sixty seconds/.test(seen.notes[0]),
     seen.notes.join(" | "));
-  check("hosting: and the runners this farm last read are still drawn", seen.runners === 3,
-    String(seen.runners));
   check("hosting: a total read from a stale snapshot says it is not fresh",
     /^You pay \$\d+ a month for \d+ machines\. Not refreshed since /.test(seen.total),
     seen.total);
@@ -513,8 +471,8 @@ for (const [route, table] of [["/api/machines", "machines"], ["/api/hosts", "hos
   await context.close();
 }
 
-/* A machines route that fails outright: the card says so, the runners are still drawn, and the
-   head says nothing about money it cannot know. */
+/* A machines route that fails outright: the card says so, and the head says nothing about money
+   it cannot know. */
 {
   const { page, context, thrown } = await open({
     overrides: {
@@ -525,12 +483,8 @@ for (const [route, table] of [["/api/machines", "machines"], ["/api/hosts", "hos
     },
   });
   const text = await hosting(page);
-  const runners = await page.evaluate(() =>
-    document.querySelectorAll("#view .h-runners tbody tr").length);
   check("hosting: a machines route that will not answer is an error card",
     /did not answer within sixty seconds|reported a problem/.test(text), text.slice(0, 300));
-  check("hosting: and the runners this farm last read are still drawn beside it", runners === 3,
-    String(runners));
   check("hosting: the head claims nothing about money it could not read",
     !/You pay/.test(text) && !/Nothing on this list is billed/.test(text), text.slice(0, 200));
   check("hosting: nothing threw on the failing farm", thrown.length === 0, thrown[0]);
@@ -575,8 +529,6 @@ for (const [opener, picker, controls] of [
   ["[data-add-machine]", "[data-machine-provider='do-droplet']",
     "[data-machine-provider], [data-size], [data-region], [data-machine-name], [data-ssh-public],"
     + " [data-machine-plan], [data-machine-create-open]"],
-  ["[data-connect-runner]", "[data-runner-provider='railway']",
-    "[data-runner-provider], [data-test-project], [data-host-test]"],
 ]) {
   let writable = true;
   const { page, context, thrown, posted } = await open({
@@ -672,20 +624,6 @@ for (const [opener, picker, controls] of [
   await context.close();
 }
 
-/* Only a Test that passed clears "not run live" (design section 5). */
-{
-  const { page, context, thrown } = await open();
-  const vercel = await page.evaluate(() => {
-    const row = [...document.querySelectorAll("#view .h-runners tbody tr")]
-      .find((node) => node.innerText.startsWith("Vercel"));
-    return row ? row.querySelector("td:nth-child(5)").innerText : "";
-  });
-  check("hosting: a Test that ran and failed keeps the words not run live",
-    /Failed/.test(vercel) && /not run live/.test(vercel), vercel);
-  check("hosting: nothing threw drawing a failed Test", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
 /* ------------------------------------------------------------- the add a machine dialog */
 
 /* No droplet is bought by one press. The first press names the price and asks; only the second
@@ -700,12 +638,13 @@ for (const [opener, picker, controls] of [
       .map((node) => node.getAttribute("data-machine-provider")),
     text: document.getElementById("drawerBody").innerText,
   }));
-  check("hosting: the dialog offers the two machine providers and no runner",
+  check("hosting: the dialog offers your own machine and a DigitalOcean Droplet, and nothing else",
     steps.providers.join(",") === "ssh,do-droplet", steps.providers.join(","));
   /* The price waits for the pick (owner, 2026-09-24): an unpicked card is its stage and a
      summary, and the picked one carries its price line. */
-  check("hosting: an unpicked provider card carries its stage and no price line",
-    /generally available/.test(steps.text) && !/From \$24 a month/.test(steps.text),
+  check("hosting: an unpicked provider card carries its stage, its summary and no price line",
+    /generally available/.test(steps.text) && /A Linux box you already reach over SSH/.test(steps.text)
+    && /runs the whole farm/.test(steps.text) && !/From \$24 a month/.test(steps.text),
     steps.text.slice(0, 300));
   await page.click("#drawer [data-machine-provider='do-droplet']");
   await page.waitForTimeout(400);
@@ -1156,150 +1095,68 @@ for (const [opener, picker, controls] of [
   await context.close();
 }
 
-/* ------------------------------------------------------------ the connect a runner dialog */
+/* ------------------------------------------------------------ the provider cards */
 
+/* A card before it is picked is its name, its stage and two short lines; the price and the terms
+   wait for the pick (owner, 2026-09-24: "short descriptions, two lines each, and the rest after
+   the choice"). */
 {
-  const { page, context, thrown, sent, posted } = await open();
-  await page.click("[data-connect-runner]");
+  const { page, context, thrown } = await open();
+  await page.click("[data-add-machine]");
   await page.waitForTimeout(600);
-  const cards = await page.evaluate(() => ({
-    providers: [...document.querySelectorAll("#drawer [data-runner-provider]")]
-      .map((node) => node.getAttribute("data-runner-provider")),
-    text: document.getElementById("drawerBody").innerText,
-    doCard: (document.querySelector("#drawer [data-runner-provider='do-agents']") || {}).innerText || "",
-  }));
-  check("hosting: the dialog offers the three runners and no machine provider",
-    cards.providers.join(",") === "do-agents,railway,vercel", cards.providers.join(","));
-  /* A card before it is picked is its name, its stage and two short lines; the price, the
-     terms and the warning wait for the pick (owner, 2026-09-24: "short descriptions, two lines
-     each, and the rest after the choice"). */
+  const card = await page.evaluate(() =>
+    (document.querySelector("#drawer [data-machine-provider='do-droplet']") || {}).innerText || "");
   const lines = await page.evaluate(() => [...document.querySelectorAll("#drawer .m-preset-sum")]
     .map((node) => Math.round(node.getBoundingClientRect().height
       / parseFloat(getComputedStyle(node).lineHeight))));
   check("hosting: an unpicked card is its stage and a summary, with no fine print",
-    /preview/.test(cards.doCard) && /cloud sandboxes/.test(cards.doCard)
-    && !/\$0.25 an hour/.test(cards.doCard) && !/RIC1/.test(cards.doCard), cards.doCard.slice(0, 300));
+    /generally available/.test(card) && /runs the whole farm/.test(card)
+    && !/Powering it off/.test(card), card.slice(0, 300));
   check("hosting: and every summary fits in two lines",
-    lines.length === 3 && lines.every((count) => count <= 2), JSON.stringify(lines));
-  await page.click("#drawer [data-runner-provider='do-agents']");
+    lines.length === 2 && lines.every((count) => count <= 2), JSON.stringify(lines));
+  await page.click("#drawer [data-machine-provider='do-droplet']");
   await page.waitForTimeout(400);
   const picked = await page.evaluate(() =>
-    (document.querySelector("#drawer [data-runner-provider='do-agents']") || {}).innerText || "");
+    (document.querySelector("#drawer [data-machine-provider='do-droplet']") || {}).innerText || "");
   check("hosting: a picked card carries its price and its terms",
-    /\$0.25 an hour/.test(picked) && /RIC1/.test(picked), picked.slice(0, 300));
-  check("hosting: and DigitalOcean's card says it may bill its own inference",
-    /may need DigitalOcean's own inference, billed by DigitalOcean/.test(picked)
-    && /does not show the claude-code adapter taking a subscription token/.test(picked),
-    picked.slice(0, 400));
-  await page.click("#drawer [data-runner-provider='vercel']");
-  await page.waitForTimeout(500);
-  const steps = await page.evaluate(() => ({
-    numbers: [...document.querySelectorAll("#drawer .m-step-no")].map((node) => node.textContent),
-    login: (document.querySelector("#drawer [data-runner-login]") || {}).textContent || "",
-    secrets: [...document.querySelectorAll("#drawer [data-runner-secret]")]
-      .map((node) => node.textContent),
-    spawn: (document.querySelector("#drawer [data-runner-spawn]") || {}).textContent || "",
-    text: document.getElementById("drawerBody").innerText,
-  }));
-  check("hosting: a runner is connected in six numbered steps",
-    steps.numbers.join(",") === "1,2,3,4,5,6", steps.numbers.join(","));
-  check("hosting: the login command is the provider's own, run on this farm",
-    steps.login === "ssh -t farm sandbox login", steps.login);
-  check("hosting: there is one command per secret, and it is the one that stores it",
-    steps.secrets.length === 2
-    && steps.secrets[0] === "ssh -t farm fleet hosts secret vercel CLAUDE_CODE_OAUTH_TOKEN"
-    && steps.secrets[1] === "ssh -t farm fleet hosts secret vercel GITHUB_TOKEN",
-    steps.secrets.join(" | "));
-  check("hosting: each secret says in one line what it is and how to get one",
-    /run claude setup-token/.test(steps.text)
-    && /fine-grained token limited to the project's repository/.test(steps.text)
-    && /the farm pushes, the sandbox never can/.test(steps.text), steps.text.slice(0, 900));
-  check("hosting: a stored secret and a missing one are two states",
-    /Stored/.test(steps.text) && /Not stored/.test(steps.text), steps.text.slice(0, 900));
-  check("hosting: the test says what it starts and what it costs",
-    /Starts the smallest sandbox for about a minute; costs a few cents/.test(steps.text),
-    steps.text.slice(0, 900));
-  check("hosting: the spawn line is the line a person runs, with the runner in it",
-    /^fleet spawn --project .* --lane <name> --engine claude --model sonnet --runner vercel --task "\.\.\."$/
-      .test(steps.spawn), steps.spawn);
-  check("hosting: and the dialog never asks for a secret itself",
-    !/password/i.test(steps.text)
-    && (await page.evaluate(() => document.querySelectorAll("#drawer input").length)) === 0,
-    steps.text.slice(0, 200));
+    /From \$24 a month/.test(picked) && /Powering it off does not/.test(picked),
+    picked.slice(0, 300));
+  check("hosting: nothing threw around the provider cards", thrown.length === 0, thrown[0]);
+  await context.close();
+}
 
-  const before = await page.evaluate(() => {
-    const node = document.querySelector("[data-test-project]");
-    return { value: node.value, shown: node.options[node.selectedIndex].textContent,
-      off: document.querySelector("[data-host-test]").disabled };
+/* The dialog asks the farm again while it waits on a login, and stops the moment it closes. */
+{
+  const { page, context, thrown } = await open({
+    overrides: {
+      "/api/hosts": (handler) => handler.fetch().then(async (answer) => {
+        const payload = await answer.json();
+        for (const row of payload.providers || []) {
+          if (row.id === "do-droplet") row.login_state = "logged_out";
+        }
+        return handler.fulfill({
+          status: 200, contentType: "application/json", body: JSON.stringify(payload),
+        });
+      }),
+    },
   });
-  await page.click("[data-host-test]", { force: true });
-  await page.waitForTimeout(500);
-  check("hosting: a test cannot be started without the project it would clone",
-    before.off === true, JSON.stringify(before));
-  check("hosting: and the select says so, rather than showing a project nobody picked",
-    before.value === "" && before.shown === "Pick a project", JSON.stringify(before));
-  check("hosting: and nothing was sent",
-    !posted.some((url) => url.endsWith("/api/hosts/test")), posted.join(" "));
-  await page.selectOption("#drawer [data-test-project]", "demo");
-  await page.waitForTimeout(400);
-  await page.click("[data-host-test]");
-  await page.waitForTimeout(800);
-  const body = bodyOf(sent, "/api/hosts/test");
-  check("hosting: a test sends the provider, the project and the confirmation it costs money",
-    body && body.provider === "vercel" && body.project === "demo" && body.confirm === true,
-    JSON.stringify(body));
-  let result = "";
-  for (let attempt = 0; attempt < 14 && !/Passed/.test(result); attempt += 1) {
-    await page.waitForTimeout(700);
-    result = await page.evaluate(() => document.getElementById("drawerBody").innerText);
-  }
-  check("hosting: and the result comes back on its own, in the same dialog",
-    /Passed/.test(result) && /git ls-remote for demo/.test(result), result.slice(-300));
-  check("hosting: nothing threw around the runner dialog", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
-/* The row's own Check and Test: one asks the farm, the other opens the dialog on that provider,
-   because a test spends money and the sentence that says so lives there. */
-{
-  const { page, context, thrown, sent } = await open();
-  await page.click("[data-host-check='railway']");
-  await page.waitForTimeout(700);
-  check("hosting: Check on a runner asks the check route with that provider",
-    JSON.stringify(bodyOf(sent, "/api/hosts/check")) === JSON.stringify({ provider: "railway" }),
-    JSON.stringify(bodyOf(sent, "/api/hosts/check")));
-  await page.click("[data-host-open-test='railway']");
-  await page.waitForTimeout(600);
-  const opened = await page.evaluate(() => ({
-    open: !document.getElementById("drawer").hidden,
-    title: document.getElementById("drawerTitle").textContent,
-    chosen: (document.querySelector("#drawer [data-runner-provider][aria-checked='true']") || {})
-      .getAttribute("data-runner-provider"),
-    cost: /costs a few cents/.test(document.getElementById("drawerBody").innerText),
-  }));
-  check("hosting: Test on a row opens the dialog on that provider, at the step that costs money",
-    opened.open && opened.chosen === "railway" && opened.cost, JSON.stringify(opened));
-  check("hosting: nothing threw around the runner row", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
-/* The two dialogs ask the farm again while they are open, and stop the moment they close. */
-{
-  const { page, context, thrown } = await open();
   const asked = [];
   page.on("request", (request) => {
     if (request.method() === "GET" && request.url().includes("/api/hosts")) asked.push(1);
   });
-  await page.click("[data-connect-runner]");
+  await page.click("[data-add-machine]");
   await page.waitForTimeout(500);
-  await page.click("#drawer [data-runner-provider='railway']");
+  await page.click("#drawer [data-machine-provider='do-droplet']");
   await page.waitForTimeout(4000);
   const whileOpen = asked.length;
-  await page.click("#drawerClose");
+  /* The Machine tab reads /api/hosts on its own three second tick, so the dialog's own asking is
+     only visible from a tab that does not: leaving the tab closes the dialog, and from then on
+     every request for the providers would be the dialog's clock still running. */
+  await page.evaluate(() => { location.hash = "#/queue"; });
   await page.waitForTimeout(400);
   const atClose = asked.length;
   await page.waitForTimeout(4000);
-  check("hosting: an open runner dialog keeps asking the farm for the state it is watching",
+  check("hosting: an open dialog keeps asking the farm for the login it is watching",
     whileOpen >= 2, `${whileOpen} in four seconds`);
   check("hosting: and a dialog that was closed stops its own asking",
     asked.length === atClose, JSON.stringify({ whileOpen, atClose, later: asked.length }));
@@ -1312,7 +1169,7 @@ for (const [opener, picker, controls] of [
   const { page, context, sent } = await open();
   await page.click("[data-machine-check='athens']");
   await page.waitForTimeout(500);
-  await page.click("[data-host-check='railway']");
+  await page.click("[data-machine-check='brussels']");
   await page.waitForTimeout(500);
   const hosting = sent.filter((row) => /\/api\/(machines|hosts)/.test(row.url));
   check("hosting: every write it sends is to a route of the design record", hosting.length >= 2,
@@ -1370,7 +1227,7 @@ for (const [opener, picker, controls] of [
   const hosts = await (await fetch(`${BASE}/api/hosts`)).json();
   const machines = await (await fetch(`${BASE}/api/machines`)).json();
   const HOST_KEYS = ["id", "label", "job", "stage", "cli_installed", "login_state", "account",
-    "detail", "checked_at", "secrets", "tested", "login", "install", "terms", "pricing", "sizes",
+    "detail", "checked_at", "login", "install", "terms", "pricing", "sizes",
     "regions", "cli", "color", "engines", "docs", "summary"].sort().join(",");
   const MACHINE_KEYS = ["name", "provider", "user", "address", "size", "monthly_usd", "region",
     "state", "detail", "checked_at", "finish_command", "tunnel_command", "provider_id"]

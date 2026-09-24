@@ -3,10 +3,9 @@
 # in ~/.fleet/models-state.json and is set by `fleet models enable|disable|test`, so this file
 # stays a clean description and the toggles never rewrite it.
 #
-# This example carries the two models a farm starts with. Every other service (Gemini CLI, Qwen
-# Code, Kimi Code, OpenCode, Aider, Ollama, a command of your own) is a PRESET in
-# lib/model_presets.py: add it from the dashboard's "Add a model", which writes the entry into
-# your own ~/.config/fleet/models.toml with source = "added".
+# This example carries the two engines murmur ships, Claude Code and Codex. An engine is added by
+# a PRESET in lib/model_presets.py (a contribution, see CONTRIBUTING.md): the dashboard's "Add a
+# model" writes a preset's entry into your own ~/.config/fleet/models.toml with source = "added".
 #
 # Fields per [model]:
 #   label        human name for the catalog

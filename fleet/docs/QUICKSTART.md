@@ -6,12 +6,17 @@ are in [`sharp-edges.md`](sharp-edges.md).
 
 Substitute your own values for `<FARM_HOST>`, `<PROJECT>`, `<OWNER>/<REPO>` and `<LANE>`.
 
+murmur runs Claude Code and Codex, on your own machine or on a DigitalOcean Droplet. Those are the
+two engines and the two places we have run for real; anything else is a contribution
+([`CONTRIBUTING.md`](../../CONTRIBUTING.md)).
+
 ---
 
 ### 1. Get a box with systemd
 
-Any Ubuntu (22.04 or newer) or comparable systemd distribution: a spare desktop, a VM, a cloud
-instance. It needs CPU and RAM rather than a GPU. Everything below runs as an ordinary user, and
+Any Ubuntu (22.04 or newer) or comparable systemd distribution: a spare desktop, a VM, a
+DigitalOcean Droplet (the dashboard's Machine tab can create one for you, `fleet machines create`
+from a terminal). It needs CPU and RAM rather than a GPU. Everything below runs as an ordinary user, and
 nothing in the fleet needs root.
 
 ```bash

@@ -1,7 +1,7 @@
 /* Hosting. Every class here is prefixed h- and every colour is a token from app.css, so this
    file can be linked after app.css and machine.css without taking anything of its own with it.
 
-   The owner's rule for a table decides most of this file: every cell of both tables is exactly
+   The owner's rule for a table decides most of this file: every cell of the table is exactly
    one line. A long value is cut with an ellipsis and carries its full text in a title, and the
    Actions cell keeps its buttons on one line and lets the wrapper scroll instead of wrapping
    them under each other, which is the one thing that makes two rows different heights. */
@@ -10,37 +10,25 @@
 .h-name b { overflow: hidden; text-overflow: ellipsis; }
 .h-name .muted { font-size: 11px; flex: none; }
 
-/* A pill and the word beside it: the word yields, the pill never does. */
-.h-cell { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
-.h-cell .pill { flex: 0 0 auto; }
-.h-cell .cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-
 /* The actions are as wide as the buttons in them, and no row's buttons ever wrap. */
 .h-do { flex-wrap: nowrap; }
 tbody td.h-do-cell { max-width: none; overflow: visible; }
 
 .h-machines th:first-child, .h-machines td:first-child { min-width: 140px; }
-/* The account a token was stored under is the widest thing a person did not ask for, so it is
-   the first thing to yield: it is cut here and carried in full by the cell's title. */
-.h-runners .h-cell .cell-text { max-width: 96px; }
-/* The two buttons of the head are one group: a head too narrow for them moves both, rather
-   than leaving one of them alone on a second line. */
+/* The buttons of the head are one group: a head too narrow for them moves them together, rather
+   than leaving one alone on a second line. */
 .h-head-do { flex-wrap: nowrap; }
 /* This farm is the row a reader starts from, so it is marked, quietly. */
 .h-this td { background: var(--surface-2); }
 
 .h-stage { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 
-/* The provider and size cards in the two dialogs, on the add-model dialog's pattern. */
+/* The provider and size cards in the add a machine dialog, on the add-model dialog's pattern. */
 .h-sizes { display: grid; gap: 8px; }
 .h-size { display: grid; gap: 2px; text-align: left; }
 .h-size.chosen { border-color: var(--accent); background: var(--accent-soft); }
 .h-size .muted { font-size: 12px; }
 .h-price { font-family: var(--font-mono); color: var(--text); font-size: 12px; }
-
-/* One secret, with the command that stores it and the state that flips by itself. */
-.h-secret { display: grid; gap: 6px; }
-.h-secret p { margin: 0; font-size: 12px; line-height: 1.4; }
 
 /* What will run, and the file a new machine boots with: read-only, scrollable, copyable. */
 .h-block { display: grid; gap: 6px; }

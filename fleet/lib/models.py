@@ -82,11 +82,15 @@ def effective(mid, cat=None, st=None):
     """Catalog entry merged with runtime state → the full picture for one model."""
     cat = cat if cat is not None else catalog()
     st = st if st is not None else _state()
-    if mid not in cat:
+    # A top-level key that is not a table (`mymodel = "on"`, typed by hand) is not a model, and a
+    # farm's hand-edited catalog must never take the listing down with it.
+    if mid not in cat or not isinstance(cat[mid], dict):
         return None
+    if not isinstance(st, dict):
+        st = {}
     m = dict(cat[mid])
     m["id"] = mid
-    srec = st.get(mid, {})
+    srec = st.get(mid) if isinstance(st.get(mid), dict) else {}
     # The catalog's `health` is the tiny PROMPT a test request sends; the state's `health` is how
     # the last test went, and that is what every reader means by the word. The prompt gets its
     # own name here before the state overwrites it: without this the test request asked the
@@ -105,6 +109,7 @@ def effective(mid, cat=None, st=None):
     m["source"] = "added" if str(m.get("source") or "") == "added" else "shipped"
     m["variant"] = str(m.get("variant") or "")
     m["preset"] = str(m.get("preset") or "")
+    m["in_catalog"], m["catalog_note"] = catalog_standing(mid, m)
     m["models_on"] = models_on(m)
     m["default_model"] = default_model(m)
     # a model is routable only if switched on AND its last health test passed (native engines,
@@ -116,9 +121,34 @@ def effective(mid, cat=None, st=None):
     return m
 
 
+SHIPPED_ENGINES = ("claude", "codex")
+
+
+def catalog_standing(mid, m):
+    """(in the catalog, the sentence that says how to take it out when it is not).
+
+    murmur ships Claude Code and Codex, and model_presets.py carries a preset for each engine it
+    knows. A farm that added Gemini CLI, Grok Build or a Custom command before those presets were
+    removed (2026-09-24) still has that table in its models.toml, and nothing here deletes it: the
+    row is read as it always was and is marked as not in the catalog, with the one sentence that
+    says how its owner takes it out. A row with no preset is in the catalog when its engine is
+    one murmur ships."""
+    preset = str((m or {}).get("preset") or "").strip()
+    engine = str((m or {}).get("engine") or "").strip()
+    known = PRESETS.by_id(preset) is not None if preset else engine in SHIPPED_ENGINES
+    if known:
+        return True, ""
+    how = f"delete its [{mid}] table from {CONFIG}"
+    if str((m or {}).get("source") or "") == "added":
+        how = f"press Remove on its row in the dashboard's models table, or {how}"
+    return False, ("Not in murmur's catalog: murmur ships Claude Code and Codex. This farm's "
+                   f"own models.toml still lists it, and nothing removes it for you. To take it "
+                   f"out, {how}.")
+
+
 def listing():
     cat, st = catalog(), _state()
-    return [effective(mid, cat, st) for mid in cat]
+    return [m for m in (effective(mid, cat, st) for mid in cat) if m is not None]
 
 
 def health_check(mid):
@@ -236,7 +266,7 @@ def _unescape(m):
 
 
 # The keys the lane parsers read an agent's words from (parse_generic.words_of, parse_codex's
-# item.text, stream-json message content), and Gemini's response. Usage, ids and error fields are
+# item.text, stream-json message content), and a top-level response. Usage, ids and error fields are
 # never among them, so a 42 in a token count or a request id is not an answer.
 _REPLY_KEYS = ("response", "text", "message", "content", "delta", "data", "result", "item")
 # Where a CLI keeps its bookkeeping. A reply key nested under one of these is a count or a label,
@@ -382,7 +412,7 @@ def _shquote(s):
 
 def _fill(template, binp, task, variant=""):
     """One invocation template with this farm's answers in it. {variant} is the model the command
-    runs (`ollama run llama3.1 ...`, `qwen --model qwen3-coder-plus ...`); it is substituted
+    runs (`mycli run my-model ...`, `mycli --model my-model ...`); it is substituted
     here, shell-quoted, never left to bash: `opus[1m]` unquoted is a glob."""
     return (str(template).replace("{bin}", binp)
             .replace("{variant}", _shquote(str(variant or "")))
@@ -589,6 +619,9 @@ def remove_model(mid):
     if not model:
         return None, f"no such model: {mid}"
     if model.get("source") != "added":
+        if not model.get("in_catalog", True):
+            return None, (f"{mid} was written into this farm's models.toml by hand, not added "
+                          f"here: delete its [{mid}] table from {CONFIG}")
         return None, (f"{mid} came with fleet: switch it off here, or edit this farm's "
                       "models.toml by hand")
     if not os.path.exists(CONFIG):

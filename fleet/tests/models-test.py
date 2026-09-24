@@ -40,9 +40,10 @@ def check(name, cond, detail=""):
 print("presets")
 
 _ids = [p["id"] for p in P.PRESETS]
-check("every service the dialog offers has a preset",
-      _ids == ["claude", "codex", "gemini", "qwen", "kimi", "grok", "opencode", "aider", "ollama",
-               "custom"], str(_ids))
+check("murmur ships a preset for Claude Code and one for Codex, and no other",
+      _ids == ["claude", "codex"], str(_ids))
+check("the free-form Custom command is gone with its constant",
+      not hasattr(P, "CUSTOM") and P.by_id("custom") is None)
 
 _fields = ("id", "label", "color", "kind", "engine", "bin", "install_hint", "pull_hint",
            "auth_env", "run", "health", "tos", "access", "variants", "docs")
@@ -63,38 +64,6 @@ check("nothing in the presets is dated",
               for w in ("today", "2025", "2026", "prepared, do not enable")))
 
 _by = {p["id"]: p for p in P.PRESETS}
-check("Gemini CLI runs the command its own docs give, with the chosen model named in it",
-      _by["gemini"]["run"] == "{bin} -m {variant} -p {task} --output-format json"
-      and _by["gemini"]["install_hint"] == "npm install -g @google/gemini-cli"
-      and _by["gemini"]["auth_env"] == "GEMINI_API_KEY")
-check("Qwen Code names the model it runs with --model",
-      _by["qwen"]["run"] == "{bin} --model {variant} -p {task} --output-format stream-json"
-      and _by["qwen"]["install_hint"] == "npm install -g @qwen-code/qwen-code"
-      and _by["qwen"]["auth_env"] == "QWEN_CODE_API_KEY")
-check("Kimi Code names the key plan as the permitted path, not the subscription",
-      "forbid non-interactive use" in _by["kimi"]["tos"]
-      and "api key" in _by["kimi"]["access"].lower()
-      and _by["kimi"]["auth_env"] == "KIMI_API_KEY")
-check("Grok Build is xAI's own CLI, headless on the API key, with the model on the command line",
-      _by["grok"]["install_hint"] == "curl -fsSL https://x.ai/cli/install.sh | bash"
-      and _by["grok"]["run"] == ("{bin} --no-auto-update --always-approve -p {task} -m {variant} "
-                                 "--output-format streaming-json")
-      and _by["grok"]["auth_env"] == "XAI_API_KEY"
-      and _by["grok"]["variants"])
-check("OpenCode runs `opencode run -m` and installs from its own script",
-      _by["opencode"]["run"] == "{bin} run -m {variant} {task}"
-      and _by["opencode"]["install_hint"] == "curl -fsSL https://opencode.ai/install | bash"
-      and "ANTHROPIC_API_KEY" in _by["opencode"]["access"])
-check("Aider runs one message on the chosen model and answers its own prompts",
-      _by["aider"]["run"] == "{bin} --model {variant} --message {task} --yes"
-      and _by["aider"]["install_hint"] == "pip install aider-chat")
-check("Ollama is local: a variant in the command, an install and a pull",
-      _by["ollama"]["kind"] == "local"
-      and _by["ollama"]["run"] == "{bin} run {variant} {task}"
-      and _by["ollama"]["variants"] == ["llama3.1", "qwen2.5-coder", "deepseek-coder"]
-      and _by["ollama"]["pull_hint"] == "ollama pull <variant>"
-      and _by["ollama"]["install_hint"] == "curl -fsSL https://ollama.com/install.sh | sh")
-check("Ollama needs no key at all", _by["ollama"]["auth_env"] == "")
 check("a preset that offers a choice of models puts {variant} in the command it runs: a choice "
       "the command line has no room for would never reach the model",
       all("{variant}" in p["run"] for p in P.PRESETS if p["variants"]),
@@ -102,80 +71,178 @@ check("a preset that offers a choice of models puts {variant} in the command it 
 check("a native engine offers no choice here: its lane picks the model, not this catalog row",
       _by["claude"]["variants"] == [] and _by["codex"]["variants"] == [],
       str(_by["claude"]["variants"]))
-check("Custom command ships no defaults: the operator names the command",
-      _by["custom"]["bin"] == "" and _by["custom"]["run"] == "")
 check("a subscription preset holds no key variable",
       all(_by[p]["auth_env"] == "" for p in ("claude", "codex")))
-check("every preset that is not Custom points at the vendor's docs",
-      all(p["docs"].startswith("https://") for p in P.PRESETS if p["id"] != "custom"))
+check("every preset points at the vendor's docs",
+      all(p["docs"].startswith("https://") for p in P.PRESETS))
 check("the shipped list is copied out, so a caller cannot edit it",
       (lambda rows: (rows[0].__setitem__("label", "scribbled"),
                      P.PRESETS[0]["label"] == "Claude Code")[1])(P.presets()))
 
+# ---------------------------------------------------------------- a contributed engine
+#
+# The list is how an engine is added: a contributor appends one dict to model_presets.PRESETS.
+# The mechanism behind it (entry_from, add_model, the generic launcher, the Test) is checked below
+# on three fictional contributions, put into the list for the length of a block and taken out
+# again, so the proof is that one dict is all a contributor has to write.
+
+DEMO_CLI = {
+    "id": "democli",
+    "label": "Demo CLI",
+    "color": "#3A6EA5",
+    "kind": "key",
+    "engine": "generic",
+    "bin": "democli",
+    "install_hint": "install democli so that `democli` is on this farm's PATH",
+    "pull_hint": "",
+    "auth_env": "DEMOCLI_API_KEY",
+    "run": "{bin} -m {variant} -p {task} --output-format json",
+    "health": P.HEALTH,
+    "tos": "a documented non-interactive mode",
+    "access": "an API key in DEMOCLI_API_KEY, billed per token",
+    "variants": ["demo-large", "demo-small"],
+    "docs": "https://example.invalid/democli",
+}
+DEMO_LOCAL = {
+    "id": "demo-local",
+    "label": "Demo local",
+    "color": "#4FA07A",
+    "kind": "local",
+    "engine": "generic",
+    "bin": "demolocal",
+    "install_hint": "install demolocal so that `demolocal` is on this farm's PATH",
+    "pull_hint": "demolocal pull <variant>",
+    "auth_env": "",
+    "run": "{bin} run {variant} {task}",
+    "health": P.HEALTH,
+    "tos": "runs on this machine, so there are no service terms to keep",
+    "access": "nothing: it runs on this farm's own hardware",
+    "variants": ["demo-7b", "demo-13b"],
+    "docs": "https://example.invalid/demolocal",
+}
+# A contribution that leaves the command to the operator: no bin and no run of its own.
+DEMO_BARE = {
+    "id": "demo-bare",
+    "label": "Demo template",
+    "color": "#8A8F98",
+    "kind": "key",
+    "engine": "generic",
+    "bin": "",
+    "install_hint": "",
+    "pull_hint": "",
+    "auth_env": "",
+    "run": "",
+    "health": P.HEALTH,
+    "tos": "whatever the command you name allows",
+    "access": "however the command you name is paid for",
+    "variants": [],
+    "docs": "https://example.invalid/demo-bare",
+}
+DEMOS = (DEMO_CLI, DEMO_LOCAL, DEMO_BARE)
+
+
+@contextlib.contextmanager
+def contributed(*extra):
+    """model_presets.PRESETS with these fictional presets appended, restored afterwards."""
+    import copy
+    shipped = P.PRESETS
+    P.PRESETS = shipped + [copy.deepcopy(p) for p in (extra or DEMOS)]
+    try:
+        yield
+    finally:
+        P.PRESETS = shipped
+
+
+check("the fictional contributions carry every field a shipped preset does",
+      all(set(_fields) <= set(p) for p in DEMOS))
+
+with contributed():
+    check("a contributed dict is offered wherever the shipped ones are",
+          [p["id"] for p in P.presets()] == ["claude", "codex", "democli", "demo-local",
+                                              "demo-bare"]
+          and P.by_id("democli")["label"] == "Demo CLI")
+check("and it is gone again once it is taken out of the list",
+      [p["id"] for p in P.PRESETS] == ["claude", "codex"] and P.by_id("democli") is None)
+
 print()
 print("building a catalog entry from a preset")
 
-_entry, _err = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-check("a preset plus a variant is a complete entry",
-      _err == "" and _entry["bin"] == "gemini" and _entry["engine"] == "generic"
-      and _entry["variant"] == "gemini-2.5-pro" and _entry["preset"] == "gemini"
-      and _entry["access"].startswith("an API key"), str(_err))
-check("the entry carries no kind, variants or docs: those describe the service, not the row",
-      not ({"kind", "variants", "docs"} & set(_entry)))
+with contributed():
+    _entry, _err = P.entry_from("democli", {"variant": "demo-large"})
+    check("a preset plus a variant is a complete entry",
+          _err == "" and _entry["bin"] == "democli" and _entry["engine"] == "generic"
+          and _entry["variant"] == "demo-large" and _entry["preset"] == "democli"
+          and _entry["access"].startswith("an API key"), str(_err))
+    check("the entry carries no kind, variants or docs: those describe the service, not the row",
+          not ({"kind", "variants", "docs"} & set(_entry)))
+    check("with no name given, the entry carries the preset's own label",
+          _entry["label"] == "Demo CLI", str(_entry.get("label")))
 
-_entry, _err = P.entry_from("ollama", {"variant": "qwen2.5-coder"})
-check("a local runner keeps {variant} in its command for the launcher to fill",
-      _err == "" and _entry["run"] == "{bin} run {variant} {task}"
-      and _entry["variant"] == "qwen2.5-coder", str(_err))
+    _entry, _err = P.entry_from("demo-local", {"variant": "demo-13b"})
+    check("a local runner keeps {variant} in its command for the launcher to fill",
+          _err == "" and _entry["run"] == "{bin} run {variant} {task}"
+          and _entry["variant"] == "demo-13b", str(_err))
 
-_entry, _err = P.entry_from("ollama", {})
-check("a command that needs a model refuses without one, and names the choices",
-      _entry is None and "llama3.1" in _err, str(_err))
+    _entry, _err = P.entry_from("demo-local", {})
+    check("a command that needs a model refuses without one, and names the choices",
+          _entry is None and "demo-7b" in _err, str(_err))
 
-_entry, _err = P.entry_from("custom", {"bin": "mycli", "run": "{bin} --do {task}"})
-check("Custom command takes the operator's own bin and run",
-      _err == "" and _entry["bin"] == "mycli" and _entry["run"] == "{bin} --do {task}", str(_err))
+    _entry, _err = P.entry_from("demo-bare", {"bin": "mycli", "run": "{bin} --do {task}"})
+    check("a preset takes the operator's own bin and run",
+          _err == "" and _entry["bin"] == "mycli" and _entry["run"] == "{bin} --do {task}",
+          str(_err))
 
-check("a custom command carries no label of its own: the name is the operator's",
-      _entry.get("label", "") == "", str(_entry.get("label")))
+    _entry, _err = P.entry_from("democli", {"variant": "demo-large", "bin": "/opt/demo/bin/democli",
+                                            "run": "{bin} --model {variant} {task}",
+                                            "auth_env": "DEMO_OTHER_KEY"})
+    check("and a preset that has its own bin, run and key variable takes the operator's over them",
+          _err == "" and _entry["bin"] == "/opt/demo/bin/democli"
+          and _entry["run"] == "{bin} --model {variant} {task}"
+          and _entry["auth_env"] == "DEMO_OTHER_KEY", str(_err))
 
-_entry, _err = P.entry_from("custom", {"bin": "mycli", "run": "{bin} --do {task}",
-                                       "label": "Nightly release notes"})
-check("and a name a person gives is the one kept",
-      _err == "" and _entry["label"] == "Nightly release notes", str(_err))
+    _entry, _err = P.entry_from("demo-bare", {"bin": "mycli", "run": "{bin} --do {task}",
+                                              "label": "Nightly release notes"})
+    check("and a name a person gives is the one kept",
+          _err == "" and _entry["label"] == "Nightly release notes", str(_err))
 
-_entry, _err = P.entry_from("custom", {"bin": "mycli", "run": "{bin} --do {task}",
-                                       "label": "x" * 200})
-check("a name too long for a table is refused, not truncated in silence",
-      _entry is None and "name" in _err, str(_err))
+    _entry, _err = P.entry_from("demo-bare", {"bin": "mycli", "run": "{bin} --do {task}",
+                                              "label": "x" * 200})
+    check("a name too long for a table is refused, not truncated in silence",
+          _entry is None and "name" in _err, str(_err))
 
-_entry, _err = P.entry_from("custom", {"run": "{bin} --do {task}"})
-check("Custom command without a bin is refused", _entry is None and "bin" in _err, str(_err))
+    _entry, _err = P.entry_from("demo-bare", {"run": "{bin} --do {task}"})
+    check("a preset with no bin, given none, is refused", _entry is None and "bin" in _err,
+          str(_err))
 
-_entry, _err = P.entry_from("custom", {"bin": "mycli"})
-check("Custom command without a command line is refused",
-      _entry is None and "run" in _err, str(_err))
+    _entry, _err = P.entry_from("demo-bare", {"bin": "mycli"})
+    check("a preset with no command line, given none, is refused",
+          _entry is None and "run" in _err, str(_err))
 
-_entry, _err = P.entry_from("custom", {"bin": "mycli", "run": "{bin} --do"})
-check("a command line that never mentions the task is refused",
-      _entry is None and "{task}" in _err, str(_err))
+    _entry, _err = P.entry_from("demo-bare", {"bin": "mycli", "run": "{bin} --do"})
+    check("a command line that never mentions the task is refused",
+          _entry is None and "{task}" in _err, str(_err))
 
-_entry, _err = P.entry_from("nope", {})
-check("a preset nobody ships is refused by name",
-      _entry is None and "nope" in _err, str(_err))
+    _entry, _err = P.entry_from("nope", {})
+    check("a preset nobody ships is refused by name",
+          _entry is None and "nope" in _err, str(_err))
 
-_entry, _err = P.entry_from("gemini", {"variant": "pro; rm -rf /"})
-check("a variant that is not a model name never reaches a command line",
-      _entry is None and "model name" in _err, str(_err))
+    _entry, _err = P.entry_from("democli", {"variant": "pro; rm -rf /"})
+    check("a variant that is not a model name never reaches a command line",
+          _entry is None and "model name" in _err, str(_err))
 
-_entry, _err = P.entry_from("custom", {"bin": "mycli", "run": "{bin} -p {task}",
-                                       "variant": "qwen3-coder"})
-check("a model name a command line has nowhere to put is refused, not quietly dropped",
-      _entry is None and "{variant}" in _err, str(_err))
+    _entry, _err = P.entry_from("demo-bare", {"bin": "mycli", "run": "{bin} -p {task}",
+                                              "variant": "demo-coder"})
+    check("a model name a command line has nowhere to put is refused, not quietly dropped",
+          _entry is None and "{variant}" in _err, str(_err))
 
-_entry, _err = P.entry_from("gemini", {"auth_env": "my key"})
-check("a key variable that is not a variable name is refused",
-      _entry is None and "environment variable" in _err, str(_err))
+    _entry, _err = P.entry_from("democli", {"variant": "demo-large", "auth_env": "my key"})
+    check("a key variable that is not a variable name is refused",
+          _entry is None and "environment variable" in _err, str(_err))
+
+for _gone in ("gemini", "qwen", "kimi", "grok", "opencode", "aider", "ollama", "custom"):
+    _entry, _err = P.entry_from(_gone, {"variant": "x", "bin": "x", "run": "{bin} {task}"})
+    check(f"a removed preset can no longer be added: {_gone}",
+          _entry is None and "no such preset" in _err, str(_err))
 
 
 @contextlib.contextmanager
@@ -207,42 +274,44 @@ def toml_of(path):
 print()
 print("writing this farm's own catalog")
 
-with farm() as room:
-    entry, err = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-    entry["id"] = "gemini"
+with farm() as room, contributed():
+    entry, err = P.entry_from("democli", {"variant": "demo-large"})
+    entry["id"] = "democli"
     model, err = M.add_model(entry)
-    check("adding a model answers the new row", err == "" and model["id"] == "gemini", str(err))
+    check("adding a model answers the new row", err == "" and model["id"] == "democli", str(err))
     check("the row is marked as one this farm added", model["source"] == "added")
     check("the row carries how it is paid for, and which model it runs",
-          model["access"].startswith("an API key") and model["variant"] == "gemini-2.5-pro")
+          model["access"].startswith("an API key") and model["variant"] == "demo-large")
     check("the catalog is created from the shipped example on the first write, keeping both "
           "models fleet ships",
-          set(toml_of(M.CONFIG)) == {"claude", "codex", "gemini"}, str(set(toml_of(M.CONFIG))))
+          set(toml_of(M.CONFIG)) == {"claude", "codex", "democli"}, str(set(toml_of(M.CONFIG))))
     check("a shipped row stays shipped", M.effective("claude")["source"] == "shipped")
     check("the new model is in the listing once, not twice",
-          [m["id"] for m in M.listing()].count("gemini") == 1)
+          [m["id"] for m in M.listing()].count("democli") == 1)
+    check("a row added from a contributed preset is in the catalog, with no note",
+          model["in_catalog"] is True and model["catalog_note"] == "", model["catalog_note"])
 
-with farm():
-    entry, _ = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-    M.add_model(dict(entry, id="gemini"))
-    model, err = M.add_model(dict(entry, id="gemini"))
+with farm(), contributed():
+    entry, _ = P.entry_from("democli", {"variant": "demo-large"})
+    M.add_model(dict(entry, id="democli"))
+    model, err = M.add_model(dict(entry, id="democli"))
     check("the same id is refused the second time",
           model is None and "already" in err, str(err))
     model, err = M.add_model(dict(entry, id="claude"))
     check("an id a shipped model already holds is refused",
           model is None and "already" in err, str(err))
 
-with farm():
-    entry, _ = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-    for bad in ("Gemini", "2fast", "a", "gem ini", "gem/ini", "x" * 32, ""):
+with farm(), contributed():
+    entry, _ = P.entry_from("democli", {"variant": "demo-large"})
+    for bad in ("Democli", "2fast", "a", "demo cli", "demo/cli", "x" * 32, ""):
         model, err = M.add_model(dict(entry, id=bad))
         check(f"an id a table name cannot hold is refused: {bad!r}",
               model is None and "model id" in err, str(err))
     check("a refused add leaves no catalog behind", not os.path.exists(M.CONFIG))
 
-with farm():
-    entry, _ = P.entry_from("custom", {"bin": "mycli",
-                                       "run": 'mycli --say "hi" --path C:\\tools {task}'})
+with farm(), contributed():
+    entry, _ = P.entry_from("demo-bare", {"bin": "mycli",
+                                          "run": 'mycli --say "hi" --path C:\\tools {task}'})
     model, err = M.add_model(dict(entry, id="mine"))
     check("a quote and a backslash survive the write", err == "", str(err))
     check("the catalog reads back exactly what was asked for",
@@ -256,21 +325,26 @@ with farm():
           err == "" and toml_of(M.CONFIG)["newline"]["label"] == "two\nlines", str(err))
 
 print()
-print("what a custom command is called")
+print("what a row is called")
 
-with farm():
-    _mine, _ = P.entry_from("custom", {"bin": "mycli", "run": "{bin} --do {task}"})
-    M.add_model(dict(_mine, id="nightly"))
-    _yours, _ = P.entry_from("custom", {"bin": "othercli", "run": "{bin} {task}"})
-    M.add_model(dict(_yours, id="triage"))
-    _named, _ = P.entry_from("custom", {"bin": "thirdcli", "run": "{bin} {task}",
-                                        "label": "Release notes"})
+with farm(), contributed():
+    # An entry that names nothing is called by its id, so two of them are two names in the
+    # table, not one name twice.
+    M.add_model({"id": "nightly", "engine": "generic", "bin": "mycli", "run": "{bin} --do {task}"})
+    M.add_model({"id": "triage", "engine": "generic", "bin": "othercli", "run": "{bin} {task}",
+                 "label": ""})
+    _named, _ = P.entry_from("demo-bare", {"bin": "thirdcli", "run": "{bin} {task}",
+                                           "label": "Release notes"})
     M.add_model(dict(_named, id="notes"))
-    check("two custom commands are two names in the table, not one name twice",
+    _plain, _ = P.entry_from("democli", {"variant": "demo-small"})
+    M.add_model(dict(_plain, id="demo2"))
+    check("an entry with no name is called by its id, so two are two names in the table",
           [M.effective(mid)["label"] for mid in ("nightly", "triage")] == ["nightly", "triage"],
           str([M.effective(mid)["label"] for mid in ("nightly", "triage")]))
     check("a name the person gave is the one the row shows",
           M.effective("notes")["label"] == "Release notes", M.effective("notes")["label"])
+    check("a row added with no name of its own shows its preset's label",
+          M.effective("demo2")["label"] == "Demo CLI", M.effective("demo2")["label"])
     check("and a preset's own label is still its label",
           M.effective("claude")["label"] == "Claude Code")
 
@@ -301,11 +375,11 @@ def beside(path):
     return sorted(entry.name for entry in pathlib.Path(path).parent.iterdir())
 
 
-with farm():
-    _entry, _ = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-    M.add_model(dict(_entry, id="gemini"))
+with farm(), contributed():
+    _entry, _ = P.entry_from("democli", {"variant": "demo-large"})
+    M.add_model(dict(_entry, id="democli"))
     _before = pathlib.Path(M.CONFIG).read_text()
-    _local, _ = P.entry_from("ollama", {"variant": "llama3.1"})
+    _local, _ = P.entry_from("demo-local", {"variant": "demo-7b"})
     with replace_fails():
         _model, _err = M.add_model(dict(_local, id="local"))
     check("an add that cannot finish leaves the operator's catalog exactly as it was",
@@ -315,36 +389,36 @@ with farm():
     check("and leaves nothing half written beside it", beside(M.CONFIG) == ["models.toml"],
           str(beside(M.CONFIG)))
     with replace_fails():
-        _removed, _err = M.remove_model("gemini")
+        _removed, _err = M.remove_model("democli")
     check("a remove that cannot finish leaves it as it was too",
           pathlib.Path(M.CONFIG).read_text() == _before and _removed is None
           and "could not write" in _err, str(_err))
     check("so the row is still there to try again",
-          "gemini" in toml_of(M.CONFIG) and beside(M.CONFIG) == ["models.toml"],
+          "democli" in toml_of(M.CONFIG) and beside(M.CONFIG) == ["models.toml"],
           str(beside(M.CONFIG)))
 
 print()
 print("taking a model back out")
 
-with farm() as room:
-    entry, _ = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-    M.add_model(dict(entry, id="gemini"))
-    secret = pathlib.Path(M._secret_path("gemini"))
+with farm() as room, contributed():
+    entry, _ = P.entry_from("democli", {"variant": "demo-large"})
+    M.add_model(dict(entry, id="democli"))
+    secret = pathlib.Path(M._secret_path("democli"))
     secret.parent.mkdir(parents=True, exist_ok=True)
     secret.write_text("sk-not-a-real-key\n")
-    M.set_enabled("gemini", False)
-    removed, err = M.remove_model("gemini")
-    check("a model this farm added can be removed", removed == "gemini" and err == "", str(err))
-    check("its table is gone from the catalog", "gemini" not in toml_of(M.CONFIG))
+    M.set_enabled("democli", False)
+    removed, err = M.remove_model("democli")
+    check("a model this farm added can be removed", removed == "democli" and err == "", str(err))
+    check("its table is gone from the catalog", "democli" not in toml_of(M.CONFIG))
     check("the two shipped models are untouched", set(toml_of(M.CONFIG)) == {"claude", "codex"})
     check("its stored key is deleted with it", not secret.exists())
-    check("its runtime state is deleted with it", "gemini" not in M._state())
+    check("its runtime state is deleted with it", "democli" not in M._state())
     check("removing it twice says so, rather than failing quietly",
-          M.remove_model("gemini") == (None, "no such model: gemini"))
+          M.remove_model("democli") == (None, "no such model: democli"))
 
-with farm():
-    entry, _ = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-    M.add_model(dict(entry, id="gemini"))
+with farm(), contributed():
+    entry, _ = P.entry_from("democli", {"variant": "demo-large"})
+    M.add_model(dict(entry, id="democli"))
     removed, err = M.remove_model("claude")
     check("a model fleet ships cannot be removed from here",
           removed is None and "came with fleet" in err, str(err))
@@ -353,13 +427,13 @@ with farm():
     check("removing something that was never there is an answer, not a crash",
           removed is None and "no such model" in err, str(err))
 
-with farm():
-    entry, _ = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-    M.add_model(dict(entry, id="gemini"))
-    M.add_model(dict((P.entry_from("ollama", {"variant": "llama3.1"})[0]), id="local"))
+with farm(), contributed():
+    entry, _ = P.entry_from("democli", {"variant": "demo-large"})
+    M.add_model(dict(entry, id="democli"))
+    M.add_model(dict((P.entry_from("demo-local", {"variant": "demo-7b"})[0]), id="local"))
     pathlib.Path(M.CONFIG).write_text(
         pathlib.Path(M.CONFIG).read_text().replace("[local]", "# a note about local\n[local]"))
-    M.remove_model("gemini")
+    M.remove_model("democli")
     check("a comment written above the next table stays with that table",
           "# a note about local" in pathlib.Path(M.CONFIG).read_text()
           and set(toml_of(M.CONFIG)) == {"claude", "codex", "local"})
@@ -371,32 +445,32 @@ print("a catalog that parses to an empty document")
 # tables at all. That is a valid, empty catalog: the page must read it as "no models here yet"
 # and still be able to write the next one. Only a file that is not TOML is a file to fix by hand.
 
-with farm():
+with farm(), contributed():
     pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(M.CONFIG).write_text("# every row this farm had has been taken back out\n")
     check("a catalog of comments is an empty catalog, not the shipped example",
           M.catalog() == {}, str(M.catalog()))
-    entry, _ = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-    model, err = M.add_model(dict(entry, id="gemini"))
+    entry, _ = P.entry_from("democli", {"variant": "demo-large"})
+    model, err = M.add_model(dict(entry, id="democli"))
     check("and a model can still be added to it without a hand edit",
           err == "" and model is not None, str(err))
     check("the operator's own comment is still at the top of the file",
           pathlib.Path(M.CONFIG).read_text().startswith("# every row"))
 
-with farm():
+with farm(), contributed():
     pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(M.CONFIG).write_text("")
     check("an empty file is an empty catalog too", M.catalog() == {}, str(M.catalog()))
-    entry, _ = P.entry_from("ollama", {"variant": "llama3.1"})
+    entry, _ = P.entry_from("demo-local", {"variant": "demo-7b"})
     model, err = M.add_model(dict(entry, id="local"))
     check("and it takes the first row like any other catalog",
           err == "" and set(toml_of(M.CONFIG)) == {"local"}, str(err))
 
-with farm():
+with farm(), contributed():
     pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(M.CONFIG).write_text('[half\nthis is not TOML at all\n')
-    entry, _ = P.entry_from("gemini", {"variant": "gemini-2.5-pro"})
-    model, err = M.add_model(dict(entry, id="gemini"))
+    entry, _ = P.entry_from("democli", {"variant": "demo-large"})
+    model, err = M.add_model(dict(entry, id="democli"))
     check("a catalog that is not TOML is still sent back to the operator",
           model is None and "could not be read as TOML" in err, str(err))
     check("and it is left exactly as it was found",
@@ -462,7 +536,7 @@ RUNTIME = {"broken": {"enabled": True, "health": "fail", "health_detail": "auth 
 @contextlib.contextmanager
 def machine(installed, env=None):
     """A farm holding exactly these commands, and nothing else on its PATH: a status must not
-    come out different on a machine that happens to have gemini installed."""
+    come out different on a machine that happens to have democli installed."""
     import json
     with farm() as room:
         pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
@@ -605,21 +679,22 @@ check("a test request carries the catalog's prompt, not the state's word",
 with farm() as room:
     _bin = room / "bin"
     _bin.mkdir()
-    _grok = _bin / "grokfail"
-    # What Grok Build prints for a key or model it cannot use: its own name, "grok models",
-    # carries the letters OK, and a Test that matched letters passed it.
-    _grok.write_text("#!/bin/sh\n"
-                     "echo '{\"type\":\"error\",\"message\":\"Could not set model grok-4.7: "
-                     "unknown model id. Run grok models to see available models.\"}'\n"
-                     "exit 1\n")
-    _grok.chmod(0o755)
+    _broke = _bin / "brokefail"
+    # What a CLI prints for a key or model it cannot use: its own name, "brokecli models", and
+    # "tokens" carry the letters OK, and a Test that matched letters passed it.
+    _broke.write_text("#!/bin/sh\n"
+                      "echo '{\"type\":\"error\",\"message\":\"Could not set model demo-large: "
+                      "unknown model id. Run brokecli models to see available models; no tokens "
+                      "were spent.\"}'\n"
+                      "exit 1\n")
+    _broke.chmod(0o755)
     pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(M.CONFIG).write_text(
-        '[grokfail]\nlabel = "Grok"\nengine = "generic"\nbin = "%s"\n'
+        '[brokefail]\nlabel = "Broke"\nengine = "generic"\nbin = "%s"\n'
         'run = "{bin} -p {task}"\nhealth = "%s"\nsource = "added"\n'
-        % (_grok, P.HEALTH))
-    _health, _detail, _limits = M.health_check("grokfail")
-check("a failing CLI whose error mentions grok or tokens does not pass the Test",
+        % (_broke, P.HEALTH))
+    _health, _detail, _limits = M.health_check("brokefail")
+check("a failing CLI whose error holds the letters OK inside a word does not pass the Test",
       _health == "fail", f"{_health}: {_detail}")
 
 print()
@@ -658,30 +733,30 @@ check("the answer in a stream-json message passes",
 check("the answer in a codex item passes",
       M.answered('{"type":"item.completed","item":{"type":"agent_message","text":"42"}}'))
 
-# Gemini's --output-format json writes one object across many lines (JSON.stringify(o, null, 2)),
-# so no line parses alone and a line reader took its stats for words.
-_GEMINI = ('{\n  "response": "%s",\n  "stats": {\n    "models": {\n      "gemini-2.5-pro": {\n'
-           '        "tokens": {\n          "input": 42\n        }\n      }\n    }\n  }\n}\n')
+# A CLI whose --output-format json writes one object across many lines (JSON.stringify(o, null,
+# 2)): no line parses alone, and a line reader took its stats for words.
+_INDENTED = ('{\n  "response": "%s",\n  "stats": {\n    "models": {\n      "demo-large": {\n'
+             '        "tokens": {\n          "input": 42\n        }\n      }\n    }\n  }\n}\n')
 check("an indented JSON reply whose only 42 is a token count does not pass",
-      not M.answered(_GEMINI % "I cannot answer"))
-check("an indented JSON reply that says 42 passes", M.answered(_GEMINI % "42"))
+      not M.answered(_INDENTED % "I cannot answer"))
+check("an indented JSON reply that says 42 passes", M.answered(_INDENTED % "42"))
 
 with farm() as room:
     _health, _detail, _limits = fake_model(
-        room, "geminiwrong", "cat <<'JSON'\n%sJSON\n" % (_GEMINI % "I cannot answer"), P.HEALTH)
-check("a Gemini-shaped CLI that answers wrong fails the Test even with 42 in its stats",
+        room, "indentwrong", "cat <<'JSON'\n%sJSON\n" % (_INDENTED % "I cannot answer"), P.HEALTH)
+check("an indented-JSON CLI that answers wrong fails the Test even with 42 in its stats",
       _health == "fail", f"{_health}: {_detail}")
 
 with farm() as room:
     _health, _detail, _limits = fake_model(
-        room, "geminiright", "cat <<'JSON'\n%sJSON\n" % (_GEMINI % "42"), P.HEALTH)
-check("a Gemini-shaped CLI whose response is 42 passes the Test",
+        room, "indentright", "cat <<'JSON'\n%sJSON\n" % (_INDENTED % "42"), P.HEALTH)
+check("an indented-JSON CLI whose response is 42 passes the Test",
       _health == "ok", f"{_health}: {_detail}")
 
 # A notice before the document (a cached-settings line, an update hint) made the whole stdout
 # unparseable, and the line reader then took the document's stats for words. Once any JSON
 # document parses, only its reply fields count and nothing printed around it does.
-_NOTICE = "Notice: using cached settings\n" + _GEMINI
+_NOTICE = "Notice: using cached settings\n" + _INDENTED
 check("a notice before an indented JSON reply whose only 42 is a token count does not pass",
       not M.answered(_NOTICE % "I cannot answer"))
 check("a notice before an indented JSON reply that says 42 passes",
@@ -786,23 +861,23 @@ print("a key never goes through this page")
 # name, so the casing a client happens to use cannot walk one past it, and on the command line
 # itself, because a key pasted in there was written into models.toml verbatim.
 
-with farm():
+with farm(), contributed():
     _refused = []
     for _field in ("key", "apiKey", "API_KEY", "x-api-key", "Token", "Secret", "credential"):
         _status, _payload = SERVER.add_model_request(
-            {"preset": "gemini", "id": "g1", "variant": "gemini-2.5-pro",
+            {"preset": "democli", "id": "g1", "variant": "demo-large",
              _field: "sk-live-not-a-real-key"})
         _refused.append((_field, _status, "never goes through this page"
                          in str(_payload.get("error", ""))))
     check("a credential is refused whatever the field is called",
           all(status == 400 and said for _f, status, said in _refused), str(_refused))
     _status, _payload = SERVER.add_model_request(
-        {"preset": "custom", "id": "c1", "bin": "echo",
+        {"preset": "demo-bare", "id": "c1", "bin": "echo",
          "run": "{bin} --api-key sk-live-not-a-real-key -p {task}"})
     check("a key pasted into the command line never reaches the catalog",
           _status == 400 and not os.path.exists(M.CONFIG), str(_payload))
     _status, _payload = SERVER.add_model_request(
-        {"preset": "custom", "id": "mine", "bin": "mycli",
+        {"preset": "demo-bare", "id": "mine", "bin": "mycli",
          "run": "{bin} --api-key $MY_API_KEY -p {task}", "auth_env": "MY_API_KEY"})
     check("a command that reads its key from the environment is still written",
           _status == 200, str(_payload))
@@ -810,8 +885,8 @@ with farm():
 print()
 print("where a test request runs")
 
-# Pressing Test runs a real coding agent, and some of them (aider says so in its own tos line)
-# edit and commit in the directory they are started in. The dashboard's working directory is the
+# Pressing Test runs a real coding agent, and some of them edit and commit in the directory they
+# are started in. The dashboard's working directory is the
 # fleet checkout, so the command gets an empty room of its own instead.
 
 with farm() as room:
@@ -856,7 +931,7 @@ def launchcmd(room, mid, taskfile="/tmp/no-such-task"):
     return done.stdout.strip()
 
 
-with farm() as room:
+with farm() as room, contributed():
     _bin = room / "bin"
     _bin.mkdir(exist_ok=True)
     _argv = room / "argv.txt"
@@ -868,17 +943,17 @@ with farm() as room:
     _secret = pathlib.Path(M._secret_path("g2"))
     _secret.parent.mkdir(parents=True, exist_ok=True)
     _secret.write_text("not-a-real-key\n")
-    _entry, _err = P.entry_from("gemini", {"variant": "gemini-2.5-flash", "bin": str(_tool)})
+    _entry, _err = P.entry_from("democli", {"variant": "demo-small", "bin": str(_tool)})
     _model, _err = M.add_model(dict(_entry, id="g2"))
     _health, _detail, _limits = M.health_check("g2")
     _seen = _argv.read_text().split() if _argv.exists() else []
     _cmd = launchcmd(room, "g2")
 check("a test request runs the model the person picked, not the CLI's default",
-      "gemini-2.5-flash" in _seen, str(_seen))
+      "demo-small" in _seen, str(_seen))
 check("and the test request still passes on a CLI that answers", _health == "ok",
       f"{_health}: {_detail}")
 check("the line the launcher runs carries the model too",
-      "gemini-2.5-flash" in _cmd and "$(cat " in _cmd, _cmd)
+      "demo-small" in _cmd and "$(cat " in _cmd, _cmd)
 
 print()
 print("the one model rule")
@@ -887,7 +962,7 @@ print("the one model rule")
 # digit first, so no name can ever be read as an option by the CLI it is handed to.
 
 for _name in ("sonnet", "opus[1m]", "sonnet[1m]", "claude-opus-4-6[1m]", "gpt-6-sol",
-              "kimi-code/kimi-for-coding", "qwen2.5-coder:7b", "MiniMax-M2.5"):
+              "demo-code/demo-for-coding", "demo2.5-coder:7b", "MiniMax-M2.5"):
     check(f"the rule takes {_name}", bool(P.MODEL_RE.match(_name)))
 for _name in ("-rf", "--model", "", "a b", "x;rm", "$(id)", "'q'", "a" * 81, "[1m]"):
     check(f"the rule refuses {_name[:20]!r}", not P.MODEL_RE.match(_name))
@@ -895,23 +970,17 @@ check("VARIANT_RE is gone: one rule, not two", not hasattr(P, "VARIANT_RE"))
 check("every preset whose command takes a model offers a docs list for the Add dialog",
       all(p["variants"] for p in P.PRESETS if "{variant}" in p["run"]),
       str([p["id"] for p in P.PRESETS if "{variant}" in p["run"] and not p["variants"]]))
-check("every generic preset except Custom now carries {variant} in its run",
-      all("{variant}" in p["run"] for p in P.PRESETS
-          if p["engine"] == "generic" and p["id"] != "custom"))
-check("the model flags are the ones each CLI documents",
-      "--model {variant}" in _by["qwen"]["run"] and "-m {variant}" in _by["kimi"]["run"]
-      and "run -m {variant}" in _by["opencode"]["run"]
-      and "--model {variant}" in _by["aider"]["run"])
+check("every generic preset carries {variant} in its run",
+      all("{variant}" in p["run"] for p in P.PRESETS if p["engine"] == "generic"))
 
 
 # ---------------------------------------------------------------- a sandbox for the rest
 #
 # Every check below runs in a throwaway world: its own FLEET_CONFIG, FLEET_STATE and HOME, and a
-# PATH whose first directory holds fake `codex`, `opencode` and `claude` executables that write
-# down their argv and never reach a provider. The Qwen and Kimi files hold a planted fake key.
+# PATH whose first directory holds fake `codex` and `claude` executables that write down their
+# argv and never reach a provider. The fake codex prints a planted fake key when it fails.
 
 PLANTED = "sk-planted-fake-key-0123456789abcdef"
-PLANTED_TOKEN = "planted-kimi-token-9876543210"
 FLEET_BIN = pathlib.Path(__file__).resolve().parent.parent / "bin" / "fleet"
 
 CODEX_JSON = """{"models": [
@@ -924,35 +993,6 @@ CODEX_JSON = """{"models": [
  {"slug": "gpt-6-luna", "display_name": "GPT-6 Luna", "visibility": "list",
   "base_instructions": "a long prompt nobody asked for"}
 ]}"""
-
-QWEN_SETTINGS = """{
-  "security": {"auth": {"selectedType": "openai"}},
-  "modelProviders": {
-    "openai": [
-      {"id": "qwen3-coder-plus", "name": "Qwen3 Coder Plus",
-       "description": "coding, key %s inside", "baseUrl": "https://example.invalid/v1",
-       "envKey": "QWEN_KEY", "apiKey": "%s",
-       "generationConfig": {"timeout": 60000}},
-      {"id": "glm-5", "name": "GLM-5"}
-    ]
-  },
-  "env": {"QWEN_API_KEY": "%s"}
-}""" % (PLANTED, PLANTED, PLANTED)
-
-KIMI_CONFIG = """default_model = "kimi-code/kimi-for-coding"
-
-[providers.kimi-code]
-type = "kimi"
-base_url = "https://example.invalid/coding/v1"
-api_key = "%s"
-
-[models."kimi-code/kimi-for-coding"]
-provider = "kimi-code"
-model = "kimi-for-coding"
-display_name = "Kimi for Coding %s"
-max_context_size = 262144
-""" % (PLANTED_TOKEN, PLANTED_TOKEN)
-
 
 def _fake(path, body):
     path.write_text("#!/bin/sh\n" + body)
@@ -980,17 +1020,10 @@ def world(catalog=None, state=None):
               '    *) cat "$HOME/codex-models.json";;\n'
               '  esac\n  exit 0\nfi\nexit 9\n')
         (home / "codex-models.json").write_text(CODEX_JSON)
-        _fake(bins / "opencode", record + 'if [ "$1" = "models" ]; then\n'
-              '  printf "openai/gpt-6-sol\\nanthropic/claude-sonnet-5\\n\\nopenai/gpt-6-sol\\n"\n'
-              '  exit 0\nfi\nexit 9\n')
         _fake(bins / "claude", record + "exit 9\n")
         for tool in ("tmux", "systemctl", "hq", "gh"):
             _fake(bins / tool, "exit 0\n")
         _fake(bins / "systemd-run", record + "exit 0\n")
-        (home / ".qwen").mkdir()
-        (home / ".qwen" / "settings.json").write_text(QWEN_SETTINGS)
-        (home / ".kimi").mkdir()
-        (home / ".kimi" / "config.toml").write_text(KIMI_CONFIG)
         (home / ".claude").mkdir()
         (home / ".claude" / ".credentials.json").write_text("{}")
         (config / "policy.toml").write_text("[hq]\nenabled = false\n")
@@ -1001,7 +1034,7 @@ def world(catalog=None, state=None):
         env = {"HOME": str(home), "FLEET_CONFIG": str(config), "FLEET_STATE": str(st),
                "PATH": str(bins) + ":/usr/local/bin:/usr/bin:/bin",
                "CODEX_BIN": str(bins / "codex"), "CLAUDE_BIN": str(bins / "claude"),
-               "OLLAMA_HOST": "127.0.0.1:9", "FLEET_LHM_URL": "http://127.0.0.1:9"}
+               "FLEET_LHM_URL": "http://127.0.0.1:9"}
         names = list(env) + ["FLEET_CODEX_MODEL", "CODEX_DEFAULT_MODEL", "FLEET_CODEX_BIN"]
         kept = {name: os.environ.get(name) for name in names}
         old = (M.CONFIG, M.STATE)
@@ -1028,66 +1061,19 @@ def fleet(*args, timeout=60):
 import model_discovery as D  # noqa: E402
 
 PROVIDERS = """
-[qwen]
-label  = "Qwen Code"
+[demo]
+label  = "Demo, written by hand"
 engine = "generic"
-preset = "qwen"
-bin    = "qwen"
-run    = "{bin} --model {variant} -p {task}"
-variant = "qwen3-coder-plus"
-source = "added"
-
-[kimi]
-label  = "Kimi Code"
-engine = "generic"
-preset = "kimi"
-bin    = "kimi"
+bin    = "democli"
 run    = "{bin} -m {variant} -p {task}"
-variant = "kimi-code/kimi-for-coding"
+variant = "demo-large"
 source = "added"
 
-[opencode]
-label  = "OpenCode"
+[fixedcli]
+label  = "Fixed, added before models"
 engine = "generic"
-preset = "opencode"
-bin    = "opencode"
-run    = "{bin} run -m {variant} {task}"
-variant = "openai/gpt-6-sol"
-source = "added"
-
-[ollama]
-label  = "Ollama local"
-engine = "generic"
-preset = "ollama"
-bin    = "ollama"
-run    = "{bin} run {variant} {task}"
-variant = "llama3.1"
-source = "added"
-
-[gemini]
-label  = "Gemini CLI"
-engine = "generic"
-preset = "gemini"
-bin    = "gemini"
-run    = "{bin} -m {variant} -p {task}"
-variant = "gemini-2.5-pro"
-source = "added"
-
-[oldqwen]
-label  = "Qwen, added before models"
-engine = "generic"
-preset = "qwen"
-bin    = "qwen"
+bin    = "fixedcli"
 run    = "{bin} -p {task}"
-source = "added"
-
-[mine]
-label  = "Mine"
-engine = "generic"
-preset = "custom"
-bin    = "mine"
-run    = "{bin} --model {variant} {task}"
-variant = "house-model"
 source = "added"
 """
 
@@ -1108,7 +1094,21 @@ def discover_cli(provider):
 
 
 def leaked(*texts):
-    return [t[:80] for t in texts if PLANTED in str(t) or PLANTED_TOKEN in str(t)]
+    return [t[:80] for t in texts if PLANTED in str(t)]
+
+
+@contextlib.contextmanager
+def contributed_discovery(pid, docs, route=None):
+    """A contributor's discovery for preset `pid`: its docs list in DOCS and, when it can list
+    its models, its function in ROUTES. Both are taken out again afterwards."""
+    D.DOCS[pid] = docs
+    if route is not None:
+        D.ROUTES[pid] = route
+    try:
+        yield
+    finally:
+        D.DOCS.pop(pid, None)
+        D.ROUTES.pop(pid, None)
 
 
 print()
@@ -1136,34 +1136,6 @@ with world(full_catalog()) as (room, calls):
     check("an id that would read as an option is dropped, not offered",
           _codex and "-rf" not in [m["id"] for m in _codex["models"]])
 
-    _qwen, _done = discover_cli("qwen")
-    check("Qwen Code is read from ~/.qwen/settings.json modelProviders",
-          _qwen and [m["id"] for m in _qwen["models"]] == ["qwen3-coder-plus", "glm-5"]
-          and _qwen["source"] == "account", str(_qwen))
-    check("the planted key in the Qwen file is in no answer, no stdout and no stderr",
-          not leaked(json_text := __import__("json").dumps(_qwen), _done.stdout, _done.stderr),
-          str(leaked(json_text, _done.stdout, _done.stderr)))
-    check("and a key written into a description is scrubbed out of it",
-          _qwen and "[redacted]" in _qwen["models"][0]["description"], str(_qwen))
-    _human = fleet("models", "discover", "qwen")
-    check("the human listing leaks no key either",
-          not leaked(_human.stdout, _human.stderr) and "qwen3-coder-plus" in _human.stdout,
-          _human.stdout)
-
-    _kimi, _done = discover_cli("kimi")
-    check("Kimi Code is read from ~/.kimi/config.toml [models.*], keyed by the alias kimi -m takes",
-          _kimi and [m["id"] for m in _kimi["models"]] == ["kimi-code/kimi-for-coding"]
-          and _kimi["source"] == "account", str(_kimi))
-    check("the planted token in the Kimi file is in no answer, stdout or stderr",
-          not leaked(__import__("json").dumps(_kimi), _done.stdout, _done.stderr), str(_kimi))
-
-    _open, _done = discover_cli("opencode")
-    check("OpenCode is asked with `opencode models`, without --refresh",
-          "opencode models" in calls.read_text() and "--refresh" not in calls.read_text())
-    check("and each provider/model line is one model, once",
-          _open and [m["id"] for m in _open["models"]]
-          == ["openai/gpt-6-sol", "anthropic/claude-sonnet-5"], str(_open))
-
     _claude, _done = discover_cli("claude")
     check("Claude Code answers the docs list, and the claude binary is never run",
           _claude and _claude["source"] == "docs" and _claude["error"] == ""
@@ -1180,108 +1152,82 @@ with world(full_catalog()) as (room, calls):
     check("and the docs descriptions never carry it",
           _claude and all("usage credits" not in m["description"] for m in _claude["models"]),
           str(_claude))
-    _gem, _done = discover_cli("gemini")
-    check("Gemini CLI answers the docs list, holding no key and calling nothing",
-          _gem and _gem["source"] == "docs" and "gemini-2.5-pro" in
-          [m["id"] for m in _gem["models"]], str(_gem))
-    _mine, _done = discover_cli("mine")
-    check("a custom command has no list, and says so rather than answering the press with nothing",
-          _mine == {"source": "docs", "models": [], "error": D.FAILURES["no_list"]}, str(_mine))
-    check("every preset but Custom has a way to list its models: a route or a documented list "
-          "(Grok Build arrived after the lists were written and its button did nothing)",
-          all(p["id"] == "custom" or p["id"] in D.ROUTES or D.DOCS.get(p["id"])
-              for p in P.PRESETS),
+    _demo, _done = discover_cli("demo")
+    check("a hand-written generic row has no list, and says so rather than answering the press "
+          "with nothing",
+          _demo == {"source": "docs", "models": [], "error": D.FAILURES["no_list"]}, str(_demo))
+    check("every preset has a way to list its models: a route or a documented list",
+          all(p["id"] in D.ROUTES or D.DOCS.get(p["id"]) for p in P.PRESETS),
           str([p["id"] for p in P.PRESETS
-               if p["id"] != "custom" and p["id"] not in D.ROUTES and not D.DOCS.get(p["id"])]))
-    _grok = D.discover({"preset": "grok", "id": "grok"})
-    check("Grok Build answers its documented models",
-          [m["id"] for m in _grok["models"]] == ["grok-4.7", "grok-build-0.1"] and not _grok["error"],
-          str(_grok))
+               if p["id"] not in D.ROUTES and not D.DOCS.get(p["id"])]))
+    check("the removed presets' lists and routes are gone with them",
+          set(D.DOCS) == {"claude", "codex"} and set(D.ROUTES) == {"codex"},
+          str((sorted(D.DOCS), sorted(D.ROUTES))))
     _none = fleet("models", "discover", "nosuch")
     check("an unknown provider is a sentence and a non-zero exit",
           _none.returncode != 0 and "no such provider" in _none.stderr, _none.stderr)
-    check("no discovery sent a prompt: the only calls were the two listing commands",
-          all(line.split()[:3] in (["codex", "debug", "models"], ["opencode", "models"])
+    check("no discovery sent a prompt: the only call was the one listing command",
+          all(line.split()[:3] == ["codex", "debug", "models"]
               for line in calls.read_text().splitlines()), calls.read_text())
 
+# A contributor's preset brings its docs list, and a function to ROUTES when its CLI can list
+# models. The route returns (rows, secrets): every secret it read on the way is scrubbed out of
+# the answer, and a row whose id the scrub changed is dropped.
+with world() as (room, calls), contributed(DEMO_CLI):
+    _demo_docs = [{"id": "demo-large", "label": "Demo Large", "description": ""},
+                  {"id": "demo-small", "label": "Demo Small", "description": ""}]
 
-class _Tags(__import__("http.server").server.BaseHTTPRequestHandler):
-    body = b""
-    status = 200
-    seen = []
+    def _listing(row):
+        return [D.keep("demo-xl", "Demo XL", "the big one"), D.keep("demo-mini", "Demo Mini")], []
 
-    def do_GET(self):
-        _Tags.seen.append(self.path)
-        self.send_response(_Tags.status)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(_Tags.body)
+    with contributed_discovery("democli", _demo_docs, _listing):
+        _row = {"id": "democli", "preset": "democli", "engine": "generic"}
+        _answer = D.discover(_row)
+        check("a contributed route answers from the account",
+              _answer["source"] == "account" and _answer["error"] == ""
+              and [m["id"] for m in _answer["models"]] == ["demo-xl", "demo-mini"], str(_answer))
+    with contributed_discovery("democli", _demo_docs):
+        check("a contributed preset with no route answers its docs list",
+              D.discover(_row) == {"source": "docs", "models": _demo_docs, "error": ""},
+              str(D.discover(_row)))
 
-    def do_POST(self):
-        _Tags.seen.append("POST " + self.path)
-        self.send_response(500)
-        self.end_headers()
+    def _leaky(row):
+        return ([D.keep("secretword/demo-large", "Large", "holds secretword"),
+                 D.keep("glm-5", "GLM-5", "says secretword too")], ["secretword"])
 
-    def log_message(self, *_args):
-        pass
-
-
-@contextlib.contextmanager
-def ollama_stub(body, status=200):
-    import http.server
-    import threading
-    _Tags.body, _Tags.status, _Tags.seen = body, status, []
-    server = http.server.HTTPServer(("127.0.0.1", 0), _Tags)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"127.0.0.1:{server.server_address[1]}"
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
-with world(full_catalog()) as (room, calls):
-    with ollama_stub(b'{"models": [{"name": "llama3.1:latest", "size": 1, "details": {}},'
-                     b' {"name": "qwen2.5-coder:7b", "digest": "abc"}]}') as where:
-        os.environ["OLLAMA_HOST"] = where
-        _oll, _done = discover_cli("ollama")
-        _seen = list(_Tags.seen)
-    check("Ollama is read from GET /api/tags on this machine",
-          _seen == ["/api/tags"], str(_seen))
-    check("and every pulled model is offered, name as id",
-          _oll and [m["id"] for m in _oll["models"]] == ["llama3.1:latest", "qwen2.5-coder:7b"]
-          and _oll["source"] == "account", str(_oll))
-    with ollama_stub(b"<html>not json</html>") as where:
-        os.environ["OLLAMA_HOST"] = where
-        _oll, _done = discover_cli("ollama")
-    check("an Ollama answer that is not JSON is its fixed sentence, with the docs list",
-          _oll and _oll["error"] == D.FAILURES["unreadable"] and _oll["source"] == "docs"
-          and _oll["models"], str(_oll))
-    os.environ["OLLAMA_HOST"] = "127.0.0.1:9"
-    _oll, _done = discover_cli("ollama")
-    check("no Ollama running is its fixed sentence",
-          _oll and _oll["error"] == D.FAILURES["unreachable"], str(_oll))
-
-with world(full_catalog()) as (room, calls):
-    (room / "home" / ".qwen" / "settings.json").write_text(__import__("json").dumps({
-        "security": {"auth": {"selectedType": "dashscope"}},
-        "modelProviders": {"dashscope": [{"id": "dashscope/qwen3-coder-plus", "name": "Plus"},
-                                      {"id": "glm-5", "name": "GLM-5"}]}}))
-    _qwen = D.discover(M.effective("qwen"))
+    with contributed_discovery("democli", _demo_docs, _leaky):
+        _answer = D.discover(_row)
     check("a row whose id the scrub changed is dropped, never offered as [redacted]/...",
-          [m["id"] for m in _qwen["models"]] == ["glm-5"], str(_qwen))
+          [m["id"] for m in _answer["models"]] == ["glm-5"], str(_answer))
+    check("and a secret the route read is scrubbed out of every description",
+          "secretword" not in __import__("json").dumps(_answer)
+          and "[redacted]" in _answer["models"][0]["description"], str(_answer))
     _only = D.scrubbed({"source": "account", "error": "",
                         "models": [{"id": "secretword/x", "label": "x", "description": ""}]},
                        ["secretword"])
     check("and an answer left with no row keeps no redacted id", _only["models"] == [], str(_only))
-    (room / "home" / ".qwen" / "settings.json").write_text(__import__("json").dumps({
-        "security": {"auth": {"selectedType": "dashscope"}},
-        "modelProviders": {"dashscope": [{"id": "dashscope/qwen3-coder-plus"}]}}))
-    _qwen = D.discover(M.effective("qwen"))
+
+    def _all_secret(row):
+        return [D.keep("secretword/demo-large")], ["secretword"]
+
+    with contributed_discovery("democli", _demo_docs, _all_secret):
+        _answer = D.discover(_row)
     check("an account list the scrub emptied is the docs list and its sentence",
-          _qwen["source"] == "docs" and _qwen["error"] == D.FAILURES["empty"]
-          and _qwen["models"], str(_qwen)[:200])
+          _answer["source"] == "docs" and _answer["error"] == D.FAILURES["empty"]
+          and [m["id"] for m in _answer["models"]] == ["demo-large", "demo-small"],
+          str(_answer)[:200])
+
+    def _broken(row):
+        raise RuntimeError("a route that broke")
+
+    with contributed_discovery("democli", _demo_docs, _broken):
+        _answer = D.discover(_row)
+    check("a contributed route that raises is a fixed sentence and the docs list, not a trace",
+          _answer["source"] == "docs" and _answer["error"] == D.FAILURES["unreadable"]
+          and _answer["models"] == _demo_docs, str(_answer))
+check("and the contribution is gone from discovery once it is taken out",
+      "democli" not in D.DOCS and "democli" not in D.ROUTES
+      and D.method({"preset": "democli", "engine": "generic"}) == "")
 
 print()
 print("every failure is a fixed sentence")
@@ -1295,6 +1241,10 @@ with world(full_catalog()) as (room, calls):
           and [m["id"] for m in _c["models"]][:1] == ["gpt-6-sol"], str(_c))
     check("and nothing the CLI printed reaches the answer",
           not leaked(_done.stdout, _done.stderr) and "not json" not in _done.stdout)
+    _human = fleet("models", "discover", "codex")
+    check("the human listing leaks nothing the CLI printed either",
+          not leaked(_human.stdout, _human.stderr) and "not json" not in _human.stdout
+          and "gpt-6-sol" in _human.stdout, _human.stdout)
     (home / "codex-mode").write_text("fail")
     _c, _done = discover_cli("codex")
     check("codex exiting non-zero: the CLI exited with an error, its stderr kept out",
@@ -1309,15 +1259,6 @@ with world(full_catalog()) as (room, calls):
     _c, _done = discover_cli("codex")
     check("codex missing: the CLI is not installed",
           _c and _c["error"] == "the CLI is not installed", str(_c))
-    os.remove(home / ".qwen" / "settings.json")
-    _q, _done = discover_cli("qwen")
-    check("no Qwen settings file: the file is missing",
-          _q and _q["error"] == "the file is missing" and _q["source"] == "docs", str(_q))
-    (home / ".kimi" / "config.toml").write_text('api_key = "%s"\n[models\nbroken' % PLANTED)
-    _k, _done = discover_cli("kimi")
-    check("a Kimi file that is not TOML: its output could not be read, no key in it",
-          _k and _k["error"] == "its output could not be read"
-          and not leaked(_done.stdout, _done.stderr), str(_k))
     _old = D.TIMEOUT
     D.TIMEOUT = 1
     (home / "codex-mode").write_text("slow")
@@ -1456,7 +1397,7 @@ with world() as (room, calls):
           str(_now) + str(_errs))
 
 with world(full_catalog()) as (room, calls):
-    _no = fleet("models", "on", "oldqwen", "glm-5")
+    _no = fleet("models", "on", "fixedcli", "glm-5")
     check("a provider whose command cannot take a model says so and writes nothing",
           _no.returncode != 0 and "its own settings choose" in _no.stderr, _no.stderr)
     check("GET /api/engines rows carry models_on and default_model",
@@ -1467,14 +1408,13 @@ print()
 print("the model reaches the lane")
 
 LANE_CATALOG = """
-[fakeqwen]
-label   = "Fake Qwen"
+[fakedemo]
+label   = "Fake Demo"
 engine  = "generic"
-preset  = "qwen"
 bin     = "%s"
 run     = "{bin} --model {variant} -p {task}"
-variant = "qwen3-coder-plus"
-models_on = ["qwen3-coder-plus"]
+variant = "demo-large"
+models_on = ["demo-large"]
 source  = "added"
 
 [fixed]
@@ -1502,25 +1442,25 @@ def project(room):
 
 with world() as (room, calls):
     _argv = room / "argv.txt"
-    _tool = room / "bin" / "fakeqwen"
+    _tool = room / "bin" / "fakedemo"
     _fake(_tool, ': > "%s"\nfor a in "$@"; do echo "$a" >> "%s"; done\n' % (_argv, _argv))
     pathlib.Path(M.CONFIG).write_text(
         (pathlib.Path(__file__).resolve().parent.parent / "config" / "models.example.toml")
         .read_text() + LANE_CATALOG % _tool)
     (room / "state" / "models-state.json").write_text(
-        '{"fakeqwen": {"enabled": true, "health": "ok"}, "fixed": {"enabled": true, "health": "ok"}}')
+        '{"fakedemo": {"enabled": true, "health": "ok"}, "fixed": {"enabled": true, "health": "ok"}}')
     project(room)
-    _plain = fleet("spawn", "--project", "demo", "--lane", "gp", "--engine", "fakeqwen",
+    _plain = fleet("spawn", "--project", "demo", "--lane", "gp", "--engine", "fakedemo",
                    "--task", "t", "--force")
     _plain_first = (_plain.stdout.splitlines() or [""])[0]
-    _spawn = fleet("spawn", "--project", "demo", "--lane", "gq", "--engine", "fakeqwen",
+    _spawn = fleet("spawn", "--project", "demo", "--lane", "gq", "--engine", "fakedemo",
                    "--model", "opus[1m]", "--task", "t", "--force")
     _first = (_spawn.stdout.splitlines() or [""])[0]
     check("a spawn with a model that is not on goes ahead",
           _spawn.returncode == 0 and "\nspawned  gq-" in "\n" + _spawn.stdout,
           _spawn.stdout + _spawn.stderr)
     check("and warns once on stderr, keeping stdout's first line the spawn result",
-          "warning: opus[1m] is not on for fakeqwen" in _spawn.stderr
+          "warning: opus[1m] is not on for fakedemo" in _spawn.stderr
           and "warning" not in _spawn.stdout and "warning" not in _first
           and _first == _plain_first, _spawn.stderr)
     _runs = list((room / "state" / "logs").glob("gq-*.run.sh"))
@@ -1532,8 +1472,8 @@ with world() as (room, calls):
     _here.mkdir()
     (_here / "opus1").write_text("")
     (_here / "task").write_text("do it")
-    _line = launchcmd(room, "fakeqwen", str(_here / "task"))
-    _mline = subprocess.run([sys.executable, str(LIB / "models.py"), "launchcmd", "fakeqwen",
+    _line = launchcmd(room, "fakedemo", str(_here / "task"))
+    _mline = subprocess.run([sys.executable, str(LIB / "models.py"), "launchcmd", "fakedemo",
                              str(_here / "task"), "opus[1m]"], capture_output=True, text=True,
                             env=dict(os.environ)).stdout.strip()
     subprocess.run(["bash", "-c", _mline], cwd=_here, env=dict(os.environ))
@@ -1541,20 +1481,20 @@ with world() as (room, calls):
     check("run by bash beside a file named opus1, opus[1m] does not glob",
           _got[:3] == ["--model", "opus[1m]", "-p"], str(_got))
     check("without a --model the row's own variant fills {variant}",
-          "--model 'qwen3-coder-plus'" in _line, _line)
-    _bad = subprocess.run([sys.executable, str(LIB / "models.py"), "launchcmd", "fakeqwen",
+          "--model 'demo-large'" in _line, _line)
+    _bad = subprocess.run([sys.executable, str(LIB / "models.py"), "launchcmd", "fakedemo",
                            "/tmp/t", "-x"], capture_output=True, text=True, env=dict(os.environ))
     check("launchcmd refuses a model the rule refuses", _bad.returncode != 0 and not _bad.stdout)
 
     check("a spawn of the model that is on says nothing on stderr about it",
           _plain.returncode == 0 and "warning" not in _plain.stderr
-          and "model=qwen3-coder-plus" in _plain.stdout, _plain.stdout + _plain.stderr)
+          and "model=demo-large" in _plain.stdout, _plain.stdout + _plain.stderr)
     _fixed = fleet("spawn", "--project", "demo", "--lane", "gf", "--engine", "fixed",
                    "--model", "anything", "--task", "t", "--force")
     check("a row with no {variant} refuses --model",
           _fixed.returncode != 0 and "its own settings choose" in _fixed.stdout,
           _fixed.stdout + _fixed.stderr)
-    _dash = fleet("spawn", "--project", "demo", "--lane", "gd", "--engine", "fakeqwen",
+    _dash = fleet("spawn", "--project", "demo", "--lane", "gd", "--engine", "fakedemo",
                   "--model", "-rf", "--task", "t", "--force")
     check("the model rule refuses a leading -",
           _dash.returncode != 0 and "not a model name" in _dash.stdout, _dash.stdout)
@@ -1686,12 +1626,10 @@ with world(full_catalog()) as (room, calls):
               and _p["source"] == "account", str(_p))
         check("each row says whether it is on",
               all("on" in m for m in _p["models"]), str(_p))
-        _s, _p = post("/api/models/discover", {"id": "qwen"})
-        check("the Qwen answer through the route leaks no key",
-              _s == 200 and not leaked(_json.dumps(_p)), str(_p))
-        _s, _p = post("/api/models/discover", {"id": "kimi"})
-        check("nor does the Kimi one",
-              _s == 200 and not leaked(_json.dumps(_p)), str(_p))
+        _s, _p = post("/api/models/discover", {"id": "demo"})
+        check("a hand-written row through the route is its fixed sentence, not an empty 200",
+              _s == 200 and _p.get("error") == D.FAILURES["no_list"] and _p.get("models") == [],
+              str(_p))
         _s, _p = post("/api/models/discover", {"id": "claude"})
         check("the route's rows are {id, label, description, cost_note, on}, the note by rule",
               _s == 200 and all(set(m) == {"id", "label", "description", "cost_note", "on"}
@@ -1749,7 +1687,7 @@ with world(full_catalog()) as (room, calls):
         check("select refuses a name the rule refuses", _s == 400, str(_p))
         _s, _p = post("/api/models/select", {"id": "claude", "on": "opus"})
         check("select refuses a body whose lists are not lists", _s == 400, str(_p))
-        _s, _p = post("/api/models/select", {"id": "oldqwen", "on": ["glm-5"]})
+        _s, _p = post("/api/models/select", {"id": "fixedcli", "on": ["glm-5"]})
         check("select on a provider that cannot take a model says the sentence",
               _s == 400 and "its own settings choose" in _p["error"], str(_p))
         check("no route ran a provider's test or sent a prompt",
@@ -1871,6 +1809,165 @@ check("key=value and key: value pairs lose their value, a Bearer header included
       'Authorization: [redacted]', M.redact('api_key=abc token: xyz "password": "p w" '
                                             'Authorization: Bearer q.r.s', "", {}))
 check("what is kept is cut to 200 characters", len(M.redact("x" * 500, "", {})) == 200)
+
+print()
+print("a row murmur no longer ships")
+
+# A farm that added Grok Build, or wrote a Gemini CLI table by hand, before those presets were
+# removed still has the table in its own models.toml. Nothing may delete it and nothing may
+# throw over it: the row is listed as it always was, marked as not in the catalog, with the one
+# sentence that says how its owner takes it out. The catalog below also holds a top-level key
+# that is not a table and a field of the wrong type, the way a hand edit leaves one.
+
+ORPHAN_ROWS = """
+[grok]
+label   = "Grok Build"
+engine  = "generic"
+preset  = "grok"
+bin     = "grok"
+run     = "{bin} -p {task} -m {variant}"
+variant = "grok-4.7"
+auth_env = "XAI_API_KEY"
+source  = "added"
+
+[gemini]
+engine = "generic"
+bin    = "gemini"
+run    = "{bin} -p {task}"
+role   = 7
+"""
+
+
+def orphan_catalog():
+    example = (pathlib.Path(__file__).resolve().parent.parent / "config"
+               / "models.example.toml").read_text()
+    # A top-level key has to come before the first table to be top level at all.
+    return 'stray = "on"\n' + example + ORPHAN_ROWS
+
+
+ORPHAN_STATE = {"grok": "not a record", "gemini": {"enabled": True, "health": "ok"}}
+REMOVED_NOTE = "Not in murmur's catalog: murmur ships Claude Code and Codex."
+
+for _gone in ("gemini", "qwen", "kimi", "grok", "opencode", "aider", "ollama", "custom"):
+    check(f"no preset answers to a removed id any more: {_gone}", P.by_id(_gone) is None)
+
+with world(orphan_catalog(), ORPHAN_STATE) as (room, calls):
+    _cat_file = pathlib.Path(M.CONFIG)
+    _state_file = pathlib.Path(M.STATE)
+    _cat_before, _state_before = _cat_file.read_bytes(), _state_file.read_bytes()
+    try:
+        _rows = {m["id"]: m for m in M.listing()}
+        _raised = ""
+    except Exception as exc:                              # the failure this section is about
+        _rows, _raised = {}, f"{exc.__class__.__name__}: {exc}"
+    check("models.listing() reads a hand-edited catalog without raising", _raised == "", _raised)
+    check("every table is listed, and the top-level key that is not a table is not a model",
+          sorted(_rows) == ["claude", "codex", "gemini", "grok"], str(sorted(_rows)))
+    check("M.effective() answers None for a top-level key that is not a table",
+          M.effective("stray") is None)
+    _grok, _gem = _rows.get("grok", {}), _rows.get("gemini", {})
+    check("a row added from a removed preset is listed as not in the catalog",
+          _grok.get("in_catalog") is False
+          and _grok.get("catalog_note", "").startswith(REMOVED_NOTE), str(_grok.get("catalog_note")))
+    check("and its note says how to take it out: Remove, or delete its table from this file",
+          "press Remove on its row" in _grok.get("catalog_note", "")
+          and f"delete its [grok] table from {M.CONFIG}" in _grok.get("catalog_note", ""),
+          _grok.get("catalog_note", ""))
+    check("a hand-written generic row with no preset is not in the catalog either",
+          _gem.get("in_catalog") is False
+          and _gem.get("catalog_note", "").startswith(REMOVED_NOTE), str(_gem.get("catalog_note")))
+    check("and its note says to delete its table, not to press a Remove it does not have",
+          f"delete its [gemini] table from {M.CONFIG}" in _gem.get("catalog_note", "")
+          and "Remove" not in _gem.get("catalog_note", ""), _gem.get("catalog_note", ""))
+    check("claude and codex are in the catalog, with no note",
+          all(_rows.get(mid, {}).get("in_catalog") is True
+              and _rows.get(mid, {}).get("catalog_note") == "" for mid in ("claude", "codex")),
+          str([(mid, _rows.get(mid, {}).get("catalog_note")) for mid in ("claude", "codex")]))
+    check("a state record that is not a record reads as no state at all",
+          _grok.get("enabled") is False and _grok.get("health") == "unchecked", str(_grok))
+    check("an orphan row keeps working as before: switched on and tested, it is routable",
+          _gem.get("enabled") is True and _gem.get("routable") is True, str(_gem))
+    check("a field of the wrong type is carried as it was written, not rewritten",
+          _gem.get("role") == 7, repr(_gem.get("role")))
+
+    _env = dict(os.environ, FLEET_HOME=str(FLEET_BIN.parent.parent))
+    _list = subprocess.run([str(FLEET_BIN), "models"], capture_output=True, text=True, env=_env,
+                           timeout=60)
+    check("`fleet models` lists a hand-edited catalog and exits 0",
+          _list.returncode == 0 and "Traceback" not in _list.stderr,
+          (_list.stdout + _list.stderr)[-400:])
+    check("and prints the note under each row murmur no longer ships",
+          _list.stdout.count(REMOVED_NOTE) == 2
+          and f"delete its [grok] table from {M.CONFIG}" in _list.stdout
+          and f"delete its [gemini] table from {M.CONFIG}" in _list.stdout,
+          _list.stdout[-800:])
+    check("and the wrong-typed field is printed as text",
+          "role: 7" in _list.stdout, _list.stdout[-800:])
+    _lines = _list.stdout.splitlines()
+    _claude_at = next((i for i, line in enumerate(_lines) if " claude " in line + " "), None)
+    check("and prints no note under claude",
+          _claude_at is not None and REMOVED_NOTE not in _lines[_claude_at + 1],
+          _list.stdout[:400])
+
+    for _mid in ("grok", "gemini"):
+        _answer, _done = discover_cli(_mid)
+        check(f"`fleet models discover {_mid} --json` answers without a traceback",
+              _done.returncode == 0 and "Traceback" not in _done.stderr
+              and _answer == {"source": "docs", "models": [], "error": D.FAILURES["no_list"]},
+              (_done.stdout + _done.stderr)[-400:])
+    _human = fleet("models", "discover", "grok")
+    check("and the human form says the fixed sentence",
+          _human.returncode == 0 and D.FAILURES["no_list"] in _human.stdout, _human.stdout)
+
+    check("nothing in this farm's models.toml was changed or deleted by any of it",
+          _cat_file.read_bytes() == _cat_before)
+    check("nor in its models-state.json", _state_file.read_bytes() == _state_before)
+
+    # A spawn on an engine with a hand-written row that is off keeps today's answer, and the
+    # command it names is one this farm can run: the row is there to switch on.
+    _off = fleet("spawn", "--project", "demo", "--lane", "go", "--engine", "grok", "--task", "t")
+    check("a spawn on a row that is off says to switch it on and test it",
+          _off.returncode != 0 and "engine 'grok' is not a routable model." in _off.stdout
+          and "fleet models enable grok" in _off.stdout
+          and "not in murmur's catalog" not in _off.stdout, _off.stdout + _off.stderr)
+    _on = fleet("models", "enable", "grok")
+    check("and `fleet models enable grok` finds the row, rather than answering no such model",
+          "no such model" not in _on.stdout + _on.stderr and "grok" in _on.stdout,
+          _on.stdout + _on.stderr)
+    # A removed engine with no row at all has nothing to enable. The spawn says so, and says
+    # where a preset is added, instead of naming a command that answers "no such model".
+    _gone = fleet("spawn", "--project", "demo", "--lane", "gz", "--engine", "qwen", "--task", "t")
+    check("a spawn on an engine with no row and no preset says murmur ships Claude Code and Codex",
+          _gone.returncode != 0 and "engine 'qwen' is not in murmur's catalog: murmur ships "
+          "Claude Code and Codex." in _gone.stdout, _gone.stdout + _gone.stderr)
+    check("and points at CONTRIBUTING.md to add a preset, not at `fleet models enable`",
+          "CONTRIBUTING.md" in _gone.stdout and "models enable" not in _gone.stdout,
+          _gone.stdout)
+
+    # What the note tells an operator to do has to work.
+    _removed, _err = M.remove_model("grok")
+    check("pressing Remove on the added orphan takes its table out",
+          _removed == "grok" and _err == "" and "grok" not in toml_of(M.CONFIG), _err)
+    check("and leaves every other table as it was",
+          set(toml_of(M.CONFIG)) == {"stray", "claude", "codex", "gemini"},
+          str(set(toml_of(M.CONFIG))))
+    _removed, _err = M.remove_model("gemini")
+    check("the hand-written one is left to the hand that wrote it",
+          _removed is None and "models.toml by hand" in _err
+          and "gemini" in toml_of(M.CONFIG), _err)
+
+# The review's own case: a farm with no models.toml of its own, so the shipped example is the
+# catalog, and an engine murmur no longer ships.
+with world() as (room, calls):
+    _gone = fleet("spawn", "--project", "demo", "--lane", "rg", "--engine", "gemini",
+                  "--task", "check")
+    check("with only the shipped catalog, `--engine gemini` is refused as not in the catalog",
+          _gone.returncode != 0 and "engine 'gemini' is not in murmur's catalog" in _gone.stdout
+          and "CONTRIBUTING.md" in _gone.stdout and "models enable" not in _gone.stdout,
+          _gone.stdout + _gone.stderr)
+    _enable = fleet("models", "enable", "gemini")
+    check("and the command the old message named does answer no such model",
+          "no such model" in _enable.stdout + _enable.stderr, _enable.stdout + _enable.stderr)
 
 print()
 print("where this suite runs")

@@ -3,8 +3,7 @@
 
 A machine is a whole farm: systemd user services, tmux, worktrees, the dashboard, the installer
 as it is. Two providers can be one: a DigitalOcean Droplet this farm creates, and any Linux box
-you already reach over SSH. (A runner, one lane in a remote sandbox, is `fleet hosts` and
-`fleet runner`, not this file.) The design record is `fleet/docs/design/hosting.md`, section 4.
+you already reach over SSH. The design record is `fleet/docs/design/hosting.md`, section 4.
 
   fleet machines list [--json]
   fleet machines plan --provider do-droplet --name N --size S --region R [--pubkey-file F]

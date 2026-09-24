@@ -113,15 +113,16 @@ function same(one, two) {
 
 /* The catalog as a server of section 6 answers it: every row carries `models_on` and
    `default_model`. Built from the stub's own rows, read before any case writes to them, so the
-   two model routes and this answer agree about which provider is which. Kimi's run line takes a
-   model here, so its sidebar reaches the request that fails; Qwen's does not, so its sidebar
-   draws the sentence of a provider that cannot take one. */
+   two model routes and this answer agree about which provider is which. demo-strict's run line
+   takes a model here, so its sidebar reaches the request that fails; demo-plain's does not, so
+   its sidebar draws the sentence of a provider that cannot take one. Both are rows of the
+   stub's fictional contributed presets: murmur ships no such engine. */
 const STUB_ROWS = await (await fetch(`${BASE}/api/engines`)).json();
 const CONTRACT = {
   claude: { models_on: ["opus", "sonnet"], default_model: "opus" },
   codex: { models_on: ["gpt-6-sol"], default_model: "gpt-6-sol" },
-  qwen: { models_on: [], default_model: "" },
-  kimi: { models_on: [], default_model: "", run: "{bin} -m {variant} -p {task}" },
+  "demo-plain": { models_on: [], default_model: "" },
+  "demo-strict": { models_on: [], default_model: "", run: "{bin} -m {variant} -p {task}" },
   local: { models_on: [], default_model: "" },
 };
 function engines(changes = {}) {
@@ -274,14 +275,17 @@ async function oneLine(page, selector) {
   const want = {
     claude: { status: "Connected", meaning: "done", switch: true, test: true, remove: false },
     codex: { status: "Failing", meaning: "fail", switch: true, test: true, remove: false },
-    qwen: { status: "Off", meaning: "pause", switch: true, test: true, remove: true },
-    kimi: { status: "Needs a key", meaning: "wait", switch: false, test: true, remove: true },
+    "demo-plain": { status: "Off", meaning: "pause", switch: true, test: true, remove: true },
+    "demo-strict": { status: "Needs a key", meaning: "wait", switch: false, test: true, remove: true },
     local: { status: "Not installed", meaning: "pause", switch: false, test: false, remove: false },
+    // murmur no longer ships its engine; the farm added it, so it is still offered Remove
+    grok: { status: "Off", meaning: "pause", switch: true, test: true, remove: true },
   };
-  // Five, because this runs before the add-dialog checks at the end of this file write anything
-  // into the stub's catalog. A new block that registers a model belongs after this one.
-  check("machine: the models table has one row per status", Object.keys(seen).length === 5,
-    Object.keys(seen).join(", "));
+  // One per status plus the row murmur no longer ships, because this runs before the add-dialog
+  // checks at the end of this file write anything into the stub's catalog. A new block that
+  // registers a model belongs after this one.
+  check("machine: the models table has one row per status, and the row not in the catalog",
+    Object.keys(seen).length === 6, Object.keys(seen).join(", "));
   for (const [id, wanted] of Object.entries(want)) {
     const row = seen[id] || {};
     check(`machine: ${id} is drawn as ${wanted.status}`,
@@ -292,14 +296,14 @@ async function oneLine(page, selector) {
       JSON.stringify(row).slice(0, 160));
   }
   check("machine: a model with no key offers the command that gives it one, and Test",
-    /fleet models auth kimi/.test(seen.kimi.hint) && seen.kimi.test === true,
-    `${seen.kimi.hint} | ${seen.kimi.text.slice(0, 120)}`);
+    /fleet models auth demo-strict/.test(seen["demo-strict"].hint) && seen["demo-strict"].test === true,
+    `${seen["demo-strict"].hint} | ${seen["demo-strict"].text.slice(0, 120)}`);
   check("machine: a model that is failing every call can still be switched off",
     seen.codex.switch === true && seen.codex.switchLabel === "Switch off",
     JSON.stringify(seen.codex).slice(0, 160));
   check("machine: the switch says what pressing it does, never the state the row is in",
-    seen.claude.switchLabel === "Switch off" && seen.qwen.switchLabel === "Switch on",
-    `claude: ${seen.claude.switchLabel}, qwen: ${seen.qwen.switchLabel}`);
+    seen.claude.switchLabel === "Switch off" && seen["demo-plain"].switchLabel === "Switch on",
+    `claude: ${seen.claude.switchLabel}, demo-plain: ${seen["demo-plain"].switchLabel}`);
   check("machine: a model with one status wears one pill in that column",
     (seen.claude.pills || []).filter((word) => word === "Connected").length === 1,
     (seen.claude.pills || []).join(", "));
@@ -323,9 +327,9 @@ async function oneLine(page, selector) {
     /\/usr\/bin\/codex/.test(seen.codex.runs) && /codex exec/.test(seen.codex.runs), seen.codex.runs);
   check("machine: every row says how it is paid for, in a word, with the sentence in its title",
     /Subscription/.test(seen.claude.text) && /Your Claude subscription/.test(seen.claude.paid)
-    && /API key, paid per token on your key/.test(seen.qwen.text)
+    && /API key, paid per token on your key/.test(seen["demo-plain"].text)
     && /Local/.test(seen.local.text) && /Runs on this machine/.test(seen.local.paid),
-    `${seen.qwen.text.slice(0, 160)} | ${seen.local.paid}`);
+    `${seen["demo-plain"].text.slice(0, 160)} | ${seen.local.paid}`);
   check("machine: no role or quality note is in the table",
     !/the workhorse/.test(await text(page)), "");
   check("machine: nothing was switched by drawing the models table",
@@ -333,15 +337,144 @@ async function oneLine(page, selector) {
   await context.close();
 }
 
+/* A row murmur no longer ships. murmur ships Claude Code and Codex, and a farm that added an
+   engine before its preset was removed still lists it in its models.toml. The server reads the
+   row as it always did and sends in_catalog false with one sentence on how to take it out; the
+   table says so with a pill beside the name, on the same one line, and the sidebar opens with
+   the sentence. Nothing removes it for the person. */
+{
+  const note = (STUB_ROWS.find((row) => row && row.id === "grok") || {}).catalog_note || "";
+  const { page, context, thrown } = await open({ view: "machine" });
+  const seen = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#view .mo-providers tbody tr")];
+    const heights = rows.map((row) => Math.round(row.getBoundingClientRect().height));
+    const orphans = [...document.querySelectorAll("#view .mo-providers [data-model-orphan]")];
+    const mark = document.querySelector("#view .mo-providers [data-model-orphan='grok']");
+    const row = mark ? mark.closest("tr") : null;
+    const name = row ? row.querySelector("[data-model-open='grok']") : null;
+    const cell = row ? row.querySelector("td:first-child") : null;
+    const pill = mark ? mark.querySelector(".pill") : null;
+    const top = (node) => Math.round(node.getBoundingClientRect().top);
+    const bottom = (node) => Math.round(node.getBoundingClientRect().bottom);
+    return {
+      ids: orphans.map((node) => node.getAttribute("data-model-orphan")),
+      word: pill ? pill.querySelector(".pill-text").textContent : "",
+      title: pill ? pill.getAttribute("title") : "",
+      inProvider: Boolean(cell && mark && cell.contains(mark)),
+      // one line: the pill sits within the name's own line, and the row is no taller than the rest
+      sameLine: Boolean(name && pill) && Math.abs((top(pill) + bottom(pill)) - (top(name) + bottom(name))) <= 4
+        && pill.getBoundingClientRect().height <= name.getBoundingClientRect().height + 4,
+      rowHeight: row ? Math.round(row.getBoundingClientRect().height) : 0,
+      heights,
+      wrap: cell ? getComputedStyle(cell.querySelector(".mo-provider-cell") || cell).whiteSpace : "",
+      status: row ? row.querySelector("td:nth-child(3) .pill-text").textContent : "",
+      width: window.innerWidth,
+    };
+  });
+  check("machine: a row murmur no longer ships wears Not in the catalog, and only that row does",
+    seen.ids.join(",") === "grok" && seen.word === "Not in the catalog" && seen.inProvider,
+    JSON.stringify(seen).slice(0, 300));
+  check("machine: the pill's title is the server's own sentence on how to take it out",
+    note.length > 0 && seen.title === note && /press Remove/.test(seen.title),
+    `${seen.title} | ${note}`);
+  check("machine: at 1440 the pill sits beside the name on the one line, the row as tall as the rest",
+    seen.width === 1440 && seen.sameLine && seen.wrap === "nowrap"
+    && seen.heights.every((height) => Math.abs(height - seen.rowHeight) <= 2),
+    JSON.stringify(seen).slice(0, 300));
+  check("machine: and the row keeps its own status word beside it",
+    seen.status === "Off", seen.status);
+  await page.click("[data-model-open='grok']");
+  await page.waitForTimeout(500);
+  const drawer = await page.evaluate(() => {
+    const body = document.getElementById("drawerBody");
+    const node = body.querySelector("p.readonly-note[data-model-orphan-note]");
+    if (!node) return { said: "", first: false };
+    // first: before the status line and before anything else the sidebar draws
+    const status = body.querySelector("[data-model-status-words]");
+    const before = [...body.querySelectorAll("*")].filter((other) => other !== node
+      && !other.contains(node) && !node.contains(other) && other.textContent.trim()
+      && node.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_PRECEDING);
+    return {
+      said: node ? node.textContent : "",
+      first: Boolean(node && status) && before.length === 0
+        && Boolean(node.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING),
+    };
+  });
+  check("machine: the orphan's sidebar starts with the same sentence",
+    drawer.said === note && drawer.first, JSON.stringify(drawer).slice(0, 300));
+  await page.click("#drawerClose");
+  await page.waitForTimeout(300);
+  await page.click("[data-model-open='claude']");
+  await page.waitForTimeout(500);
+  const shipped = await page.evaluate(() => Boolean(document.querySelector("#drawerBody [data-model-orphan-note]")));
+  check("machine: a row in the catalog carries no such note", shipped === false, String(shipped));
+  check("machine: nothing threw around a row not in the catalog", thrown.length === 0, thrown[0]);
+  await context.close();
+
+  /* A phone's provider column is narrower than the pill alone. The name must stay on screen and
+     tappable, and the pill must stay inside its own cell. */
+  const phone = await open({ view: "machine", size: { width: 390, height: 844 } });
+  const small = await phone.page.evaluate(() => {
+    const name = document.querySelector("#view [data-model-open='grok']");
+    const mark = document.querySelector("#view [data-model-orphan='grok']");
+    if (!name || !mark) return { found: false };
+    const cell = name.closest("td").getBoundingClientRect();
+    const box = name.getBoundingClientRect();
+    const pill = mark.getBoundingClientRect();
+    const row = name.closest("tr").getBoundingClientRect();
+    const other = document.querySelector("#view [data-model-open='claude']").closest("tr").getBoundingClientRect();
+    return {
+      found: true,
+      name: Math.round(box.width),
+      pillRight: Math.round(pill.right),
+      cellRight: Math.round(cell.right),
+      row: Math.round(row.height),
+      other: Math.round(other.height),
+    };
+  });
+  check("machine: on a phone the orphan's name stays on screen, its pill inside its cell, one line",
+    small.found && small.name >= 40 && small.pillRight <= small.cellRight
+    && Math.abs(small.row - small.other) <= 2, JSON.stringify(small));
+  await phone.page.click("[data-model-open='grok']");
+  await phone.page.waitForTimeout(500);
+  const tapped = await phone.page.evaluate(() => Boolean(document.querySelector("#drawerBody [data-model-orphan-note]")));
+  check("machine: and tapping it opens its sidebar with the note", tapped, String(tapped));
+  check("machine: nothing threw on the orphan at a phone width", phone.thrown.length === 0, phone.thrown[0]);
+  await phone.context.close();
+}
+
+/* The same at laptop widths: at 1024 the full pill used to push the name to nothing, so the row
+   could not be opened. The pill yields first at every width. */
+for (const width of [1024, 1280]) {
+  const laptop = await open({ view: "machine", size: { width, height: 900 } });
+  const seen = await laptop.page.evaluate(() => {
+    const name = document.querySelector("#view [data-model-open='grok']");
+    const mark = document.querySelector("#view [data-model-orphan='grok']");
+    if (!name || !mark) return { found: false };
+    const cell = name.closest("td");
+    return { found: true, name: Math.round(name.getBoundingClientRect().width),
+      pillRight: Math.round(mark.getBoundingClientRect().right), cellRight: Math.round(cell.getBoundingClientRect().right),
+      title: cell.title || "" };
+  });
+  check(`machine: at ${width} the orphan's name stays clickable and its pill stays in its cell`,
+    seen.found && seen.name >= 40 && seen.pillRight <= seen.cellRight && /not in the catalog/.test(seen.title),
+    JSON.stringify(seen));
+  await laptop.page.click("[data-model-open='grok']", { timeout: 3000 }).catch(() => null);
+  await laptop.page.waitForTimeout(500);
+  const opened = await laptop.page.evaluate(() => Boolean(document.querySelector("#drawerBody [data-model-orphan-note]")));
+  check(`machine: and at ${width} clicking it opens its sidebar with the note`, opened, String(opened));
+  await laptop.context.close();
+}
+
 /* Status and Actions disagree on a real farm, and that is the server being right: a generic
    model is "off" until a test passes, however it is switched. The pill carries the state, the
    button carries the press, so a row like this says Off and offers Switch off. */
 {
   const only = [{
-    id: "gemini", label: "Gemini CLI", engine: "generic", source: "added", status: "off",
-    enabled: true, installed: true, path: "/usr/bin/gemini", command: "gemini",
-    access: "An API key, held on the farm.", auth_env: "GEMINI_API_KEY",
-    run: "{bin} -p {task}", last_test: null, install_hint: "npm install -g @google/gemini-cli",
+    id: "democli", label: "Demo CLI", engine: "generic", source: "added", status: "off",
+    enabled: true, installed: true, path: "/usr/bin/democli", command: "democli",
+    access: "An API key, held on the farm.", auth_env: "DEMOCLI_API_KEY",
+    run: "{bin} -p {task}", last_test: null, install_hint: "npm install -g @example/democli",
   }];
   const { page, context, thrown, sent } = await open({
     view: "machine",
@@ -349,16 +482,16 @@ async function oneLine(page, selector) {
   });
   const seen = await page.evaluate(() => ({
     status: document.querySelector("#view .mo-providers td:nth-child(3) .pill-text").textContent,
-    label: document.querySelector("[data-model-switch='gemini']").textContent,
+    label: document.querySelector("[data-model-switch='democli']").textContent,
   }));
   check("machine: a row that is switched on and still off says Off and offers Switch off",
     seen.status === "Off" && seen.label === "Switch off", JSON.stringify(seen));
-  await page.click("[data-model-switch='gemini']");
+  await page.click("[data-model-switch='democli']");
   await page.waitForTimeout(800);
   const posted = sent.find((item) => item.url.endsWith("/api/models"));
   const body = JSON.parse((posted || {}).body || "{}");
   check("machine: and pressing it sends the press the button named",
-    body.action === "disable" && body.id === "gemini", JSON.stringify(body));
+    body.action === "disable" && body.id === "democli", JSON.stringify(body));
   check("machine: nothing threw where the status and the switch disagree",
     thrown.length === 0, thrown[0]);
   await context.close();
@@ -481,12 +614,12 @@ async function oneLine(page, selector) {
   const written = await (await fetch(`${BASE}/api/models/add`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ preset: "opencode", id: "shaped" }),
+    body: JSON.stringify({ preset: "demo-plain", id: "shaped" }),
   })).json();
   const row = written.model || {};
   check("machine: the add route answers the row under model, with the preset's own fields",
-    row.id === "shaped" && row.source === "added" && row.preset === "opencode"
-    && row.auth_env === "OPENCODE_API_KEY", JSON.stringify(written).slice(0, 240));
+    row.id === "shaped" && row.source === "added" && row.preset === "demo-plain"
+    && row.auth_env === "DEMO_PLAIN_API_KEY", JSON.stringify(written).slice(0, 240));
   check("machine: and invents no role, quality, caps or docs for it",
     !row.role && !row.quality && !row.caps && !row.docs,
     JSON.stringify(row).slice(0, 300));
@@ -504,7 +637,7 @@ async function oneLine(page, selector) {
    a person writes, so they are on the shipped rows. */
 {
   const { page, context, thrown } = await open({ view: "machine" });
-  await page.click("[data-model-open='qwen']");
+  await page.click("[data-model-open='demo-plain']");
   await page.waitForTimeout(500);
   const drawer = await page.evaluate(() => {
     const host = document.getElementById("drawer");
@@ -518,10 +651,10 @@ async function oneLine(page, selector) {
     };
   });
   check("machine: the model name opens a drawer about that model",
-    drawer.open && /Qwen Code/.test(drawer.title), JSON.stringify(drawer).slice(0, 160));
+    drawer.open && /Demo Plain/.test(drawer.title), JSON.stringify(drawer).slice(0, 160));
   check("machine: the drawer carries what the table dropped",
-    /headless mode/.test(drawer.text) && /fleet models auth qwen/.test(drawer.text)
-    && /QWEN_CODE_API_KEY/.test(drawer.text) && /Added on this farm/.test(drawer.text),
+    /headless mode/.test(drawer.text) && /fleet models auth demo-plain/.test(drawer.text)
+    && /DEMO_PLAIN_API_KEY/.test(drawer.text) && /Added on this farm/.test(drawer.text),
     drawer.text.slice(0, 400));
   check("machine: and the run template, with {bin} and {task} explained",
     drawer.run && /\{bin\} is the command/.test(drawer.text), drawer.text.slice(0, 300));
@@ -544,24 +677,24 @@ async function oneLine(page, selector) {
      shipped catalog and no added entry carries one today, so this is the case that proves the
      row works when a farm's own models.toml does. */
   const linked = [{
-    id: "qwen", label: "Qwen Code", engine: "generic", source: "added", status: "off",
-    enabled: false, installed: true, path: "/usr/bin/qwen", command: "qwen",
-    access: "An API key, held on the farm.", auth_env: "QWEN_CODE_API_KEY",
+    id: "democli", label: "Demo CLI", engine: "generic", source: "added", status: "off",
+    enabled: false, installed: true, path: "/usr/bin/democli", command: "democli",
+    access: "An API key, held on the farm.", auth_env: "DEMOCLI_API_KEY",
     run: "{bin} -p {task}", last_test: null, health: "ok",
-    docs: "https://example.invalid/docs/qwen-code",
+    docs: "https://example.invalid/docs/democli",
   }];
   const second = await open({
     view: "machine",
     overrides: { "/api/engines": JSON.stringify(linked) },
   });
-  await second.page.click("[data-model-open='qwen']");
+  await second.page.click("[data-model-open='democli']");
   await second.page.waitForTimeout(500);
   const link = await second.page.evaluate(() => {
     const node = document.querySelector("#drawerBody a[href]");
     return node ? node.getAttribute("href") : "";
   });
   check("machine: a row that carries a documentation link draws it",
-    link === "https://example.invalid/docs/qwen-code", link || "no link");
+    link === "https://example.invalid/docs/democli", link || "no link");
   check("machine: nothing threw on the linked drawer",
     second.thrown.length === 0, second.thrown[0]);
   await second.context.close();
@@ -884,8 +1017,8 @@ async function oneLine(page, selector) {
    docs list instead. A key-shaped string is never drawn, even if a server were to pass it on. */
 {
   const { page, context, thrown } = await open({ overrides: { "/api/engines": engines() } });
-  await openSidebar(page, "kimi");
-  await page.click("[data-model-request='kimi']");
+  await openSidebar(page, "demo-strict");
+  await page.click("[data-model-request='demo-strict']");
   await page.waitForTimeout(900);
   const said = await page.evaluate(() => {
     const node = document.querySelector("#drawer [data-model-failed]");
@@ -895,19 +1028,19 @@ async function oneLine(page, selector) {
   check("models: a failed request says why, in the fixed sentence",
     said === "The request failed: the file is missing. The list below is the docs list.", said);
   check("models: and shows the docs list instead",
-    seen.rows["kimi-code/kimi-for-coding"] && seen.rows["kimi-code/kimi-for-coding"].tag === "From the docs",
+    seen.rows["demo-strict/coder"] && seen.rows["demo-strict/coder"].tag === "From the docs",
     JSON.stringify(seen.rows));
   await context.close();
 
-  const leaked = "Traceback: api_key=sk-ant-api03-0123456789abcdefghij in /home/farm/.kimi/config.toml";
+  const leaked = "Traceback: api_key=sk-ant-api03-0123456789abcdefghij in /home/farm/.demo-strict/config.toml";
   const second = await open({
     overrides: {
       "/api/engines": engines(),
       "/api/models/discover": JSON.stringify({ source: "docs", error: leaked, models: [] }),
     },
   });
-  await openSidebar(second.page, "kimi");
-  await second.page.click("[data-model-request='kimi']");
+  await openSidebar(second.page, "demo-strict");
+  await second.page.click("[data-model-request='demo-strict']");
   await second.page.waitForTimeout(700);
   const drawn = await second.page.evaluate(() => document.getElementById("drawerBody").innerText);
   check("models: an error that carries a key-shaped string is never drawn",
@@ -933,16 +1066,16 @@ async function oneLine(page, selector) {
       }),
     },
   });
-  await openSidebar(each.page, "kimi");
+  await openSidebar(each.page, "demo-strict");
   for (const sentence of SENTENCES) {
-    await each.page.click("[data-model-request='kimi']");
+    await each.page.click("[data-model-request='demo-strict']");
     await each.page.waitForTimeout(500);
     const shown = await each.page.evaluate(() => (document.querySelector("#drawer [data-model-failed]") || {}).textContent || "");
     check(`models: the server's sentence "${sentence}" is shown as sent`,
       shown === `The request failed: ${sentence}. The list below is the docs list.`, shown);
     next += 1;
   }
-  await each.page.click("[data-model-request='kimi']");
+  await each.page.click("[data-model-request='demo-strict']");
   await each.page.waitForTimeout(500);
   const none = await each.page.evaluate(() => (document.querySelector("#drawer [data-model-failed]") || {}).textContent || "");
   check("models: a provider with no list says so, and does not call it a failed request",
@@ -955,19 +1088,19 @@ async function oneLine(page, selector) {
       "/api/engines": engines(),
       "/api/models/discover": (handler) => handler.fulfill({
         status: 409, contentType: "application/json",
-        body: JSON.stringify({ error: "a request for kimi is already running" }),
+        body: JSON.stringify({ error: "a request for demo-strict is already running" }),
       }),
     },
   });
-  await openSidebar(third.page, "kimi");
-  await third.page.click("[data-model-request='kimi']");
+  await openSidebar(third.page, "demo-strict");
+  await third.page.click("[data-model-request='demo-strict']");
   await third.page.waitForTimeout(700);
   const refused = await third.page.evaluate(() => {
     const node = document.querySelector("#drawer [data-model-failed]");
-    return { said: node ? node.textContent : "", button: document.querySelector("[data-model-request='kimi']").disabled };
+    return { said: node ? node.textContent : "", button: document.querySelector("[data-model-request='demo-strict']").disabled };
   });
   check("models: a request the server refuses says the server's sentence, and can be tried again",
-    refused.said === "a request for kimi is already running" && refused.button === false,
+    refused.said === "a request for demo-strict is already running" && refused.button === false,
     JSON.stringify(refused));
   check("models: nothing threw on a failed request",
     thrown.length === 0 && second.thrown.length === 0 && third.thrown.length === 0,
@@ -1059,8 +1192,8 @@ async function oneLine(page, selector) {
 /* A provider whose command cannot take a model shows one sentence instead of the list. */
 {
   const { page, context, thrown } = await open({ overrides: { "/api/engines": engines() } });
-  const cell = await page.evaluate(() => document.querySelector("[data-model-count='qwen']").getAttribute("title"));
-  await openSidebar(page, "qwen");
+  const cell = await page.evaluate(() => document.querySelector("[data-model-count='demo-plain']").getAttribute("title"));
+  await openSidebar(page, "demo-plain");
   const seen = await page.evaluate(() => ({
     said: (document.querySelector("#drawer [data-model-cannot]") || {}).textContent || "",
     list: Boolean(document.querySelector("#drawer .mo-list")),
@@ -1234,22 +1367,23 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
       text: host.innerText,
     };
   });
-  check("machine: the dialog draws a card per service", presets.count >= 8 && presets.radios,
-    JSON.stringify(presets).slice(0, 200));
+  const served = (await (await fetch(`${BASE}/api/models/presets`)).json()).length;
+  check("machine: the dialog draws a card per service", presets.count === served
+    && served >= 6 && presets.radios, `${served} served ${JSON.stringify(presets).slice(0, 200)}`);
   check("machine: a service already in the catalog is said to be, and cannot be picked",
     presets.off.includes("claude") && presets.alreadySaid.includes("claude"),
     `off: ${presets.off.join(", ")} said: ${presets.alreadySaid.join(", ")}`);
   check("machine: every choosable service says whether it is safe to run headless",
     presets.terms + presets.off.length >= presets.count, JSON.stringify(presets).slice(0, 200));
   check("machine: and a service whose terms forbid a farm says so",
-    presets.risky.length > 0 || presets.off.includes("kimi"), presets.risky.join(", "));
+    presets.risky.length > 0 || presets.off.includes("demo-strict"), presets.risky.join(", "));
   check("machine: every card says how that service is paid for",
     /An API key, billed per token/.test(presets.text)
     && /Runs on this machine/.test(presets.text), presets.text.slice(0, 200));
 
   /* A service behind a key: the command that takes it is named, and the page says out loud
      that the key does not pass through it. */
-  await page.click("#drawer [data-preset='gemini']");
+  await page.click("#drawer [data-preset='democli']");
   await page.waitForTimeout(400);
   const key = await page.evaluate(() => {
     const host = document.getElementById("drawerBody");
@@ -1262,17 +1396,17 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
     };
   });
   check("machine: a key service names the command that takes the key",
-    key.command === "fleet models auth gemini", key.command);
+    key.command === "fleet models auth democli", key.command);
   check("machine: and says a key never goes through this page",
     /A key never goes through this page/.test(key.text)
     && /Paste the key when it asks/.test(key.text), key.text.slice(0, 400));
   check("machine: the name is filled in from the preset and the variant is offered",
-    key.name === "gemini" && key.variant === "gemini-2.5-pro", JSON.stringify(key).slice(0, 160));
+    key.name === "democli" && key.variant === "demo-large", JSON.stringify(key).slice(0, 160));
   check("machine: and the dialog asks for no key of its own",
     !/password/.test(key.text) && key.fields <= 2, JSON.stringify(key).slice(0, 160));
 
   /* A local service: two commands, nothing paid, no key at all. */
-  await page.click("#drawer [data-preset='ollama']");
+  await page.click("#drawer [data-preset='demo-local']");
   await page.waitForTimeout(400);
   const local = await page.evaluate(() => {
     const host = document.getElementById("drawerBody");
@@ -1284,20 +1418,20 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
     };
   });
   check("machine: a local service shows the install and the pull, and asks for no key",
-    /install.sh/.test(local.install) && local.pull === "ollama pull qwen2.5-coder:14b"
+    /install.sh/.test(local.install) && local.pull === "demolocal pull demo-7b"
     && local.auth === false, JSON.stringify(local).slice(0, 200));
   check("machine: and says nothing is paid for it",
     /Nothing is paid/.test(local.text), local.text.slice(0, 200));
 
   /* Registering sends the preset, the name and the variant, and nothing else. */
-  await page.click("#drawer [data-preset='gemini']");
+  await page.click("#drawer [data-preset='democli']");
   await page.waitForTimeout(300);
   await page.click("[data-model-register]");
   await page.waitForTimeout(1200);
   const add = sent.filter((row) => row.url.endsWith("/api/models/add"));
   const body = add.length ? JSON.parse(add[0].body || "{}") : {};
   check("machine: Register posts the preset, the name and the variant", add.length === 1
-    && body.preset === "gemini" && body.id === "gemini" && body.variant === "gemini-2.5-pro",
+    && body.preset === "democli" && body.id === "democli" && body.variant === "demo-large",
     JSON.stringify(body));
   check("machine: and the body carries no key, by any name",
     !Object.keys(body).some((field) => /key|secret|token/i.test(field))
@@ -1321,7 +1455,7 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
     };
   });
   check("machine: a model that needs a key is told the command, in a terminal, then Test",
-    last.command === "fleet models auth gemini" && /then press Test/.test(last.said),
+    last.command === "fleet models auth democli" && /then press Test/.test(last.said),
     JSON.stringify(last).slice(0, 240));
   check("machine: and Test can be pressed on that step", last.test === true,
     JSON.stringify(last).slice(0, 160));
@@ -1350,9 +1484,52 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   await context.close();
 }
 
-/* A local runner's pull command is the preset's own (pull_hint), not one this page builds. The
-   line it built, "{bin} pull {variant}", is Ollama's by luck and is wrong for the next local
-   runner a farm adds. */
+/* murmur ships two engines and a farm usually has both, so step one of the dialog can be a row
+   of cards none of which can be picked. It then says why, and where another engine comes from;
+   while any card can be picked it says nothing of the kind. */
+{
+  const every = (await (await fetch(`${BASE}/api/models/presets`)).json())
+    .map((row) => ({ ...row, added: true }));
+  const { page, context, thrown } = await open({
+    view: "machine",
+    overrides: { "/api/models/presets": JSON.stringify(every) },
+  });
+  await page.click("[data-add-model]");
+  await page.waitForTimeout(700);
+  const seen = await page.evaluate(() => {
+    const node = document.querySelector("#drawer [data-model-all-added]");
+    const cards = [...document.querySelectorAll("#drawer [data-preset]")];
+    return {
+      said: node ? node.textContent : "",
+      cards: cards.length,
+      off: cards.filter((card) => card.disabled).length,
+    };
+  });
+  check("machine: when every preset is already added, step one says so",
+    /Every engine murmur ships is already in this farm's catalog/.test(seen.said)
+    && /fleet\/lib\/model_presets\.py/.test(seen.said) && /CONTRIBUTING\.md/.test(seen.said)
+    && seen.cards === every.length && seen.off === seen.cards, JSON.stringify(seen));
+  check("machine: nothing threw on a dialog with nothing to pick", thrown.length === 0, thrown[0]);
+  await context.close();
+
+  for (const state of ["ready", "empty"]) {
+    const other = await open({ view: "machine", state });
+    await other.page.click("[data-add-model]");
+    await other.page.waitForTimeout(700);
+    const quiet = await other.page.evaluate(() => ({
+      note: Boolean(document.querySelector("#drawer [data-model-all-added]")),
+      pickable: [...document.querySelectorAll("#drawer [data-preset]")].filter((card) => !card.disabled).length,
+    }));
+    check(`machine: while a preset can still be picked (${state}), there is no such note`,
+      quiet.note === false && quiet.pickable > 0, JSON.stringify(quiet));
+    check(`machine: nothing threw on the ${state} dialog`, other.thrown.length === 0, other.thrown[0]);
+    await other.context.close();
+  }
+}
+
+/* A local runner's pull command is the preset's own (pull_hint), not one this page builds. A
+   line it built, "{bin} pull {variant}", would be right for one runner by luck and wrong for the
+   next local runner a contributor adds. */
 {
   const own = [{
     id: "lmstudio", label: "LM Studio", color: "#8b949e", kind: "local", tos_kind: "safe",
@@ -1386,7 +1563,8 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
 
 /* The terms pill is the server's own classification of its terms sentence, in one word. The
    page used to read the sentence itself and call anything it did not recognise "safe headless",
-   which put a green pill on Custom command, whose terms nobody here has read. */
+   which put a green pill on a command whose terms nobody here has read. The three cards are the
+   stub's fictional contributed presets, one per word. */
 {
   // An empty catalog, so every card draws its terms pill rather than "already added".
   const { page, context, thrown } = await open({ view: "machine", state: "empty" });
@@ -1401,11 +1579,11 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
     return out;
   });
   check("machine: a service the server calls safe wears the safe pill",
-    said.gemini === "safe headless" && said.ollama === "safe headless", JSON.stringify(said));
+    said.democli === "safe headless" && said["demo-local"] === "safe headless", JSON.stringify(said));
   check("machine: a service whose terms refuse a farm says so, and is not called safe",
-    said.kimi === "not permitted", JSON.stringify(said));
-  check("machine: and a command nobody has read the terms of says check the terms",
-    said.custom === "check the terms", JSON.stringify(said));
+    said["demo-strict"] === "not permitted", JSON.stringify(said));
+  check("machine: and a service nobody has read the terms of says check the terms",
+    said["demo-plain"] === "check the terms", JSON.stringify(said));
   await context.close();
 
   /* A farm on a server that sends the sentence and no classification. The words of the
@@ -1447,15 +1625,18 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   await second.context.close();
 }
 
-/* A command of your own is authenticated under the name you give it, so step 3 has no command
-   to show until there is a name. It used to fall back to the preset's id and print "fleet models
-   auth custom", which is a runnable-looking command that does nothing. */
+/* A key engine is authenticated under the name it is given, so step 3 has no command to show
+   while the name is empty. Falling back to the preset's id printed a runnable-looking command
+   for a model that would not exist under that name. */
 {
   const { page, context, thrown } = await open({ view: "machine", state: "empty" });
   await page.click("[data-add-model]");
   await page.waitForTimeout(700);
-  await page.click("#drawer [data-preset='custom']");
+  await page.click("#drawer [data-preset='democli']");
   await page.waitForTimeout(400);
+  await page.fill("#drawer [data-model-id]", "");
+  // Typing repaints nothing by itself; the page's own tick does.
+  await page.waitForTimeout(3500);
   const bare = await page.evaluate(() => {
     const host = document.getElementById("drawerBody");
     return {
@@ -1463,20 +1644,20 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
       said: host.innerText,
     };
   });
-  check("machine: a command of your own shows no auth command before it has a name",
+  check("machine: a key service with its name cleared shows no auth command",
     bare.command === "" && /Name it, and it appears here/.test(bare.said),
     JSON.stringify(bare).slice(0, 240));
-  check("machine: and never prints fleet models auth custom",
-    !/fleet models auth custom/.test(bare.said), bare.said.slice(0, 300));
+  check("machine: and never prints one built from the preset's id",
+    !/fleet models auth democli/.test(bare.said), bare.said.slice(0, 300));
   await page.fill("#drawer [data-model-id]", "mine");
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(3500);
   const named = await page.evaluate(() => {
     const node = document.querySelector("#drawerBody [data-model-auth]");
     return node ? node.textContent : "";
   });
   check("machine: and shows it under that name once it is typed",
     named === "fleet models auth mine", named || "no command");
-  check("machine: nothing threw on a command of your own", thrown.length === 0, thrown[0]);
+  check("machine: nothing threw on a renamed key service", thrown.length === 0, thrown[0]);
   await context.close();
 }
 
@@ -1485,13 +1666,13 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
    the name as a table in this farm's catalog. */
 {
   // An empty catalog, because every preset is choosable there and the cases above have already
-  // written gemini into this stub's catalog.
+  // written democli into this stub's catalog.
   const { page, context, thrown, sent } = await open({ view: "machine", state: "empty" });
   await page.click("[data-add-model]");
   await page.waitForTimeout(700);
-  await page.click("#drawer [data-preset='gemini']");
+  await page.click("#drawer [data-preset='democli']");
   await page.waitForTimeout(300);
-  await page.fill("#drawer [data-model-id]", "Gemini");
+  await page.fill("#drawer [data-model-id]", "Democli");
   await page.click("[data-model-register]");
   await page.waitForTimeout(600);
   const said = await page.evaluate(() => {
@@ -1506,11 +1687,11 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   /* And the rule behind the page is the same rule, so a page that drifts is caught by the
      route rather than by a farm nobody is watching. */
   const refused = [];
-  for (const name of ["Gemini", "my.model", "a", "g".repeat(32)]) {
+  for (const name of ["Democli", "my.model", "a", "g".repeat(32)]) {
     const answer = await fetch(`${BASE}/api/models/add`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preset: "gemini", id: name }),
+      body: JSON.stringify({ preset: "democli", id: name }),
     });
     refused.push({ name, status: answer.status, said: (await answer.json()).error || "" });
   }
@@ -1545,7 +1726,7 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   });
   await page.click("[data-add-model]");
   await page.waitForTimeout(700);
-  await page.click("#drawer [data-preset='gemini']");
+  await page.click("#drawer [data-preset='democli']");
   await page.waitForTimeout(300);
   await page.fill("#drawer [data-model-id]", "seeded");
   await page.click("[data-model-register]");
@@ -1578,7 +1759,7 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   for (const field of fields) {
     answers.push({
       field,
-      ...await post({ preset: "gemini", id: "keyed", [field]: "sk-abcdefgh12345678" }),
+      ...await post({ preset: "democli", id: "keyed", [field]: "sk-abcdefgh12345678" }),
     });
   }
   check("machine: a credential in the body is refused by any name it goes by",
@@ -1588,7 +1769,7 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   check("machine: and the refusal names the command that does take one",
     answers.every((row) => /fleet models auth keyed/.test(row.said)),
     answers[0].said);
-  const written = await post({ preset: "custom", id: "pasted", bin: "mine",
+  const written = await post({ preset: "democli", id: "pasted", bin: "mine",
     run: "{bin} --api-key sk-abcdefgh12345678 -p {task}" });
   check("machine: a key written into the command line is refused as well",
     written.status === 400 && /take it out of the command line/.test(written.said),
@@ -1616,7 +1797,7 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   });
   await page.click("[data-add-model]");
   await page.waitForTimeout(700);
-  await page.click("#drawer [data-preset='ollama']");
+  await page.click("#drawer [data-preset='demo-local']");
   await page.waitForTimeout(300);
   await page.click("[data-model-register]");
   await page.waitForTimeout(1200);
@@ -1646,20 +1827,26 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
     polls >= 3, `${polls} asks in six seconds`);
   check("machine: nothing threw around the test in the dialog", thrown.length === 0, thrown[0]);
   await context.close();
+  // Taken out again, so the remove case below can add the same local preset through the dialog.
+  await fetch(`${BASE}/api/models/remove`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: "demo-local" }),
+  });
 }
 
 /* Remove says what it deletes before it deletes it, and a model that shipped with the farm is
    never offered it at all. */
 {
   const { page, context, thrown, posted } = await open({ view: "machine" });
-  await page.click("[data-model-remove='qwen']");
+  await page.click("[data-model-remove='demo-plain']");
   await page.waitForTimeout(500);
   const asked = await page.evaluate(() => document.querySelector("#view .m-confirm").innerText);
   check("machine: Remove asks first, naming the entry and the key it deletes",
-    /Remove Qwen Code\?/.test(asked) && /deleted from this farm's catalog/.test(asked)
+    /Remove Demo Plain\?/.test(asked) && /deleted from this farm's catalog/.test(asked)
     && /key stored/.test(asked), asked.slice(0, 300));
   check("machine: and the key by the name of the variable that holds it",
-    /QWEN_CODE_API_KEY/.test(asked), asked.slice(0, 300));
+    /DEMO_PLAIN_API_KEY/.test(asked), asked.slice(0, 300));
   await page.click("#view .m-confirm .ghost-button");
   await page.waitForTimeout(400);
   check("machine: keeping it sends nothing",
@@ -1669,20 +1856,20 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
      rather than trusted. */
   await page.click("[data-add-model]");
   await page.waitForTimeout(700);
-  await page.click("#drawer [data-preset='aider']");
+  await page.click("#drawer [data-preset='demo-local']");
   await page.waitForTimeout(300);
   await page.click("[data-model-register]");
   await page.waitForTimeout(1200);
   await page.click("[data-model-done]");
   await page.waitForTimeout(1200);
-  const added = await page.evaluate(() => Boolean(document.querySelector("[data-model-remove='aider']")));
+  const added = await page.evaluate(() => Boolean(document.querySelector("[data-model-remove='demo-local']")));
   check("machine: a model this operator added can be removed", added, "no Remove on the new row");
-  await page.click("[data-model-remove='aider']");
+  await page.click("[data-model-remove='demo-local']");
   await page.waitForTimeout(400);
-  await page.click("[data-confirm='remove-model:aider']");
+  await page.click("[data-confirm='remove-model:demo-local']");
   await page.waitForTimeout(1400);
   const after = await page.evaluate(() => ({
-    row: Boolean(document.querySelector("[data-model-open='aider']")),
+    row: Boolean(document.querySelector("[data-model-open='demo-local']")),
     shipped: Boolean(document.querySelector("[data-model-remove='claude']")),
   }));
   check("machine: the post goes, and the table is read back without that row",
@@ -1695,19 +1882,19 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
 }
 
 /* Any row this farm added can be removed, including one it added before this run. The stub knew
-   only the rows added in the same process, so the two fixture rows carrying source "added" wore a
+   only the rows added in the same process, so the fixture rows carrying source "added" wore a
    Remove button that answered "there is no model with that name" the first time it was pressed. */
 {
   const { page, context, thrown, posted } = await open({ view: "machine" });
-  await page.click("[data-model-remove='kimi']");
+  await page.click("[data-model-remove='demo-strict']");
   await page.waitForTimeout(500);
-  await page.click("[data-confirm='remove-model:kimi']");
+  await page.click("[data-confirm='remove-model:demo-strict']");
   await page.waitForTimeout(1500);
   const seen = await page.evaluate(() => {
     const models = [...document.querySelectorAll("#view .section")]
       .find((item) => item.innerText.startsWith("Models"));
     return {
-      row: Boolean(document.querySelector("[data-model-open='kimi']")),
+      row: Boolean(document.querySelector("[data-model-open='demo-strict']")),
       said: models ? models.innerText : "",
     };
   });
@@ -1741,13 +1928,13 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
       "/api/models/remove": (handler) => handler.fulfill({
         status: 400,
         contentType: "application/json",
-        body: JSON.stringify({ error: "qwen is held open by a lane that is still running" }),
+        body: JSON.stringify({ error: "demo-plain is held open by a lane that is still running" }),
       }),
     },
   });
-  await page.click("[data-model-remove='qwen']");
+  await page.click("[data-model-remove='demo-plain']");
   await page.waitForTimeout(500);
-  await page.click("[data-confirm='remove-model:qwen']");
+  await page.click("[data-confirm='remove-model:demo-plain']");
   await page.waitForTimeout(1000);
   const said = await page.evaluate(() => {
     const sections = [...document.querySelectorAll("#view .section")];
@@ -1763,37 +1950,6 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
     said.accounts.length > 0 && !/still running/.test(said.accounts),
     said.accounts.slice(0, 240));
   check("machine: nothing threw on a refused removal", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
-/* Two commands of your own are two rows, each under the name its operator gave it. The server
-   takes a row's label from the preset, and for Custom command that is the name of the card, so
-   two of them drew as two rows both called "Custom command". */
-{
-  const { page, context, thrown } = await open({ view: "machine" });
-  for (const [name, command] of [["mine-one", "one-cli"], ["mine-two", "two-cli"]]) {
-    await page.click("[data-add-model]");
-    await page.waitForTimeout(700);
-    await page.click("#drawer [data-preset='custom']");
-    await page.waitForTimeout(300);
-    await page.fill("#drawer [data-model-id]", name);
-    await page.fill("#drawer [data-model-bin]", command);
-    await page.fill("#drawer [data-model-run-template]", "{bin} -p {task}");
-    await page.click("[data-model-register]");
-    await page.waitForTimeout(1300);
-    await page.click("[data-model-done]");
-    await page.waitForTimeout(1000);
-  }
-  const named = await page.evaluate(() => [
-    ...document.querySelectorAll("#view .mo-providers tbody tr"),
-  ].map((row) => row.querySelector("td:first-child").innerText.replace(/\n/g, " ")));
-  check("machine: two commands of your own are two rows under the names they were given",
-    named.some((line) => /mine-one/.test(line)) && named.some((line) => /mine-two/.test(line)),
-    named.join(" | "));
-  check("machine: and neither of them is called Custom command",
-    named.every((line) => !/Custom command/.test(line)), named.join(" | "));
-  check("machine: nothing threw around a command of your own",
-    thrown.length === 0, thrown[0]);
   await context.close();
 }
 
@@ -1906,7 +2062,7 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
     table.total > 0 && table.live === 0 && table.reasons === table.total, JSON.stringify(table));
   check("machine: reading a model is still allowed", table.names === table.rows,
     JSON.stringify(table));
-  await page.click("[data-model-open='qwen']");
+  await page.click("[data-model-open='demo-plain']");
   await page.waitForTimeout(500);
   const drawer = await page.evaluate(() => {
     const nodes = [...document.querySelectorAll("#drawer [data-model-switch], "

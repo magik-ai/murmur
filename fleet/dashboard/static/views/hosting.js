@@ -1,8 +1,8 @@
-/* Hosting: where a farm and its agents run. Two tables, because the providers do not offer the
-   same thing. A machine runs a whole farm (systemd, worktrees, this dashboard); a runner runs
-   one agent in a cloud sandbox and nothing else. Every price is said in the same words, and
-   every state of a droplet except destroyed still costs money, which the page says out loud
-   on the pill, on the button that buys it and in the head.
+/* Hosting: where a farm runs. A machine runs a whole farm (systemd, worktrees, this
+   dashboard), and murmur ships two kinds: a Linux box you already reach over SSH, and a
+   DigitalOcean Droplet. Every price is said in the same words, and every state of a droplet
+   except destroyed still costs money, which the page says out loud on the pill, on the button
+   that buys it and in the head.
 
    Nothing here ever asks for a token. A provider login is made by that provider's own CLI, in
    a terminal, and this page only hands over the command and watches the state flip by itself.
@@ -19,29 +19,13 @@ import { sectionHead, stepHead, commandRow, copyCommand, farmAlias } from "./mac
 
 /* The sentences a person is asked to act on. They are written once, here, because the dialog,
    the row and the confirm all have to say the same thing about the same money. */
-const HEAD_LINE = "Where farms and agents run. A machine runs a whole farm; a runner runs one "
-  + "agent in a cloud sandbox.";
+const HEAD_LINE = "Where farms run: your own machine over SSH, or a DigitalOcean Droplet. A "
+  + "machine runs a whole farm.";
 const FINISH_LINE = "Run this from your laptop. It signs in to GitHub, clones murmur and runs "
   + "the installer.";
 const BILL_LINE = "You are billed until you destroy it. Powering it off does not stop the bill.";
-const GAP_LINE = "Usage by cloud agents is not in the Accounts windows yet.";
 const KEY_LINE = "Your SSH public key: how your laptop reaches the machine. On your laptop: "
   + "cat ~/.ssh/id_ed25519.pub";
-const TEST_LINE = "Starts the smallest sandbox for about a minute; costs a few cents.";
-const NOT_LIVE = "not run live";
-/* DigitalOcean's own documentation does not show that its claude-code adapter takes a
-   subscription token, so the card says what that may cost instead of guessing (UNVERIFIED,
-   internal/research/report-hosting-cli.md, 2026-09-23). */
-const DO_AGENTS_LINE = "It may need DigitalOcean's own inference, billed by DigitalOcean: their "
-  + "documentation does not show the claude-code adapter taking a subscription token.";
-
-/* The hint under each secret. The names are the two the runners need and no others. */
-const SECRET_HINTS = {
-  CLAUDE_CODE_OAUTH_TOKEN: "run claude setup-token on any machine logged in to your Claude "
-    + "subscription and paste what it prints",
-  GITHUB_TOKEN: "a fine-grained token limited to the project's repository, with contents: read "
-    + "only; the farm pushes, the sandbox never can",
-};
 
 /* A machine's state, in the five meanings this dashboard has and the words a person reads.
    needs-login is a wait on a person and says which person and what for. */
@@ -91,10 +75,9 @@ const TOKEN_SHAPES = [
   /dop_v1_[a-f0-9]{64}/,
 ];
 const TOKEN_REFUSAL = "That looks like a token, not a public key. A token never goes through "
-  + "this page: store it with fleet hosts secret, in a terminal.";
+  + "this page.";
 
 const ADD_MACHINE_KEY = "add-machine";
-const CONNECT_RUNNER_KEY = "connect-runner";
 
 /* This section's own state, and its own footer sentence. The Machine tab learned once that two
    cards reading one error field print one card's failure under both of them, so a hosting job
@@ -118,8 +101,6 @@ const local = {
   confirming: false,
   sending: false,
   created: "",
-  runner: "",
-  project: "",
 };
 
 function afterPaint(work) {
@@ -260,11 +241,10 @@ async function startJob(context, key, body, path, field = "error") {
 }
 
 const machineKey = (name) => `the machine ${name}`;
-const runnerKey = (id) => `the runner ${id}`;
 
 /* --------------------------------------------------------- refreshing by itself */
 
-/* A login or a stored secret happens in a terminal, not here, so the dialog that told a person
+/* A login happens in a terminal, not here, so the dialog that told a person
    to go and do it asks the farm again every three seconds and flips its own state when it
    lands. It stops when the dialog closes: nothing on this page polls in the background. */
 function startPoll(context) {
@@ -284,11 +264,6 @@ function stopPoll() {
 function stateWords(row) {
   const [, label] = MACHINE_STATE[row.state] || ["pause", fmt.titleCase(row.state || "unknown")];
   return [label, row.detail || "", billedLine(row)].filter(Boolean).join(". ");
-}
-
-function loginWords(row) {
-  const [, label] = LOGIN_STATE[String(row.login_state || "")] || ["pause", "Cannot tell"];
-  return [label, LOGIN_TITLE[String(row.login_state || "")] || "", row.detail || ""].filter(Boolean).join(". ");
 }
 
 function statePill(row) {
@@ -505,7 +480,7 @@ function machinesCard(context) {
   local.error ? h("p", { class: "m-bad card-pad", key: "err" }, local.error) : null);
 }
 
-/* ------------------------------------------------------------- the runners table */
+/* ------------------------------------------------------------- a provider's words */
 
 function stageWord(row) {
   const stage = String((row || {}).stage || "").toLowerCase();
@@ -518,137 +493,6 @@ function loginPill(row) {
   const title = [LOGIN_TITLE[state] || "", row.account ? `Account: ${row.account}.` : "",
     row.detail || ""].filter(Boolean).join(" ");
   return pill(meaning, label, title);
-}
-
-function secretsCell(row) {
-  const secrets = list(row.secrets);
-  const stored = secrets.filter((item) => item && item.stored);
-  /* The label stored with the token, so a person can see which subscription a lane would
-     spend. The farm's Accounts windows cannot see a cloud agent's usage at all. */
-  const account = (stored.find((item) => item.account) || {}).account || "";
-  /* The title starts with what the cell shows, so a narrow window that cuts it loses nothing. */
-  const title = [`${stored.length} of ${secrets.length}${account ? ` ${account}` : ""}`,
-    secrets.length
-      ? secrets.map((item) => `${item.name}: ${item.stored ? "stored" : "not stored"}`
-        + `${item.account ? ` (${item.account})` : ""}`).join(". ")
-      : "This provider needs no secret."].join(". ");
-  return h("div", { class: "h-cell", title },
-    h("span", null, `${stored.length} of ${secrets.length}`),
-    account ? h("span", { class: "muted cell-text" }, account) : null);
-}
-
-/* The Test cell in words, for its title: a narrow window cuts the cell (fixed columns). */
-function testWords(row) {
-  const tested = row.tested;
-  if (!tested) return `Not tested, ${NOT_LIVE}`;
-  const seconds = Number(tested.seconds);
-  const when = tested.at ? fmt.ago(tested.at) : "";
-  return tested.ok
-    ? `Passed${Number.isFinite(seconds) && seconds > 0 ? `, in ${fmt.duration(seconds)}` : ""}${when ? `, last run ${when}` : ""}`
-    : `Failed, ${NOT_LIVE}${tested.detail ? `. ${tested.detail}` : ""}`;
-}
-
-function testCell(row) {
-  const tested = row.tested;
-  if (!tested) {
-    return h("div", { class: "h-cell" },
-      pill("pause", "Not tested", "No Test has run on this farm, so nothing here has spoken to "
-        + "the provider yet."),
-      h("span", { class: "muted cell-text" }, NOT_LIVE));
-  }
-  const ok = Boolean(tested.ok);
-  const seconds = Number(tested.seconds);
-  const when = tested.at ? fmt.ago(tested.at) : "";
-  /* Only a Test that passed clears the words: one that ran and failed has still not shown
-     this farm talking to the provider (design section 5). */
-  return h("div", { class: "h-cell" },
-    pill(ok ? "done" : "fail", ok ? "Passed" : "Failed",
-      [tested.detail || "", when ? `Last run ${when}.` : ""].filter(Boolean).join(" ")),
-    h("span", { class: "muted cell-text" }, ok
-      ? (Number.isFinite(seconds) && seconds > 0 ? fmt.duration(seconds) : when) : NOT_LIVE));
-}
-
-function cliCell(context, row) {
-  if (row.cli_installed) {
-    return h("div", { class: "h-cell" },
-      h("span", null, "Installed"),
-      h("span", { class: "muted cell-text mono" }, row.cli || ""));
-  }
-  /* The install command is an action, so it is the Install button in the actions column. */
-  return h("span", { class: "muted" }, "Not installed");
-}
-
-function runnerActions(context, row) {
-  const key = runnerKey(row.id);
-  const busy = Boolean(running(context, key));
-  /* Three buttons at most, like every actions column: without the CLI the spawn line would
-     spawn nothing, so Install takes its place and comes first. */
-  const install = !row.cli_installed && row.install;
-  return h("div", { class: "row h-do" },
-    install ? copyButton(row.install, "host-install", "Install",
-      `Copy the install command, then run it on this farm: ${row.install}`) : null,
-    h("button", {
-      key: "check",
-      class: "ghost-button small",
-      "data-host-check": row.id,
-      disabled: access.writable && !busy ? null : true,
-      title: busy ? "Check is running" : blocked(),
-      onclick: () => startJob(context, key, { provider: row.id }, "/api/hosts/check"),
-    }, "Check"),
-    h("button", {
-      key: "test",
-      class: "ghost-button small",
-      "data-host-open-test": row.id,
-      disabled: access.writable ? null : true,
-      title: blocked() || TEST_LINE,
-      onclick: () => openConnectRunner(context, row.id),
-    }, "Test"),
-    /* The project is the one the header is filtered to, or the one picked in the dialog; with
-       neither, the line carries a placeholder rather than a project nobody chose. */
-    install ? null : copyButton(spawnLine(row.id, local.project || context.project), "host-spawn", "Spawn",
-      "Copy the line that spawns a lane in this provider's sandbox."));
-}
-
-function runnerRow(context, row) {
-  return h("tr", { key: row.id },
-    h("td", { title: `${row.label || row.id}, ${stageWord(row)}` }, h("div", { class: "h-name" },
-      h("b", null, row.label || row.id),
-      h("span", { class: "muted" }, stageWord(row)))),
-    h("td", { title: row.cli_installed ? `Installed ${row.cli || ""}`.trim()
-      : `Not installed${row.install ? `. Install: ${row.install}` : ""}` }, cliCell(context, row)),
-    h("td", { title: loginWords(row) }, loginPill(row)),
-    h("td", null, secretsCell(row)),
-    h("td", { title: testWords(row) }, testCell(row)),
-    h("td", { class: "h-do-cell actions" }, runnerActions(context, row)));
-}
-
-function runnersCard(context) {
-  const resource = context.res("/api/hosts");
-  return card({ key: "runners", "data-write": "" }, panel(resource, {
-    loading: () => h("div", { class: "card-pad" }, skeletonStack(3)),
-    isEmpty: (data) => !list(data.providers).filter((row) => row && row.job === "runner").length,
-    empty: () => h("div", { class: "card-pad" }, emptyState({
-      title: "This server lists no runner",
-      body: "A runner is a provider that can hold one agent in a cloud sandbox. The page and "
-        + "the server are different versions, so this table has nothing to show.",
-      command: "fleet update && fleet dashboard restart",
-    })),
-    ready: (data) => [
-      staleNote(data, "stale-runners"),
-      h("div", { class: "tablewrap", key: "table" }, h("table", { class: "h-runners" },
-        h("thead", null, h("tr", null,
-          h("th", { title: "Provider" }, "Provider"),
-          h("th", { title: "CLI" }, "CLI"),
-          h("th", { title: "Login" }, "Login"),
-          h("th", { title: "Secrets" }, "Secrets"),
-          h("th", { title: "Test" }, "Test"),
-          h("th", { class: "actions", title: "Actions" }, "Actions"))),
-        h("tbody", null, list(data.providers)
-          .filter((row) => row && row.job === "runner")
-          .map((row) => runnerRow(context, row))))),
-      readOnlyLine("ro-runners"),
-    ],
-  }));
 }
 
 /* ------------------------------------------------------- the add a machine dialog */
@@ -674,8 +518,7 @@ function chooseProvider(context, row) {
 }
 
 function providerCard(context, row, mark, extra) {
-  const machineSide = mark === "machine-provider";
-  const chosen = (machineSide ? local.provider : local.runner) === row.id;
+  const chosen = local.provider === row.id;
   const stage = stageWord(row);
   return h("button", {
     key: row.id,
@@ -686,13 +529,13 @@ function providerCard(context, row, mark, extra) {
     [`data-${mark}`]: row.id,
     disabled: access.writable ? null : true,
     title: blocked(),
-    onclick: () => (machineSide ? chooseProvider(context, row) : chooseRunner(context, row)),
+    onclick: () => chooseProvider(context, row),
   },
   h("div", { class: "m-preset-head" },
     h("b", null, row.label || row.id),
     stage ? h("span", { class: "h-stage" }, stage) : null),
   /* Two short lines on a card, and the price, the terms and any warning only once it is
-     picked: five cards of fine print is a wall nobody reads (owner, 2026-09-24). */
+     picked: cards of fine print are a wall nobody reads (owner, 2026-09-24). */
   h("div", { class: "muted m-preset-sum", title: row.summary || "" }, row.summary || ""),
   chosen ? providerFacts(row, extra) : null);
 }
@@ -1113,8 +956,8 @@ function addMachineSteps(context, rows) {
     afterPaint(() => closeDrawer());
   }
   return h("div", { class: "m-steps", key: "steps" },
-    stepHead(1, "Where it runs", "A machine runs a whole farm. A runner is a different thing "
-      + "and is connected further down the page."),
+    stepHead(1, "Where it runs", "A machine runs a whole farm: a box of your own over SSH, or a "
+      + "DigitalOcean Droplet."),
     h("div", { class: "m-presets", role: "radiogroup", "aria-label": "Provider", key: "cards" },
       rows.map((row) => providerCard(context, row, "machine-provider"))),
     preset ? (preset.id === "ssh" ? ownFields(context) : dropletFields(context, preset)) : null,
@@ -1172,176 +1015,6 @@ export function openAddMachine(context) {
   });
 }
 
-/* ----------------------------------------------------- the connect a runner dialog */
-
-function runnerProviders(context) {
-  return providers(context).filter((row) => row.job === "runner");
-}
-
-function chooseRunner(context, row) {
-  local.runner = row.id;
-  local.dialogError = "";
-  context.paint();
-}
-
-function spawnLine(provider, project) {
-  return `fleet spawn --project ${project || "<project>"} --lane <name> --engine claude `
-    + `--model sonnet --runner ${provider} --task "..."`;
-}
-
-function installStep(context, row) {
-  const done = Boolean(row.cli_installed);
-  return [
-    stepHead(2, "Install the CLI", done
-      ? `${row.cli || "The provider's command"} is on this farm.`
-      : "The provider's own command, installed on the farm, in a terminal."),
-    done ? null : commandRow(row.install || `install ${row.cli || row.id}`, "runner-install", "install"),
-    h("div", { class: "row m-wait", key: "state" },
-      pill(done ? "done" : "wait", done ? "Installed" : "Not installed", row.detail || ""),
-      h("span", { class: "muted" }, done
-        ? "Nothing to do here." : "This page is watching for it.")),
-  ];
-}
-
-function runnerLoginStep(context, row) {
-  const done = String(row.login_state || "") === "logged_in";
-  return [
-    stepHead(3, "Log in", done
-      ? "This farm is logged in to the provider."
-      : "The login is made by the provider's own command, never through this page."),
-    done ? null : commandRow(`ssh -t ${farmAlias(context)} ${row.login || `${row.cli || row.id} login`}`,
-      "runner-login", "login"),
-    h("div", { class: "row m-wait", key: "state" },
-      loginPill(row),
-      h("span", { class: "muted" }, done
-        ? `Logged in as ${row.account || "this account"}.`
-        : "This page is watching for it and will say so by itself.")),
-  ];
-}
-
-function secretsStep(context, row) {
-  const secrets = list(row.secrets);
-  return [
-    stepHead(4, "Store the secrets", "Each one is typed into your own terminal and read from "
-      + "there. The value never passes through this page, and never reaches a command line."),
-    secrets.length
-      ? secrets.map((secret) => h("div", { class: "h-secret", key: secret.name },
-        h("div", { class: "row" },
-          h("b", null, secret.name),
-          pill(secret.stored ? "done" : "wait", secret.stored ? "Stored" : "Not stored",
-            secret.account ? `Stored for ${secret.account}.` : "")),
-        h("p", { class: "muted" }, SECRET_HINTS[secret.name] || "a value this runner needs"),
-        commandRow(`ssh -t ${farmAlias(context)} fleet hosts secret ${row.id} ${secret.name}`,
-          "runner-secret", `secret:${secret.name}`)))
-      : h("p", { class: "muted", key: "none" }, "This provider needs no secret."),
-  ];
-}
-
-function testStep(context, row) {
-  const key = runnerKey(row.id);
-  const job = running(context, key, "dialogError");
-  const projects = list(context.res("/api/projects").data).filter(Boolean);
-  const tested = row.tested;
-  return [
-    stepHead(5, "Test it", "One real sandbox, started and deleted again, so you know this works "
-      + "before a lane depends on it."),
-    h("label", { class: "m-field", key: "project" },
-      h("span", { class: "m-label" }, "Project"),
-      h("select", {
-        class: "m-name",
-        "aria-label": "Project",
-        "data-test-project": "",
-        value: local.project,
-        disabled: access.writable ? null : true,
-        onchange: (event) => {
-          local.project = event.target.value;
-          context.paint();
-        },
-      /* Every option says whether it is the chosen one, the placeholder included. Leaving that
-         off the placeholder left the select showing the last project in the list while its
-         value was empty, which is a select that lies about what pressing Test would do. */
-      }, [h("option", { key: "none", value: "", selected: !local.project }, "Pick a project"),
-        ...projects.map((project) => h("option", {
-          key: project.name, value: project.name, selected: local.project === project.name,
-        }, project.name))])),
-    h("p", { class: "muted", key: "cost" }, TEST_LINE),
-    h("div", { class: "row m-dialog-actions", key: "acts" },
-      h("button", {
-        class: "button primary",
-        "data-host-test": row.id,
-        disabled: access.writable && local.project && !job ? null : true,
-        title: blocked() || (local.project ? "" : "Pick a project first."),
-        onclick: () => startJob(context, key,
-          { provider: row.id, project: local.project, confirm: true },
-          "/api/hosts/test", "dialogError"),
-      }, job ? "Testing" : "Test it")),
-    job
-      ? h("p", { class: "muted", key: "job" },
-        `Job ${job.id} is running: ${job.detail || "starting a sandbox"}.`)
-      : h("div", { class: "row m-wait", key: "result" }, testCell(row),
-        h("span", { class: "muted" }, tested
-          ? tested.detail || "" : "Nothing here has spoken to the provider yet.")),
-  ];
-}
-
-function spawnStep(context, row) {
-  return [
-    stepHead(6, "Spawn a lane in it", "Spawning stays a command: the page does not spawn."),
-    commandRow(spawnLine(row.id, local.project), "runner-spawn", "spawn"),
-  ];
-}
-
-function connectRunnerSteps(context, rows) {
-  const row = providerById(context, local.runner);
-  if (row) startPoll(context); else stopPoll();
-  return h("div", { class: "m-steps", key: "steps" },
-    stepHead(1, "Pick a provider", ""),
-    h("div", { class: "m-presets", role: "radiogroup", "aria-label": "Runner", key: "cards" },
-      rows.map((item) => providerCard(context, item, "runner-provider",
-        item.id === "do-agents" ? DO_AGENTS_LINE : ""))),
-    row ? installStep(context, row) : null,
-    row ? runnerLoginStep(context, row) : null,
-    row ? secretsStep(context, row) : null,
-    row ? testStep(context, row) : null,
-    row ? spawnStep(context, row) : null,
-    local.dialogError
-      ? h("p", { class: "m-bad", key: "err", role: "alert" }, local.dialogError) : null,
-    h("div", { class: "row m-dialog-actions", key: "close" },
-      h("button", { class: "ghost-button", "data-runner-done": "", onclick: () => closeDrawer() },
-        "Done")),
-    readOnlyLine("ro-connect-runner"));
-}
-
-function connectRunnerBody(context) {
-  const resource = context.res("/api/hosts");
-  return panel(resource, {
-    loading: () => skeletonStack(4),
-    isEmpty: () => !runnerProviders(context).length,
-    empty: () => emptyState({
-      title: "This farm lists no runner",
-      body: "A runner is a provider that can hold one agent in a cloud sandbox.",
-      command: "fleet hosts list",
-    }),
-    ready: () => connectRunnerSteps(context, runnerProviders(context)),
-  });
-}
-
-export function openConnectRunner(context, provider) {
-  local.runner = provider || "";
-  local.dialogError = "";
-  openDrawer({
-    key: CONNECT_RUNNER_KEY,
-    title: "Connect a runner",
-    sub: "A runner holds one agent at a time, in a sandbox in the cloud.",
-    body: () => connectRunnerBody(context),
-    onClose: () => {
-      stopPoll();
-      local.dialogError = "";
-      context.refresh("/api/hosts");
-    },
-  });
-}
-
 /* ------------------------------------------------------------------- the section */
 
 export function hostingSection(context) {
@@ -1367,22 +1040,7 @@ export function hostingSection(context) {
           disabled: access.writable ? null : true,
           title: blocked(),
           onclick: () => openAddMachine(context),
-        }, "Add a machine"),
-        h("button", {
-          key: "connect-runner",
-          class: "button",
-          "data-connect-runner": "",
-          "data-write": "",
-          disabled: access.writable ? null : true,
-          title: blocked(),
-          onclick: () => openConnectRunner(context, ""),
-        }, "Connect a runner"))),
+        }, "Add a machine"))),
     h("h3", { class: "subhead", key: "machines-head" }, "Machines"),
-    machinesCard(context),
-    /* The one sentence under a heading on this tab that stays visible: it names a spend the page
-       does not count, and a warning in a tooltip is a warning a keyboard or a finger never finds. */
-    h("div", { class: "subhead-row", key: "runners-head" },
-      h("h3", { class: "subhead" }, "Runners"),
-      h("span", { class: "muted", "data-runner-gap": "" }, GAP_LINE)),
-    runnersCard(context));
+    machinesCard(context));
 }

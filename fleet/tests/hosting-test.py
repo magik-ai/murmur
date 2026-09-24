@@ -2,7 +2,7 @@
 
 Nothing here reaches a real provider, spends money or touches the live farm. Every test runs
 with its own FLEET_STATE, FLEET_CONFIG and HOME, and with fake `doctl`, `ssh`, `ssh-keygen`,
-`railway`, `sandbox`, `sudo`, `dpkg` and `id` executables first on PATH (tests/fakes/core), which
+`sudo`, `dpkg` and `id` executables first on PATH (tests/fakes/core), which
 record every call as one JSON line in $FAKE_LOG. The installer tests add tests/fakes/core/installer
 (gh, hq, uv, claude, loginctl, systemctl, apt-get, curl), so farm/install.sh runs to its last
 line on a scratch HOME and changes nothing.
@@ -31,34 +31,30 @@ def machine_presets():
     return [row for row in host_presets.presets() if row["job"] == "machine"]
 
 
-def runner_presets():
-    return [row for row in host_presets.presets() if row["job"] == "runner"]
-
-
 class Presets(unittest.TestCase):
     """The provider facts, as the research pass of 2026-09-23 recorded them."""
 
     FIELDS = ("id", "label", "summary", "color", "job", "cli", "install", "login", "whoami", "docs",
-              "terms", "stage", "pricing", "sizes", "regions", "secrets", "engines")
+              "terms", "stage", "pricing", "sizes", "regions", "engines")
 
     def test_every_preset_carries_every_field(self):
         for row in host_presets.presets():
             for field in self.FIELDS:
                 self.assertIn(field, row, f"{row['id']} has no {field}")
             self.assertTrue(host_presets.ID_RE.match(row["id"]), row["id"])
-            self.assertIn(row["job"], ("machine", "runner"), row["id"])
+            self.assertEqual(row["job"], "machine", row["id"])
             self.assertIn(row["stage"], ("ga", "preview", "early access"), row["id"])
             self.assertRegex(row["color"], r"^#[0-9A-Fa-f]{6}$", row["id"])
             # A card says what the provider is in two short lines; prices and caveats wait until
             # it is picked (owner, 2026-09-24).
             self.assertLessEqual(len(row["summary"]), 90, row["id"])
 
-    def test_the_five_providers_of_the_design_record(self):
-        self.assertEqual([row["id"] for row in host_presets.presets()],
-                         ["ssh", "do-droplet", "do-agents", "railway", "vercel"])
+    def test_murmur_ships_your_own_machine_and_a_droplet_and_nothing_else(self):
+        # The owner's decision of 2026-09-24: only what has run for real. A preset added back
+        # is a contribution, and it changes this list on purpose (CONTRIBUTING.md).
+        self.assertEqual([row["id"] for row in host_presets.presets()], ["ssh", "do-droplet"])
         self.assertEqual([row["id"] for row in machine_presets()], ["ssh", "do-droplet"])
-        self.assertEqual([row["id"] for row in runner_presets()],
-                         ["do-agents", "railway", "vercel"])
+        self.assertFalse(hasattr(host_presets, "RUNNER_SECRETS"))
 
     def test_the_module_offers_the_three_calls_the_brief_names_and_nothing_else(self):
         public = sorted(name for name in vars(host_presets)
@@ -79,15 +75,10 @@ class Presets(unittest.TestCase):
             self.assertIsInstance(row["whoami"], list, row["id"])
             self.assertEqual(row["whoami"][0], row["cli"], row["id"])
 
-    def test_runners_carry_both_secrets_an_output_and_one_engine(self):
-        for row in runner_presets():
-            self.assertEqual(row["secrets"], ["CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN"],
-                             row["id"])
-            self.assertIn(row["output"], ("stream-json", "text"), row["id"])
-            self.assertEqual(row["engines"], ["claude"], row["id"])
-        for row in machine_presets():
-            self.assertEqual(row["secrets"], [], row["id"])
-            self.assertNotIn("output", row, row["id"])
+    def test_no_preset_carries_the_runner_only_fields(self):
+        for row in host_presets.presets():
+            for field in ("secrets", "output"):
+                self.assertNotIn(field, row, row["id"])
 
     def test_droplet_sizes_and_prices_are_the_research_table(self):
         sizes = host_presets.preset("do-droplet")["sizes"]
@@ -99,7 +90,7 @@ class Presets(unittest.TestCase):
         self.assertEqual(host_presets.DEFAULT_SIZE, "s-4vcpu-8gb")
         self.assertEqual(host_presets.size("do-droplet", "s-4vcpu-8gb")["monthly_usd"], 48)
         self.assertIsNone(host_presets.size("do-droplet", "s-1vcpu-1gb"))
-        self.assertIsNone(host_presets.size("railway", "anything"))
+        self.assertIsNone(host_presets.size("no-such-provider", "anything"))
 
     def test_exactly_one_size_of_a_sized_preset_is_its_default(self):
         for row in host_presets.presets():
@@ -110,13 +101,11 @@ class Presets(unittest.TestCase):
                 self.assertEqual(len(defaults), 1, row["id"])
         droplet = host_presets.preset("do-droplet")["sizes"]
         self.assertEqual([e["slug"] for e in droplet if e["default"]], [host_presets.DEFAULT_SIZE])
-        agents = host_presets.preset("do-agents")["sizes"]
-        self.assertEqual([e["slug"] for e in agents if e["default"]], ["mars-4vcpu-8gb"])
 
     def test_a_price_says_the_day_it_was_read(self):
         self.assertEqual(host_presets.LIST_PRICE_NOTE, "list price on 2026-09-23")
         for row in host_presets.presets():
-            if row["sizes"] or row["id"] in ("railway", "vercel"):
+            if row["sizes"]:
                 self.assertIn("list price on 2026-09-23", row["pricing"], row["id"])
 
     def test_droplet_regions_default_to_frankfurt(self):
@@ -126,12 +115,8 @@ class Presets(unittest.TestCase):
                          sorted(["fra1", "ams3", "lon1", "nyc3", "sfo3", "sgp1", "tor1", "blr1",
                                  "syd1"]))
 
-    def test_managed_agents_run_in_one_region(self):
-        self.assertEqual(host_presets.preset("do-agents")["regions"], ["ric1"])
-
     def test_what_the_research_could_not_confirm_says_so(self):
-        for host_id in ("do-agents", "railway", "vercel"):
-            self.assertIn("UNVERIFIED", host_presets.preset(host_id)["terms"], host_id)
+        self.assertIn("UNVERIFIED", host_presets.preset("do-droplet")["terms"])
 
     def test_a_caller_cannot_edit_the_shipped_description(self):
         row = host_presets.preset("do-droplet")
@@ -142,10 +127,11 @@ class Presets(unittest.TestCase):
         self.assertIsNone(host_presets.preset("no-such-provider"))
 
     def test_every_doctl_call_names_the_context_the_login_creates(self):
-        for host_id in ("do-droplet", "do-agents"):
-            row = host_presets.preset(host_id)
-            self.assertIn("--context", row["whoami"], host_id)
-            self.assertIn(host_presets.DOCTL_CONTEXT, row["login"], host_id)
+        for row in host_presets.presets():
+            if row["cli"] != "doctl":
+                continue
+            self.assertIn("--context", row["whoami"], row["id"])
+            self.assertIn(host_presets.DOCTL_CONTEXT, row["login"], row["id"])
 
 
 class Farm(unittest.TestCase):
@@ -291,6 +277,7 @@ class CloudInit(Farm):
         self.assertEqual(len(made), 1, made)
 
     def test_no_secret_is_rendered_into_the_first_boot(self):
+        # A farm that stored a runner token before runners were removed still has the file.
         secrets = os.path.join(self.state, "secrets", "hosts", "railway")
         os.makedirs(secrets)
         with open(os.path.join(secrets, "GITHUB_TOKEN"), "w", encoding="utf-8") as handle:
@@ -617,7 +604,7 @@ class DoctlContext(Farm):
         verbs = {" ".join(argv[1:4]) for argv in seen}
         for verb in ("compute size list", "compute ssh-key import", "compute firewall create",
                      "compute droplet create", "compute droplet list", "compute droplet get",
-                     "compute droplet delete", "account get -o", "harness-runtime list -o"):
+                     "compute droplet delete", "account get -o"):
             self.assertIn(verb, verbs)
         return seen
 
@@ -816,54 +803,47 @@ class Hosts(HostsFarm):
     """Is the CLI there, is it logged in, and what does a slow provider look like."""
 
     def test_every_provider_carries_the_fields_the_page_reads(self):
-        rows = self.providers(FAKE_RAILWAY_LOGGED_IN="1", FAKE_SANDBOX_LOGGED_IN="1")
-        self.assertEqual(sorted(rows), sorted(["ssh", "do-droplet", "do-agents", "railway",
-                                               "vercel"]))
+        rows = self.providers()
+        self.assertEqual(sorted(rows), sorted(["ssh", "do-droplet"]))
         for row in rows.values():
             for field in ("id", "label", "job", "stage", "cli_installed", "login_state",
-                          "account", "detail", "checked_at", "secrets", "tested", "login",
+                          "account", "detail", "checked_at", "login",
                           "install", "terms", "pricing", "sizes", "regions",
                           # the contract amendment of the PR 40 fix round
                           "cli", "color", "engines", "docs"):
                 self.assertIn(field, row, row["id"])
+            # The runner-only fields went with the runners (2026-09-24).
+            for field in ("secrets", "tested"):
+                self.assertNotIn(field, row, row["id"])
             for entry in row["sizes"]:
                 self.assertIn("default", entry, row["id"])
             self.assertIn(row["login_state"], ("logged_in", "logged_out", "not_installed",
                                                "no_answer"), row["id"])
 
     def test_a_logged_in_provider_names_its_account_where_it_documents_one(self):
-        rows = self.providers(FAKE_RAILWAY_LOGGED_IN="1")
+        rows = self.providers()
         self.assertEqual(rows["do-droplet"]["login_state"], "logged_in")
         self.assertEqual(rows["do-droplet"]["account"], "owner@example.com")
-        self.assertEqual(rows["railway"]["account"], "owner@example.com")
-        # DigitalOcean's harness-runtime list documents no account, so this farm invents none.
-        self.assertIsNone(rows["do-agents"]["account"])
+        # ssh has no account at all, so this farm invents none.
+        self.assertIsNone(rows["ssh"]["account"])
 
     def test_a_logged_out_provider_is_not_a_missing_one(self):
         rows = self.providers(FAKE_DOCTL_LOGGED_IN="")
         self.assertEqual(rows["do-droplet"]["login_state"], "logged_out")
         self.assertTrue(rows["do-droplet"]["cli_installed"])
         self.assertIn("access token", rows["do-droplet"]["detail"])
-        self.assertEqual(rows["vercel"]["login_state"], "logged_out")
-
-    def test_a_doctl_build_without_the_command_is_not_a_logged_out_one(self):
-        rows = self.providers(FAKE_DOCTL_NO_HARNESS="1")
-        self.assertEqual(rows["do-agents"]["login_state"], "not_installed")
-        self.assertIn("harness-runtime", rows["do-agents"]["detail"])
-        self.assertIn("2026-09-22", rows["do-agents"]["detail"])
-        self.assertEqual(rows["do-droplet"]["login_state"], "logged_in")
 
     def test_a_cli_that_is_not_there_says_how_to_install_it(self):
         rows = self.providers(PATH=os.path.dirname(sys.executable))
-        self.assertEqual(rows["railway"]["login_state"], "not_installed")
-        self.assertFalse(rows["railway"]["cli_installed"])
-        done = self.hosts("check", "railway", PATH=os.path.dirname(sys.executable))
-        self.assertIn("npm i -g @railway/cli", done.stdout)
+        self.assertEqual(rows["do-droplet"]["login_state"], "not_installed")
+        self.assertFalse(rows["do-droplet"]["cli_installed"])
+        done = self.hosts("check", "do-droplet", PATH=os.path.dirname(sys.executable))
+        self.assertIn("docs.digitalocean.com/reference/doctl/how-to/install", done.stdout)
 
     def test_a_slow_provider_is_no_answer_and_never_logged_out(self):
-        rows = self.providers(FAKE_RAILWAY_SLEEP="8")
-        self.assertEqual(rows["railway"]["login_state"], "no_answer")
-        self.assertIn("no answer", rows["railway"]["detail"])
+        rows = self.providers(FAKE_DOCTL_SLEEP="8")
+        self.assertEqual(rows["do-droplet"]["login_state"], "no_answer")
+        self.assertIn("no answer", rows["do-droplet"]["detail"])
 
     def test_the_shipped_check_timeout_is_the_design_records_fifteen_seconds(self):
         done = subprocess.run(
@@ -879,131 +859,41 @@ class Hosts(HostsFarm):
         row = self.providers()["ssh"]
         self.assertEqual(row["login_state"], "logged_in")
         self.assertIn("fleet machines check", row["detail"])
-        self.assertEqual(row["secrets"], [])
-
-    def test_the_last_test_is_read_from_the_file_the_runners_lane_writes(self):
-        self.assertIsNone(self.providers()["railway"]["tested"])
-        folder = os.path.join(self.state, "hosts", "railway")
-        os.makedirs(folder)
-        with open(os.path.join(folder, "tested.json"), "w", encoding="utf-8") as handle:
-            json.dump({"ok": True, "at": "2026-09-23T10:00:00Z", "seconds": 42,
-                       "detail": "claude --version answered"}, handle)
-        self.assertEqual(self.providers()["railway"]["tested"]["seconds"], 42)
-        with open(os.path.join(folder, "tested.json"), "w", encoding="utf-8") as handle:
-            handle.write("not json at all")
-        self.assertIsNone(self.providers()["railway"]["tested"])
 
 
-class Secrets(HostsFarm):
-    """A value that arrives on stdin, lives in a 0600 file, and is never said out loud."""
+
+class LeftoverRunnerSecrets(HostsFarm):
+    """A farm that stored a runner token before runners were removed (2026-09-24) keeps the
+    file, because nothing here deletes a person's things. It is never listed, and it is still
+    scrubbed out of whatever a provider CLI prints."""
 
     VALUE = "sandbox-secret-value-987654"
 
-    def store(self, provider="railway", name="CLAUDE_CODE_OAUTH_TOKEN", value=None, *extra):
-        done = self.hosts("secret", provider, name, *extra, stdin=(value or self.VALUE))
-        return done
+    def setUp(self):
+        super().setUp()
+        folder = os.path.join(self.state, "secrets", "hosts", "railway")
+        os.makedirs(folder, mode=0o700)
+        with open(os.path.join(folder, "CLAUDE_CODE_OAUTH_TOKEN"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(self.VALUE)
 
-    def test_a_secret_is_stored_0600_in_a_0700_directory_with_its_label(self):
-        done = self.store("railway", "CLAUDE_CODE_OAUTH_TOKEN", None, "--account", "demo-max")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        path = os.path.join(self.state, "secrets", "hosts", "railway",
-                            "CLAUDE_CODE_OAUTH_TOKEN")
-        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
-        # Every directory on the way down, or a group member could rename one and put their own
-        # in its place: a rename needs write on the parent, not on the directory itself.
-        for folder in ("secrets", "secrets/hosts", "secrets/hosts/railway"):
-            self.assertEqual(os.stat(os.path.join(self.state, folder)).st_mode & 0o777, 0o700,
-                             folder)
-        with open(path, encoding="utf-8") as handle:
-            self.assertEqual(handle.read(), self.VALUE)
-        row = self.providers()["railway"]
-        stored = {secret["name"]: secret for secret in row["secrets"]}
-        self.assertTrue(stored["CLAUDE_CODE_OAUTH_TOKEN"]["stored"])
-        self.assertEqual(stored["CLAUDE_CODE_OAUTH_TOKEN"]["account"], "demo-max")
-        self.assertFalse(stored["GITHUB_TOKEN"]["stored"])
-
-    def test_the_value_never_reaches_stdout_stderr_or_an_argv(self):
-        done = self.store()
-        self.assertNotIn(self.VALUE, done.stdout)
-        self.assertNotIn(self.VALUE, done.stderr)
-        self.hosts("list", "--json", FAKE_RAILWAY_LOGGED_IN="1")
-        self.hosts("check", "railway", FAKE_RAILWAY_LOGGED_IN="1")
-        with open(self.fake_log, encoding="utf-8") as handle:
-            self.assertNotIn(self.VALUE, handle.read())
-        for call in self.calls():
-            self.assertNotIn(self.VALUE, " ".join(call["argv"]))
+    def test_the_old_provider_is_not_listed_and_its_file_is_kept(self):
+        rows = self.providers()
+        self.assertEqual(sorted(rows), ["do-droplet", "ssh"])
+        self.assertTrue(os.path.exists(os.path.join(self.state, "secrets", "hosts", "railway",
+                                                    "CLAUDE_CODE_OAUTH_TOKEN")))
 
     def test_a_provider_that_prints_a_stored_secret_is_scrubbed_before_anyone_reads_it(self):
-        self.store()
-        done = self.hosts("check", "railway", FAKE_RAILWAY_LOGGED_IN="",
-                          FAKE_RAILWAY_LEAK=self.VALUE)
+        done = self.hosts("check", "do-droplet", FAKE_DOCTL_LOGGED_IN="",
+                          FAKE_DOCTL_LEAK=self.VALUE)
         self.assertNotIn(self.VALUE, done.stdout + done.stderr)
         self.assertIn("[redacted]", done.stdout)
 
-    def test_the_account_label_is_shown_and_never_taken_for_a_secret(self):
-        done = self.store("railway", "CLAUDE_CODE_OAUTH_TOKEN", None, "--account",
-                          "demo-max-plan")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        import scrub
-        self.assertNotIn("demo-max-plan", scrub.stored_secrets(self.state))
-        # A provider line that names the label keeps it; the stored value is still redacted.
-        done = self.hosts("check", "railway", FAKE_RAILWAY_LOGGED_IN="",
-                          FAKE_RAILWAY_LEAK=f"{self.VALUE} of demo-max-plan")
-        self.assertIn("[redacted] of demo-max-plan", done.stdout)
-        self.assertIn("CLAUDE_CODE_OAUTH_TOKEN: stored (demo-max-plan)", done.stdout)
-        # A label stored without one is cleared again.
-        self.store("railway", "CLAUDE_CODE_OAUTH_TOKEN")
-        stored = {s["name"]: s for s in self.providers()["railway"]["secrets"]}
-        self.assertEqual(stored["CLAUDE_CODE_OAUTH_TOKEN"]["account"], "")
-
-    def test_two_stores_at_once_keep_both_labels(self):
-        # In one process, so the read of accounts.json can be held open long enough for the
-        # second writer to read the same old file: without the lock, the later write wins alone.
-        import importlib
-        import threading
-        from unittest import mock
-        import hosts
-        hosts = importlib.reload(hosts)
-        mock.patch.object(hosts, "SECRETS", os.path.join(self.state, "secrets", "hosts")).start()
-        mock.patch.object(hosts, "TESTED", os.path.join(self.state, "hosts")).start()
-        self.addCleanup(mock.patch.stopall)
-        read = hosts.account_labels
-
-        def slow_read(provider):
-            labels = read(provider)
-            import time
-            time.sleep(0.5)
-            return labels
-
-        mock.patch.object(hosts, "account_labels", slow_read).start()
-        writers = [threading.Thread(target=hosts.store_secret,
-                                    args=("railway", name, self.VALUE, label))
-                   for name, label in (("CLAUDE_CODE_OAUTH_TOKEN", "demo-max"),
-                                       ("GITHUB_TOKEN", "magik-bot"))]
-        for writer in writers:
-            writer.start()
-        for writer in writers:
-            writer.join(timeout=30)
-        self.assertEqual(read("railway"),
-                         {"CLAUDE_CODE_OAUTH_TOKEN": "demo-max", "GITHUB_TOKEN": "magik-bot"})
-
-    def test_an_empty_stdin_stores_nothing(self):
-        done = self.hosts("secret", "railway", "GITHUB_TOKEN", stdin="\n")
-        self.assertEqual(done.returncode, 1)
-        self.assertIn("nothing arrived on stdin", done.stderr)
-        self.assertFalse(os.path.exists(os.path.join(self.state, "secrets", "hosts", "railway",
-                                                     "GITHUB_TOKEN")))
-
-    def test_only_the_names_a_provider_needs_are_stored(self):
-        done = self.hosts("secret", "railway", "ANTHROPIC_API_KEY", stdin="x" * 20)
-        self.assertEqual(done.returncode, 1)
-        self.assertIn("CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN", done.stderr)
-        done = self.hosts("secret", "ssh", "GITHUB_TOKEN", stdin="x" * 20)
-        self.assertEqual(done.returncode, 1)
-        self.assertIn("no secrets at all", done.stderr)
-        done = self.hosts("secret", "nowhere", "GITHUB_TOKEN", stdin="x" * 20)
-        self.assertEqual(done.returncode, 1)
-        self.assertIn("not a provider", done.stderr)
+    def test_the_secret_command_is_gone(self):
+        done = self.hosts("secret", "railway", "GITHUB_TOKEN", stdin="x" * 20)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertNotIn("stored", done.stdout)
+        self.assertIsNone(host_presets.preset("railway"))
 
 
 class Installer(unittest.TestCase):

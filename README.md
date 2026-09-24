@@ -2,6 +2,8 @@
 
 Run dozens of coding agents (Claude Code, Codex) as a team: named agents with per-session identity, branch claims and mail between them, a remote farm that spawns and cleans up after them, a merge discipline that keeps main green, and the written laws that let it run overnight without you.
 
+murmur runs **Claude Code** and **Codex**, on **your own machine** (any Linux box you reach over SSH) or on a **DigitalOcean Droplet** it creates for you. That is what we have run for real. Another engine or another place to run agents is a contribution: [CONTRIBUTING.md](CONTRIBUTING.md) says which file to add it to and which test to extend.
+
 **Status: private pilot. Not ready for strangers yet.** The plan is in [internal/PLAN.md](internal/PLAN.md).
 
 ## What is inside
@@ -13,7 +15,8 @@ Run dozens of coding agents (Claude Code, Codex) as a team: named agents with pe
   verification runs and their logs) and Machine (power, services, hosting, accounts, models and
   projects; a Health section only when the farm asks for it). From the page a person can stop a
   lane, pause the farm and resume it, add an account and enqueue a verification; spawning and
-  provider keys stay at a terminal on purpose. Runs on a Linux box you own.
+  provider keys stay at a terminal on purpose. Runs on a Linux box you own or on a DigitalOcean
+  Droplet.
 - `farm/install.sh` one command that turns a fresh Ubuntu box or VPS into that farm: `curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash` (see `docs/12-the-machine.md`). While the repository is private that address answers only a signed-in request, so during the pilot clone it with `gh` first, as `farm/README.md` shows.
 - `plugin/` a Claude Code plugin: five skills (`init`, `doctor`, `orchestrate`, `night-mode`, `conductor`), the generated-file guard hook and the session context hook.
 - `docs/` the handbook: thirteen short chapters, 00 to 12, a team adopts in a week.

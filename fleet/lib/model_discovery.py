@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Which models a provider offers, asked without spending anything.
 
-One function and one docs list per preset id (design: fleet/docs/design/models-providers.md,
-section 3). Every route reads metadata only: no prompt is ever sent, so no request here costs a
-token. The method is chosen by the provider row's `preset`, falling back to its `engine` for the
-shipped Claude and Codex rows.
+One docs list per preset id, and one function for a provider that can say what it offers
+(design: fleet/docs/design/models-providers.md, section 3). Every route reads metadata only: no
+prompt is ever sent, so no request here costs a token. The method is chosen by the provider row's
+`preset`, falling back to its `engine` for the shipped Claude and Codex rows. A contributed
+preset adds its docs list to DOCS and, when its CLI can list models, a function to ROUTES.
 
 An answer is {source: "account" | "docs", models: [{id, label, description}], error}, and
 annotate() adds each model's `cost_note` and `on` (the conductor's amendment to section 6):
 
   source   "account" when the provider itself answered (its CLI, its local file, its port),
            "docs" when the list is the one its documentation gives
-  models   only an id, a label and a description are kept from any source. The Qwen and Kimi
-           files hold API keys, a CLI can print anything, and none of that is ours to pass on.
+  models   only an id, a label and a description are kept from any source. A vendor's own file
+           can hold API keys, a CLI can print anything, and none of that is ours to pass on.
            A description is free text and never asks anything; `cost_note` is the server's,
            decided by rule (cost_note() below), and is the only thing that asks
   error    "" or one of FAILURES: a fixed sentence, never text from the provider
@@ -29,8 +30,6 @@ import re
 import shutil
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import model_presets as PRESETS  # noqa: E402
@@ -126,48 +125,6 @@ DOCS = {
         ("gpt-5.6-sol", "GPT-5.6 Sol", ""),
         ("gpt-5.5", "GPT-5.5", "retires 2026-10-14"),
     ),
-    "gemini": _docs(
-        ("auto", "Auto", ""),
-        ("pro", "Pro", ""),
-        ("flash", "Flash", ""),
-        ("flash-lite", "Flash-Lite", ""),
-        ("gemini-2.5-pro", "Gemini 2.5 Pro", ""),
-        ("gemini-2.5-flash", "Gemini 2.5 Flash", ""),
-        ("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite", ""),
-        ("gemini-3-pro-preview", "Gemini 3 Pro Preview", ""),
-        ("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", ""),
-    ),
-    "qwen": _docs(
-        ("qwen3-coder-plus", "Qwen3 Coder Plus", ""),
-        ("qwen3-coder-next", "Qwen3 Coder Next", ""),
-        ("qwen3.7-plus", "Qwen3.7 Plus", ""),
-        ("qwen3.6-plus", "Qwen3.6 Plus", ""),
-        ("qwen3.5-plus", "Qwen3.5 Plus", ""),
-        ("qwen3-max-2026-01-23", "Qwen3 Max", ""),
-        ("glm-5", "GLM-5", ""),
-        ("glm-4.7", "GLM-4.7", ""),
-        ("kimi-k2.5", "Kimi K2.5", ""),
-        ("MiniMax-M2.5", "MiniMax M2.5", ""),
-    ),
-    "kimi": _docs(("kimi-code/kimi-for-coding", "Kimi for Coding", "")),
-    "grok": _docs(
-        ("grok-4.7", "Grok 4.7", "xAI's pick for code"),
-        ("grok-build-0.1", "Grok Build 0.1", "the model behind Grok Build's own agent loop"),
-    ),
-    "opencode": _docs(
-        ("openai/gpt-6-sol", "GPT-6 Sol through OpenAI", ""),
-        ("anthropic/claude-sonnet-5", "Sonnet 5 through Anthropic", ""),
-    ),
-    "aider": _docs(
-        ("openai/gpt-6-sol", "GPT-6 Sol through OpenAI", ""),
-        ("anthropic/claude-sonnet-5", "Sonnet 5 through Anthropic", ""),
-    ),
-    "ollama": _docs(
-        ("llama3.1", "Llama 3.1", ""),
-        ("qwen2.5-coder", "Qwen2.5 Coder", ""),
-        ("deepseek-coder", "DeepSeek Coder", ""),
-    ),
-    "custom": [],
 }
 
 
@@ -181,7 +138,7 @@ class Failed(Exception):
 
 def method(row):
     """The preset id whose route this provider row uses: its `preset`, else its `engine` (the
-    shipped claude and codex rows carry no preset), else custom."""
+    shipped claude and codex rows carry no preset), else "" (no route and no list)."""
     row = row or {}
     preset = str(row.get("preset") or "").strip()
     if preset in DOCS:
@@ -189,7 +146,7 @@ def method(row):
     engine = str(row.get("engine") or "").strip()
     if engine in ("claude", "codex"):
         return engine
-    return "custom"
+    return ""
 
 
 def cost_note(engine, model):
@@ -230,24 +187,6 @@ def _unique(rows):
             seen.add(row["id"])
             out.append(row)
     return out
-
-
-_SECRET_NAME = re.compile(r"key|token|secret|password|credential|auth", re.I)
-
-
-def secrets_in(value, named=False):
-    """Every string in a parsed config file that sits under a credential-looking name. These are
-    added to the scrub, so a key a vendor wrote into a description is taken out too."""
-    found = []
-    if isinstance(value, dict):
-        for name, item in value.items():
-            found += secrets_in(item, named or bool(_SECRET_NAME.search(str(name))))
-    elif isinstance(value, list):
-        for item in value:
-            found += secrets_in(item, named)
-    elif isinstance(value, str) and named and value.strip():
-        found.append(value.strip())
-    return found
 
 
 # ---------------------------------------------------------------- the routes
@@ -300,106 +239,9 @@ def from_codex(row):
     return rows, []
 
 
-def ollama_url():
-    """Where Ollama listens: OLLAMA_HOST as Ollama itself reads it, else its default port."""
-    host = str(os.environ.get("OLLAMA_HOST") or "").strip() or "127.0.0.1:11434"
-    if "://" not in host:
-        host = "http://" + host
-    return host.rstrip("/") + "/api/tags"
-
-
-def from_ollama(_row):
-    """GET /api/tags on this machine: the models pulled here."""
-    try:
-        with urllib.request.urlopen(ollama_url(), timeout=TIMEOUT) as answer:
-            body = answer.read(4 * 1024 * 1024)
-    except (TimeoutError, OSError) as exc:
-        reason = getattr(exc, "reason", None)
-        if isinstance(exc, TimeoutError) or isinstance(reason, TimeoutError):
-            raise Failed("timeout")
-        if isinstance(exc, urllib.error.HTTPError):
-            raise Failed("unreadable")
-        raise Failed("unreachable")
-    try:
-        items = json.loads(body.decode("utf-8"))["models"]
-        if not isinstance(items, list):
-            raise ValueError
-    except (ValueError, KeyError, TypeError, UnicodeError):
-        raise Failed("unreadable")
-    rows = []
-    for item in items:
-        if isinstance(item, dict):
-            name = item.get("name") or item.get("model")
-            rows.append(keep(name, name, ""))
-    return rows, []
-
-
-def _home(*parts):
-    return os.path.join(os.path.expanduser("~"), *parts)
-
-
-def _read(path):
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return handle.read()
-    except FileNotFoundError:
-        raise Failed("missing")
-    except (OSError, UnicodeError):
-        raise Failed("unreadable")
-
-
-def from_qwen(_row):
-    """~/.qwen/settings.json modelProviders.<type>[]: exactly what Qwen Code's /model offers."""
-    try:
-        data = json.loads(_read(_home(".qwen", "settings.json")))
-    except ValueError:
-        raise Failed("unreadable")
-    providers = data.get("modelProviders") if isinstance(data, dict) else None
-    if not isinstance(providers, dict):
-        raise Failed("unreadable")
-    rows = []
-    for items in providers.values():
-        for item in items if isinstance(items, list) else []:
-            if isinstance(item, dict):
-                rows.append(keep(item.get("id"), item.get("name"), item.get("description")))
-    return rows, secrets_in(data)
-
-
-def from_kimi(_row):
-    """~/.kimi/config.toml [models."<alias>"]: what Kimi Code's login wrote there. The alias is
-    what `kimi -m` takes."""
-    import tomllib
-    try:
-        data = tomllib.loads(_read(_home(".kimi", "config.toml")))
-    except tomllib.TOMLDecodeError:
-        raise Failed("unreadable")
-    models = data.get("models")
-    if not isinstance(models, dict):
-        raise Failed("unreadable")
-    rows = []
-    for alias, item in models.items():
-        item = item if isinstance(item, dict) else {}
-        rows.append(keep(alias, item.get("display_name") or item.get("model"),
-                         item.get("description")))
-    return rows, secrets_in(data)
-
-
-def from_opencode(row):
-    """`opencode models`: one provider/model a line. Its catalog, not a plan check."""
-    out = _run([_bin(row, "opencode"), "models"])
-    rows = []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if " " in line:
-            raise Failed("unreadable")
-        rows.append(keep(line, line, ""))
-    return rows, []
-
-
-ROUTES = {"codex": from_codex, "ollama": from_ollama, "qwen": from_qwen, "kimi": from_kimi,
-          "opencode": from_opencode}
+# A route returns (rows, secrets): the rows through keep(), and every credential-looking value it
+# read on the way (a vendor file's API key), which is added to the scrub of the answer.
+ROUTES = {"codex": from_codex}
 
 
 def discover(row):
@@ -408,8 +250,8 @@ def discover(row):
     route = ROUTES.get(how)
     if route is None:
         listed = docs_list(row)
-        # A row with neither a route nor a documented list (a hand-written command, a preset
-        # added after this list) says so, rather than answering a press with nothing at all.
+        # A row with neither a route nor a documented list (a hand-written command, a row whose
+        # preset was removed) says so, rather than answering a press with nothing at all.
         return {"source": "docs", "models": listed, "error": "" if listed else FAILURES["no_list"]}
     secrets = []
     try:

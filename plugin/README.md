@@ -10,6 +10,11 @@ skills that load when the work matches them, and as a session-start hook that
 injects the short version of the law at the top of every session. The full
 text stays in the handbook under `docs/`.
 
+The agents it orchestrates are Claude Code and Codex, running on your own
+machine or on a DigitalOcean Droplet (the `fleet` farm in this repository).
+Those are the engines and machines murmur ships; another one is a contribution,
+see `CONTRIBUTING.md` at the repository root.
+
 ## Install
 
 From this repository, inside Claude Code:

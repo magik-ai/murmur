@@ -1,5 +1,15 @@
 # Models: providers, and the models you switch on
 
+> **Note, 2026-09-24.** The extra engine presets were removed on this day by the owner's
+> decision: murmur ships only what it has run for real. Gone: the Gemini CLI, Qwen Code, Kimi
+> Code, Grok Build, OpenCode, Aider, Ollama and Custom command presets, their discovery routes
+> and docs lists, and the Custom command's own dialog fields. What remains: the Claude Code and
+> Codex presets, and the mechanism a preset runs through (a catalog entry with
+> `engine = "generic"`, `model_presets.entry_from`, `fleet models auth`, `models.py launchcmd`,
+> `parse_generic.py`, the discovery `DOCS` and `ROUTES` tables). A farm whose `models.toml` still
+> lists a removed engine keeps it, marked as not in the catalog. The body below is kept as it was
+> written, as history; adding an engine back is a contribution (`CONTRIBUTING.md`).
+
 Design record, 2026-09-23. The owner: "it would be good like this: you connect a provider as a
 subscription, then you click it and choose in a sidebar which models you want to activate; for
 that you press a button 'Request available models' and get a list where you tick what you want

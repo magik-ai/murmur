@@ -52,13 +52,15 @@ LISTS = {
         ("gpt-6-luna", "GPT-6 Luna", ""),
         ("gpt-5.5", "GPT-5.5", "Retires on 2026-10-14."),
     ]),
-    "qwen": ("account", "", [
-        ("qwen3-coder-plus", "Qwen3 Coder Plus", ""),
-        ("qwen3.7-plus", "Qwen3.7 Plus", ""),
+    # The two rows below belong to fictional contributed presets (test_stub_server.py,
+    # MODEL_PRESETS): murmur ships no such engine, they exist to test the mechanism.
+    "demo-plain": ("account", "", [
+        ("demo-plain-large", "Demo Plain Large", ""),
+        ("demo-plain-small", "Demo Plain Small", ""),
     ]),
     # The file its login writes is not there, so the answer is the docs list and the reason.
-    "kimi": ("docs", "the file is missing", [
-        ("kimi-code/kimi-for-coding", "Kimi for Coding", ""),
+    "demo-strict": ("docs", "the file is missing", [
+        ("demo-strict/coder", "Demo Strict Coder", ""),
     ]),
     "local": ("docs", "the CLI is not installed", []),
 }

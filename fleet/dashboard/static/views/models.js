@@ -20,9 +20,6 @@ const local = {
   modelPreset: "",
   modelId: "",
   modelVariant: "",
-  modelBin: "",
-  modelRun: "",
-  modelEnv: "",
   addModelError: "",
   modelBusy: false,
   modelAdded: "",
@@ -91,7 +88,7 @@ function accessOf(model) {
 
 /* The terms of a service, as one of three words. The classification is the server's, sent as
    `tos_kind`: safe, check or blocked. A page that read the sentence itself and called anything
-   it did not recognise "safe headless" put that green pill on Custom command, whose own terms
+   it did not recognise "safe headless" put that green pill on a command whose own terms
    sentence says nobody here has read the terms for you. */
 const TOS_PILL = {
   safe: ["done", "safe headless"],
@@ -363,6 +360,20 @@ function commandTitle(model) {
   return model.run ? `${model.label || model.id} runs ${command}: ${model.run}` : `${model.label || model.id} runs ${command}`;
 }
 
+/* A row this farm's models.toml still lists and murmur no longer ships (its preset was removed
+   on 2026-09-24, or it was a command of its own). The server says so, with the one sentence on
+   how to take it out; nothing here removes it for the person. */
+function notInCatalog(model) {
+  return (model || {}).in_catalog === false;
+}
+
+function orphanPill(model) {
+  return notInCatalog(model)
+    ? h("span", { class: "mo-orphan", "data-model-orphan": model.id },
+      pill("wait", "Not in the catalog", String(model.catalog_note || "")))
+    : null;
+}
+
 /* One provider, one line: every cell is cut with an ellipsis and carries its whole text in its
    title (the owner's table law). The long things live in the sidebar the name opens. */
 function modelRow(context, model) {
@@ -371,14 +382,16 @@ function modelRow(context, model) {
   const [count, names] = modelCount(model);
   const paid = ACCESS_WORD[accessKind(model)];
   return h("tr", { key: model.id },
-    h("td", { class: "mo-provider" }, h("button", {
+    h("td", { class: "mo-provider", title: notInCatalog(model)
+      ? `${model.label || model.id}: not in the catalog` : (model.label || model.id) },
+    h("div", { class: "mo-provider-cell" }, h("button", {
       class: "mo-name",
       "data-model-open": model.id,
       title: commandTitle(model),
       onclick: () => openModelDrawer(context, model.id),
     },
     h("span", { class: "m-dot", style: dotStyle(model.color), "aria-hidden": "true" }),
-    h("b", null, model.label || model.id))),
+    h("b", null, model.label || model.id)), orphanPill(model))),
     h("td", { class: "mo-col-access", title: `${paid}. ${accessOf(model)}` }, paid),
     h("td", { class: "mo-col-status", title: [label, statusTitle(model, status)].filter(Boolean).join(": ") },
       pill(meaning, label, statusTitle(model, status))),
@@ -705,13 +718,12 @@ function modelList(context, model) {
   }
   const state = listState(model.id);
   const rows = listRows(model, state);
-  const custom = String(model.preset || "") === "custom";
   const changed = state.adds.size + state.removes.size > 0;
   return h("div", { class: "mo-list-block", key: "models" },
     h("div", { class: "row mo-list-head" },
       h("h3", null, "Models"),
       h("div", { class: "spacer" }),
-      custom ? null : h("button", {
+      h("button", {
         class: "button small",
         "data-model-request": model.id,
         disabled: access.writable && !state.asking ? null : true,
@@ -728,9 +740,8 @@ function modelList(context, model) {
           h("th", { class: "mo-tag" }, ""),
           h("th", { class: "mo-note" }, "Note"))),
         h("tbody", null, rows.map((row) => listRow(context, model, row, state)))))
-      : h("p", { class: "muted", key: "none" }, custom
-        ? "No model is on. Add one by name below."
-        : "No model is on. Request the available models, or add one by name."),
+      : h("p", { class: "muted", key: "none" },
+        "No model is on. Request the available models, or add one by name."),
     h("div", { class: "mo-byname" },
       h("input", {
         key: `name:${state.typedRound}`,
@@ -781,6 +792,10 @@ function modelDrawerBody(context, id) {
   const status = statusOf(model);
   const [meaning, label] = STATUS[status];
   return [
+    notInCatalog(model)
+      ? h("p", { class: "readonly-note", key: "orphan", "data-model-orphan-note": "" },
+        String(model.catalog_note || "Not in murmur's catalog."))
+      : null,
     h("div", { class: "row m-wait", key: "status" },
       pill(meaning, label, statusTitle(model, status)),
       h("span", { class: "muted", "data-model-status-words": "" }, statusWords(model, status))),
@@ -837,11 +852,8 @@ function presetById(context, id) {
 
 function choosePreset(context, preset) {
   local.modelPreset = preset.id;
-  local.modelId = preset.id === "custom" ? "" : preset.id;
+  local.modelId = preset.id;
   local.modelVariant = list(preset.variants)[0] || "";
-  local.modelBin = preset.bin || "";
-  local.modelRun = preset.run || "";
-  local.modelEnv = preset.auth_env || "";
   local.addModelError = "";
   context.paint();
 }
@@ -874,15 +886,13 @@ function presetCards(context, presets) {
     }));
 }
 
-/* Step two: the name it goes into the catalog under, the variant when the service sells more
-   than one, and, for a command of your own, the three things only you can know. */
+/* Step two: the name it goes into the catalog under, and the variant when the service sells more
+   than one. */
 function nameStep(context, preset) {
-  const custom = preset.id === "custom";
   const variants = list(preset.variants);
   return [
-    stepHead(2, "Name it", custom
-      ? "A short id for the catalog, plus the command and the line that runs it."
-      : "A short id for the catalog. The preset's own name is filled in; change it if you run two."),
+    stepHead(2, "Name it",
+      "A short id for the catalog. The preset's own name is filled in; change it if you run two."),
     h("label", { class: "m-field", key: "name" },
       h("span", { class: "m-label" }, "Name"),
       h("input", {
@@ -890,7 +900,7 @@ function nameStep(context, preset) {
         class: "m-name",
         "aria-label": "Model name",
         "data-model-id": "",
-        placeholder: custom ? "my-model" : preset.id,
+        placeholder: preset.id,
         autocomplete: "off",
         spellcheck: "false",
         value: local.modelId,
@@ -917,64 +927,6 @@ function nameStep(context, preset) {
           key: name, value: name, selected: local.modelVariant === name,
         }, name))))
       : null,
-    custom
-      ? [
-        h("p", { class: "muted", key: "tpl" },
-          "In the line below, {bin} is the command above and {task} is the brief the lane is "
-          + "given. The farm writes both in before it runs anything."),
-        h("label", { class: "m-field", key: "bin" },
-          h("span", { class: "m-label" }, "Command"),
-          h("input", {
-            type: "text",
-            class: "m-name",
-            "aria-label": "Command",
-            "data-model-bin": "",
-            placeholder: "my-cli",
-            autocomplete: "off",
-            spellcheck: "false",
-            value: local.modelBin,
-            disabled: access.writable ? null : true,
-            oninput: (event) => {
-              local.modelBin = event.target.value;
-              local.addModelError = "";
-            },
-          })),
-        h("label", { class: "m-field", key: "run" },
-          h("span", { class: "m-label" }, "How to run it"),
-          h("input", {
-            type: "text",
-            class: "m-name",
-            "aria-label": "Run template",
-            "data-model-run-template": "",
-            placeholder: "{bin} -p {task}",
-            autocomplete: "off",
-            spellcheck: "false",
-            value: local.modelRun,
-            disabled: access.writable ? null : true,
-            oninput: (event) => {
-              local.modelRun = event.target.value;
-              local.addModelError = "";
-            },
-          })),
-        h("label", { class: "m-field", key: "env" },
-          h("span", { class: "m-label" }, "Key is read from"),
-          h("input", {
-            type: "text",
-            class: "m-name",
-            "aria-label": "Key environment variable",
-            "data-model-env": "",
-            placeholder: "MY_MODEL_API_KEY",
-            autocomplete: "off",
-            spellcheck: "false",
-            value: local.modelEnv,
-            disabled: access.writable ? null : true,
-            oninput: (event) => {
-              local.modelEnv = event.target.value;
-              local.addModelError = "";
-            },
-          })),
-      ]
-      : null,
   ];
 }
 
@@ -982,7 +934,7 @@ function nameStep(context, preset) {
    in none of them does a key pass through this page. */
 function accessStep(context, preset) {
   const name = (local.modelId || preset.id || "the model").trim();
-  const binary = local.modelBin || preset.bin || name;
+  const binary = preset.bin || name;
   if (preset.kind === "subscription" && (preset.engine === "codex" || preset.id === "codex")) {
     /* Codex signs in through a page on port 1455 of the farm, so the port comes back through
        the ssh session; the Accounts row and the provider sidebar give the same command. */
@@ -1011,8 +963,8 @@ function accessStep(context, preset) {
   }
   if (preset.kind === "local") {
     /* The pull command is the preset's own, with the model chosen in step 2 written into it.
-       A line this page built itself ("{bin} pull {variant}") matched Ollama by luck and would
-       be wrong for the next local runner a farm adds. */
+       A line this page built itself ("{bin} pull {variant}") would be right for one local
+       runner by luck and wrong for the next one a contributor adds. */
     const wanted = local.modelVariant || name;
     const hint = String(preset.pull_hint || "").trim();
     const pull = hint
@@ -1028,8 +980,7 @@ function accessStep(context, preset) {
     ];
   }
   /* The command is the model's own name, so there is no command to show until the name is
-     typed. Falling back to the preset's id printed "fleet models auth custom", a command that
-     looks runnable and is not. */
+     typed: a command built from anything else looks runnable and is not. */
   const named = local.modelId.trim();
   return [
     stepHead(3, "Give it a key", named
@@ -1042,7 +993,7 @@ function accessStep(context, preset) {
 }
 
 /* The farm's own rule for a model id, which is the only rule that decides: lib/models.py
-   writes the name as a TOML table. A page that taught a looser one let "Gemini", "my.model"
+   writes the name as a TOML table. A page that taught a looser one let "Codex", "my.model"
    and a thirty-five character name through to a refusal nobody could have predicted. */
 const MODEL_ID_RE = /^[a-z][a-z0-9_-]{1,30}$/;
 const MODEL_ID_RULE = "A model id is lower case letters, digits, - and _, starting with a "
@@ -1050,14 +1001,8 @@ const MODEL_ID_RULE = "A model id is lower case letters, digits, - and _, starti
 
 function validateModel(preset) {
   const name = local.modelId.trim();
-  if (!name) return "Give the model a name, for example gemini.";
+  if (!name) return `Give the model a name, for example ${preset.id}.`;
   if (!MODEL_ID_RE.test(name)) return `${MODEL_ID_RULE} ${name} is not one.`;
-  if (preset.id === "custom" && !local.modelBin.trim()) {
-    return "A command of your own needs the command to run, for example my-cli.";
-  }
-  if (preset.id === "custom" && !local.modelRun.trim()) {
-    return "A command of your own needs the line that runs it, with {bin} and {task} in it.";
-  }
   return "";
 }
 
@@ -1075,11 +1020,6 @@ async function registerModel(context, preset) {
      refuses a body that carries one, and this page must never be the reason it has to. */
   const body = { preset: preset.id, id: local.modelId.trim() };
   if (local.modelVariant) body.variant = local.modelVariant;
-  if (preset.id === "custom") {
-    body.bin = local.modelBin.trim();
-    body.run = local.modelRun.trim();
-    if (local.modelEnv.trim()) body.auth_env = local.modelEnv.trim();
-  }
   try {
     const answer = await apiPost("/api/models/add", body);
     /* The server answers {"model": row}. Reading the row off the envelope's top level left the
@@ -1172,6 +1112,13 @@ function addModelSteps(context, presets) {
     stepHead(1, "Pick a service", "What the agents would be spawned with. A service already in "
       + "this farm's catalog cannot be added twice."),
     presetCards(context, presets),
+    /* murmur ships Claude Code and Codex, and a farm usually has both already. Saying so beats
+       a row of switched-off cards with nothing to explain them. */
+    presets.every((row) => row.added)
+      ? h("p", { class: "muted", key: "all-added", "data-model-all-added": "" },
+        "Every engine murmur ships is already in this farm's catalog. Another engine is a "
+        + "contribution: its preset is one entry in fleet/lib/model_presets.py (CONTRIBUTING.md).")
+      : null,
     preset ? nameStep(context, preset) : null,
     preset ? accessStep(context, preset) : null,
     preset ? stepHead(4, "Register it", "This writes the entry to this farm's model catalog. "
@@ -1209,9 +1156,6 @@ function openAddModel(context) {
   local.modelPreset = "";
   local.modelId = "";
   local.modelVariant = "";
-  local.modelBin = "";
-  local.modelRun = "";
-  local.modelEnv = "";
   local.addModelError = "";
   local.modelBusy = false;
   local.modelAdded = "";

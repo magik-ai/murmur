@@ -298,11 +298,13 @@ ACCOUNTS = {
 # operator added the entry or it shipped with the farm (`source`), and the variant it runs.
 #
 # There are five rows here on purpose, one per status, because the table draws a different set
-# of actions for each. The fields are the ones GET /api/engines really carries: `health` is the
-# state of the last test (ok | fail | unchecked) and `health_prompt` is the tiny prompt a test
-# sends, which is how lib/models.py names them; no row carries `docs`, because nothing on the
-# server writes one into a catalog; and the two rows this farm added carry no role, quality or
-# caps note, because the add route writes none.
+# of actions for each, and a sixth (grok) that murmur no longer ships. The fields are the ones
+# GET /api/engines really carries: `health` is the state of the last test (ok | fail | unchecked)
+# and `health_prompt` is the tiny prompt a test sends, which is how lib/models.py names them;
+# `in_catalog` and `catalog_note` say whether murmur still ships the row's engine, and how to take
+# it out when it does not; no row carries `docs`, because nothing on the server writes one into a
+# catalog; and the rows this farm added carry no role, quality or caps note, because the add
+# route writes none.
 MODELS = [
     {"id": "claude", "label": "Claude Code", "glyph": "C", "color": "#D97757", "enabled": True,
      "engine": "claude", "source": "shipped", "preset": "", "status": "on", "variant": "opus",
@@ -316,7 +318,8 @@ MODELS = [
      "models": "opus, sonnet, haiku", "limits": "two windows, session and weekly",
      "command": "claude",
      "installed": True, "path": "/home/farm/.local/bin/claude", "last_test": ago(1800),
-     "install_hint": "npm install -g @anthropic-ai/claude-code"},
+     "install_hint": "npm install -g @anthropic-ai/claude-code",
+     "in_catalog": True, "catalog_note": ""},
     # Installed, keyed, switched on, and the last health call did not come back. The table draws
     # Failing and puts the server's own detail under the pill.
     {"id": "codex", "label": "Codex", "glyph": "X", "color": "#10A37F", "enabled": True,
@@ -331,40 +334,68 @@ MODELS = [
      "health_detail": "the last health call timed out", "routable": False,
      "models": "gpt-5-codex", "limits": "five hour window", "command": "codex",
      "installed": True, "path": "/usr/bin/codex", "last_test": ago(600),
-     "install_hint": "npm install -g @openai/codex"},
-    # Added by the operator, installed, keyed, and switched off. This is the only row that can
-    # be switched on, and one of the two that can be removed. It carries no role, quality or
+     "install_hint": "npm install -g @openai/codex",
+     "in_catalog": True, "catalog_note": ""},
+    # Added by the operator, installed, keyed, and switched off. This is the only fixture row that
+    # can be switched on, and one of the rows that can be removed. It carries no role, quality or
     # caps note: those are catalog fields a person writes, and lib/model_presets.py does not
-    # write them, so a row this farm added through the dialog has none.
-    {"id": "qwen", "label": "Qwen Code", "color": "#7C5CFC", "enabled": False,
-     "engine": "generic", "source": "added", "preset": "qwen", "status": "off",
-     "variant": "qwen3-coder-plus",
-     "access": "An API key, held on the farm.",
-     "tos": "LOW: a documented headless mode, and the plan is sold for agentic use.",
-     "run": "{bin} -p {task} --output-format stream-json", "auth_env": "QWEN_CODE_API_KEY",
-     "health": "ok", "health_prompt": "What is 17 plus 25? Reply with the number only.", "health_detail": "",
-     "routable": False, "limits": "", "command": "qwen",
-     "installed": True, "path": "/home/farm/.local/bin/qwen", "last_test": ago(7200),
-     "install_hint": "npm install -g @qwen-code/qwen-code"},
-    # Added, installed, and no key was ever pasted. It cannot be switched on: a model with no
-    # credential spawns a lane that cannot answer. Test is offered, because a key is pasted in a
-    # terminal and this page cannot see it land.
-    {"id": "kimi", "label": "Kimi Code", "color": "#6D5AE6", "enabled": False,
-     "engine": "generic", "source": "added", "preset": "kimi", "status": "needs_key",
+    # write them, so a row this farm added through the dialog has none. Its run line has no
+    # {variant}, so its sidebar says the provider runs the model its own settings choose.
+    # "demo-plain" is one of the fictional contributed presets below (MODEL_PRESETS).
+    {"id": "demo-plain", "label": "Demo Plain", "color": "#7C5CFC", "enabled": False,
+     "engine": "generic", "source": "added", "preset": "demo-plain", "status": "off",
      "variant": "",
      "access": "An API key, held on the farm.",
-     "tos": "HIGH: the subscription is sold for interactive use only, so a headless farm "
+     "tos": "Nobody here has read this service's terms for its headless mode; check them before "
+            "a farm runs it.",
+     "run": "{bin} -p {task} --output-format stream-json", "auth_env": "DEMO_PLAIN_API_KEY",
+     "health": "ok", "health_prompt": "What is 17 plus 25? Reply with the number only.", "health_detail": "",
+     "routable": False, "limits": "", "command": "demoplain",
+     "installed": True, "path": "/home/farm/.local/bin/demoplain", "last_test": ago(7200),
+     "install_hint": "npm install -g @example/demo-plain",
+     "in_catalog": True, "catalog_note": ""},
+    # Added, installed, and no key was ever pasted. It cannot be switched on: a model with no
+    # credential spawns a lane that cannot answer. Test is offered, because a key is pasted in a
+    # terminal and this page cannot see it land. Also a fictional contributed preset.
+    {"id": "demo-strict", "label": "Demo Strict", "color": "#6D5AE6", "enabled": False,
+     "engine": "generic", "source": "added", "preset": "demo-strict", "status": "needs_key",
+     "variant": "",
+     "access": "An API key, held on the farm.",
+     "tos": "HIGH: this service is sold for interactive use only, so a headless farm "
             "risks suspension.",
-     "run": "{bin} -p {task} --output-format stream-json", "auth_env": "KIMI_API_KEY",
+     "run": "{bin} -p {task} --output-format stream-json", "auth_env": "DEMO_STRICT_API_KEY",
      "health": "unchecked", "health_prompt": "What is 17 plus 25? Reply with the number only.", "health_detail": "",
-     "routable": False, "limits": "", "command": "kimi",
-     "installed": True, "path": "/home/farm/.local/bin/kimi", "last_test": None,
-     "install_hint": "npm install -g @moonshot/kimi-code"},
+     "routable": False, "limits": "", "command": "demostrict",
+     "installed": True, "path": "/home/farm/.local/bin/demostrict", "last_test": None,
+     "install_hint": "npm install -g @example/demo-strict",
+     "in_catalog": True, "catalog_note": ""},
+    # A row murmur no longer ships: this farm added Grok Build before its preset was removed on
+    # 2026-09-24, and its models.toml still lists it. The server reads it as it always did and
+    # marks it in_catalog false, with lib/models.py's own sentence (catalog_standing) on how its
+    # owner takes it out. Nothing removes it for them, and it still offers Remove because this
+    # farm added it.
+    {"id": "grok", "label": "Grok Build", "color": "#1A1A1A", "enabled": False,
+     "engine": "generic", "source": "added", "preset": "grok", "status": "off",
+     "variant": "",
+     "access": "An API key, held on the farm.",
+     "tos": "A documented headless mode, billed against the key.",
+     "run": "{bin} -p {task}", "auth_env": "XAI_API_KEY",
+     "health": "ok", "health_prompt": "What is 17 plus 25? Reply with the number only.", "health_detail": "",
+     "routable": False, "limits": "", "command": "grok",
+     "installed": True, "path": "/home/farm/.local/bin/grok", "last_test": ago(86400),
+     "install_hint": "npm install -g @example/grok-build",
+     "in_catalog": False,
+     "catalog_note": ("Not in murmur's catalog: murmur ships Claude Code and Codex. This farm's own "
+                      "models.toml still lists it, and nothing removes it for you. To take it out, "
+                      "press Remove on its row in the dashboard's models table, or delete its [grok] "
+                      "table from /home/farm/.config/fleet/models.toml.")},
     # The one this machine cannot run. It carries enabled true on purpose: a model left switched
     # on in the registry and then uninstalled is exactly the row that must not offer a switch,
     # because pressing it spawns a lane that cannot start.
+    # Its preset is the fictional contributed "demo-local" below: a generic row with no preset
+    # is not in murmur's catalog (lib/models.py catalog_standing), and this one is.
     {"id": "local", "label": "Local model", "color": "#8b949e", "enabled": True,
-     "engine": "generic", "source": "shipped", "preset": "", "status": "not_installed",
+     "engine": "generic", "source": "shipped", "preset": "demo-local", "status": "not_installed",
      "variant": "",
      "access": "Runs on this machine. Nothing is paid.",
      "role": "offline experiments", "quality": "well under the frontier tier",
@@ -374,7 +405,8 @@ MODELS = [
      "health": "unchecked", "health_prompt": "What is 17 plus 25? Reply with the number only.", "health_detail": "",
      "routable": False, "limits": "", "command": "llama",
      "installed": False, "path": "", "last_test": None,
-     "install_hint": "curl -fsSL https://example.invalid/local/install.sh | sh"}
+     "install_hint": "curl -fsSL https://example.invalid/local/install.sh | sh",
+     "in_catalog": True, "catalog_note": ""}
 ]
 
 # The presets GET /api/models/presets serves: one service per card in the add dialog. A preset
@@ -384,72 +416,63 @@ MODELS = [
 # `tos_kind` is the server's own classification of its `tos` sentence, in one word: safe, check
 # or blocked. The page draws it as the card's terms pill, so a sentence nobody has read is never
 # called safe by a page guessing from its wording.
+#
+# murmur ships two engines, Claude Code and Codex, and the first two presets are those, as
+# lib/model_presets.py serves them.
 MODEL_PRESETS = [
     {"id": "claude", "label": "Claude Code", "color": "#D97757", "kind": "subscription", "tos_kind": "safe", "pull_hint": "",
      "engine": "claude", "bin": "claude",
      "install_hint": "npm install -g @anthropic-ai/claude-code", "auth_env": "",
-     "run": "claude -p {task}", "health": "What is 17 plus 25? Reply with the number only.",
-     "tos": "First-party CLI on the Anthropic subscription, made for headless runs.",
-     "access": "Your Claude subscription.", "variants": ["opus", "sonnet", "haiku"],
-     "docs": "https://example.invalid/docs/claude-code"},
+     "run": "{bin} -p {task}", "health": "What is 17 plus 25? Reply with the number only.",
+     "tos": "first-party CLI on the Anthropic OAuth subscription; headless use is what it is for",
+     "access": "your Claude subscription, shared with your own interactive sessions",
+     "variants": [],
+     "docs": "https://docs.claude.com/en/docs/claude-code/overview"},
     {"id": "codex", "label": "Codex", "color": "#10A37F", "kind": "subscription", "tos_kind": "safe", "pull_hint": "",
      "engine": "codex", "bin": "codex", "install_hint": "npm install -g @openai/codex",
-     "auth_env": "", "run": "codex exec {task}", "health": "What is 17 plus 25? Reply with the number only.",
-     "tos": "First-party CLI on the ChatGPT subscription.",
-     "access": "Your ChatGPT subscription.", "variants": ["gpt-5-codex"],
-     "docs": "https://example.invalid/docs/codex"},
-    {"id": "gemini", "label": "Gemini CLI", "color": "#4285F4", "kind": "key", "tos_kind": "safe", "pull_hint": "",
-     "engine": "generic", "bin": "gemini", "install_hint": "npm install -g @google/gemini-cli",
-     "auth_env": "GEMINI_API_KEY", "run": "{bin} -p {task}",
+     "auth_env": "", "run": "{bin} exec {task}", "health": "What is 17 plus 25? Reply with the number only.",
+     "tos": "first-party CLI on the ChatGPT subscription (auth_mode chatgpt)",
+     "access": "your ChatGPT subscription", "variants": [],
+     "docs": "https://developers.openai.com/codex/cli"},
+    # FICTIONAL contributed presets. None of these services exists and murmur ships none of them:
+    # they stand for the one dict a contributor adds to lib/model_presets.py (engine "generic"),
+    # and they are here only so the dialog's kept mechanism stays tested. A key engine is given
+    # `fleet models auth <id>` in step 3, a local one its install line and its own pull_hint, a
+    # preset with variants is offered them in step 2, and each terms pill (safe, check, blocked)
+    # has a card that wears it.
+    {"id": "democli", "label": "Demo CLI", "color": "#4285F4", "kind": "key", "tos_kind": "safe", "pull_hint": "",
+     "engine": "generic", "bin": "democli", "install_hint": "npm install -g @example/democli",
+     "auth_env": "DEMOCLI_API_KEY", "run": "{bin} --model {variant} -p {task}",
      "health": "What is 17 plus 25? Reply with the number only.",
      "tos": "A documented non-interactive mode, billed against the key.",
      "access": "An API key, billed per token.",
-     "variants": ["gemini-2.5-pro", "gemini-2.5-flash"],
-     "docs": "https://example.invalid/docs/gemini-cli"},
-    {"id": "qwen", "label": "Qwen Code", "color": "#7C5CFC", "kind": "key", "tos_kind": "safe", "pull_hint": "",
-     "engine": "generic", "bin": "qwen",
-     "install_hint": "npm install -g @qwen-code/qwen-code", "auth_env": "QWEN_CODE_API_KEY",
+     "variants": ["demo-large", "demo-small"],
+     "docs": "https://example.invalid/docs/democli"},
+    {"id": "demo-plain", "label": "Demo Plain", "color": "#7C5CFC", "kind": "key", "tos_kind": "check", "pull_hint": "",
+     "engine": "generic", "bin": "demoplain",
+     "install_hint": "npm install -g @example/demo-plain", "auth_env": "DEMO_PLAIN_API_KEY",
      "run": "{bin} -p {task} --output-format stream-json", "health": "What is 17 plus 25? Reply with the number only.",
-     "tos": "LOW: a documented headless mode, and the plan is sold for agentic use.",
-     "access": "An API key, held on the farm.",
-     "variants": ["qwen3-coder-plus", "qwen3-coder-flash"],
-     "docs": "https://example.invalid/docs/qwen-code"},
-    {"id": "kimi", "label": "Kimi Code", "color": "#6D5AE6", "kind": "key", "tos_kind": "blocked", "pull_hint": "",
-     "engine": "generic", "bin": "kimi", "install_hint": "npm install -g @moonshot/kimi-code",
-     "auth_env": "KIMI_API_KEY", "run": "{bin} -p {task} --output-format stream-json",
+     "tos": "Nobody here has read this service's terms for its headless mode; check them before "
+            "a farm runs it.",
+     "access": "An API key, held on the farm.", "variants": [],
+     "docs": "https://example.invalid/docs/demo-plain"},
+    {"id": "demo-strict", "label": "Demo Strict", "color": "#6D5AE6", "kind": "key", "tos_kind": "blocked", "pull_hint": "",
+     "engine": "generic", "bin": "demostrict", "install_hint": "npm install -g @example/demo-strict",
+     "auth_env": "DEMO_STRICT_API_KEY", "run": "{bin} -p {task} --output-format stream-json",
      "health": "What is 17 plus 25? Reply with the number only.",
-     "tos": "HIGH: the subscription is sold for interactive use only, so a headless farm "
+     "tos": "HIGH: this service is sold for interactive use only, so a headless farm "
             "risks suspension.",
      "access": "An API key, held on the farm.", "variants": [],
-     "docs": "https://example.invalid/docs/kimi-code"},
-    {"id": "opencode", "label": "OpenCode", "color": "#F5A623", "kind": "key", "tos_kind": "safe", "pull_hint": "",
-     "engine": "generic", "bin": "opencode", "install_hint": "npm install -g opencode-ai",
-     "auth_env": "OPENCODE_API_KEY", "run": "{bin} run {task}",
+     "docs": "https://example.invalid/docs/demo-strict"},
+    {"id": "demo-local", "label": "Demo Local", "color": "#8b949e", "kind": "local", "tos_kind": "safe",
+     "engine": "generic", "bin": "demolocal",
+     "install_hint": "curl -fsSL https://example.invalid/demo-local/install.sh | sh",
+     "pull_hint": "demolocal pull <variant>", "auth_env": "", "run": "{bin} run {variant} {task}",
      "health": "What is 17 plus 25? Reply with the number only.",
-     "tos": "Open source client, so the terms are the provider's behind the key.",
-     "access": "An API key, billed per token.", "variants": [],
-     "docs": "https://example.invalid/docs/opencode"},
-    {"id": "aider", "label": "Aider", "color": "#14B8A6", "kind": "key", "engine": "generic", "tos_kind": "safe", "pull_hint": "",
-     "bin": "aider", "install_hint": "python3 -m pip install aider-install",
-     "auth_env": "OPENAI_API_KEY", "run": "{bin} --message {task} --yes",
-     "health": "What is 17 plus 25? Reply with the number only.",
-     "tos": "Open source client, so the terms are the provider's behind the key.",
-     "access": "An API key, billed per token.", "variants": [],
-     "docs": "https://example.invalid/docs/aider"},
-    {"id": "ollama", "label": "Ollama local", "color": "#8b949e", "kind": "local", "tos_kind": "safe",
-     "engine": "generic", "bin": "ollama",
-     "install_hint": "curl -fsSL https://example.invalid/local/install.sh | sh",
-     "pull_hint": "ollama pull <variant>", "auth_env": "", "run": "{bin} run {variant} {task}", "health": "What is 17 plus 25? Reply with the number only.",
      "tos": "Local weights on your own machine, so no service terms apply.",
      "access": "Runs on this machine. Nothing is paid.",
-     "variants": ["qwen2.5-coder:14b", "llama3.1:8b"],
-     "docs": "https://example.invalid/docs/ollama"},
-    {"id": "custom", "label": "Custom command", "color": "#6e7681", "kind": "key", "tos_kind": "check", "pull_hint": "",
-     "engine": "generic", "bin": "", "install_hint": "", "auth_env": "", "run": "",
-     "health": "What is 17 plus 25? Reply with the number only.",
-     "tos": "Whatever the terms of the service behind your command are.",
-     "access": "However the command you give is paid for.", "variants": [],
-     "docs": ""},
+     "variants": ["demo-7b", "demo-14b"],
+     "docs": "https://example.invalid/docs/demo-local"},
 ]
 
 # The words that make a field a credential, and the two sentences the server refuses with. A
@@ -629,7 +652,7 @@ LOG_LINES = [f"[{time.strftime('%H:%M:%S', time.localtime(ago(1200 - index * 6))
 
 # Written by the POST routes, so the browser check can prove a form does something.
 # `removed` holds the ids a person has taken out of the catalog in this run, fixture rows
-# included: a farm can remove anything it added, and two of the five fixtures are rows this farm
+# included: a farm can remove anything it added, and three of the six fixtures are rows this farm
 # added. Without it the first Remove anyone tried by hand answered "no such model".
 SENT = {"messages": [], "mail": [], "projects": [], "models": [], "removed": [],
         "machines": []}
@@ -794,7 +817,7 @@ HOST_PRESETS = [
      "stage": "ga", "install": "", "login": "", "docs": "https://man.openbsd.org/ssh",
      "engines": ["claude", "codex"],
      "terms": "Any Linux box you already reach over SSH: a spare PC, WSL2, a company VM.",
-     "pricing": "Whatever you already pay for it.", "secrets": [], "sizes": [], "regions": []},
+     "pricing": "Whatever you already pay for it.", "sizes": [], "regions": []},
     {"id": "do-droplet", "label": "DigitalOcean Droplet", "summary": "A cloud server that runs the whole farm, billed by the second until you destroy it.", "color": "#0069FF", "job": "machine",
      "cli": "doctl", "stage": "ga", "install": "sudo snap install doctl",
      "login": "doctl auth init --context murmur",
@@ -802,7 +825,6 @@ HOST_PRESETS = [
      "terms": "A droplet is billed per second until it is destroyed. Powering it off does not "
               "stop the bill.",
      "pricing": "From $24 a month, list price on 2026-09-23.",
-     "secrets": [],
      "sizes": [
          {"slug": "s-2vcpu-4gb", "label": "Small", "vcpu": 2, "ram_gb": 4, "disk_gb": 80,
           "monthly_usd": 24, "default": False},
@@ -813,61 +835,21 @@ HOST_PRESETS = [
      ],
      "regions": [{"slug": "fra1", "label": "Frankfurt"}, {"slug": "ams3", "label": "Amsterdam"},
                  {"slug": "nyc3", "label": "New York"}]},
-    {"id": "do-agents", "label": "DigitalOcean Managed Agents", "summary": "DigitalOcean's cloud sandboxes for one agent. In preview.", "color": "#0069FF",
-     "job": "runner", "cli": "doctl", "stage": "preview", "install": "sudo snap install doctl",
-     "login": "doctl auth init --context murmur",
-     "docs": "https://docs.digitalocean.com/products/managed-agents/", "engines": ["claude"],
-     "terms": "Region RIC1 only, and a prepaid balance: a session pauses at zero. A session "
-              "pauses after 15 idle minutes.",
-     "pricing": "About $0.25 an hour for 4 vCPU and 8 GB, billed by DigitalOcean.",
-     "secrets": ["CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN"], "sizes": [], "regions": ["ric1"]},
-    {"id": "railway", "label": "Railway sandboxes", "summary": "Railway's cloud sandboxes for one agent. The one this farm is built around.", "color": "#8A63D2", "job": "runner",
-     "cli": "railway", "stage": "early access", "install": "npm install -g @railway/cli",
-     "login": "railway login --browserless", "docs": "https://docs.railway.com/cli/sandbox",
-     "engines": ["claude"],
-     "terms": "A sandbox stops itself after 30 idle minutes, which is Railway's own backstop.",
-     "pricing": "$50 per vCPU-month and $50 per GB-month, while it runs.",
-     "secrets": ["CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN"], "sizes": [], "regions": []},
-    {"id": "vercel", "label": "Vercel Sandbox", "summary": "Vercel's cloud sandboxes for one agent. Billed by the CPU, memory and data it uses.", "color": "#000000", "job": "runner",
-     "cli": "sandbox", "stage": "ga", "install": "npm install -g sandbox", "login": "sandbox login",
-     "docs": "https://vercel.com/docs/sandbox/cli-reference", "engines": ["claude"],
-     "terms": "Up to 24 hours a session on Pro, 45 minutes on Hobby. UNVERIFIED: live streaming "
-              "out of exec is not documented.",
-     "pricing": "About $0.13 an hour of active CPU, plus memory.",
-     "secrets": ["CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN"], "sizes": [], "regions": []},
 ]
 
-# What this farm knows about each provider. `secrets` maps a stored name to the account label
-# it was stored with; a name that is not in it is not stored. The four login states are spread
-# across the states of this stub, because a page that only ever sees "logged in" draws the
-# other three by guesswork.
+# What this farm knows about each provider. The login states are spread across the states of
+# this stub (logged in here, no answer on the quiet farm, not installed on the empty one, and
+# logged out by the tests that route it), because a page that only ever sees "logged in" draws
+# the others by guesswork.
 HOST_FARM = {
     "ssh": {"cli_installed": True, "login_state": "logged_in", "account": "this farm's own key",
-            "detail": "", "checked_at": ago(120), "secrets": {}, "tested": None},
+            "detail": "", "checked_at": ago(120)},
     "do-droplet": {"cli_installed": True, "login_state": "logged_in",
-                   "account": "owner@example.invalid", "detail": "", "checked_at": ago(90),
-                   "secrets": {}, "tested": None},
-    "do-agents": {"cli_installed": False, "login_state": "not_installed", "account": "",
-                  "detail": "this doctl build has no harness-runtime commands",
-                  "checked_at": ago(220), "secrets": {}, "tested": None},
-    "railway": {"cli_installed": True, "login_state": "logged_in", "account": "murmur-workspace",
-                "detail": "", "checked_at": ago(70),
-                "secrets": {"CLAUDE_CODE_OAUTH_TOKEN": "work subscription", "GITHUB_TOKEN": ""},
-                "tested": {"ok": True, "at": ago(5400), "seconds": 54,
-                           "detail": "a sandbox started, claude answered and it was deleted"}},
-    "vercel": {"cli_installed": True, "login_state": "logged_out", "account": "",
-               "detail": "sandbox list came back with no session", "checked_at": ago(140),
-               "secrets": {"GITHUB_TOKEN": ""},
-               "tested": {"ok": False, "at": ago(9000), "seconds": 12,
-                          "detail": "the sandbox was created and exec never streamed"}},
+                   "account": "owner@example.invalid", "detail": "", "checked_at": ago(90)},
 }
 
 FRESH_FARM = {"cli_installed": False, "login_state": "not_installed", "account": "",
-              "detail": "", "checked_at": None, "secrets": {}, "tested": None}
-
-# A Test asked for through the page. It is answered the way a job is: not before its seconds
-# are up, so the page can be watched flipping the pill by itself.
-TESTS = {}
+              "detail": "", "checked_at": None}
 
 
 def host_rows(state):
@@ -877,13 +859,6 @@ def host_rows(state):
     rows = []
     for preset in HOST_PRESETS:
         farm = dict(FRESH_FARM if state == "empty" else HOST_FARM[preset["id"]])
-        stored = dict(farm["secrets"])
-        tested = farm["tested"]
-        asked = TESTS.get(preset["id"])
-        if asked and time.time() - asked["at"] >= JOB_SECONDS:
-            tested = {"ok": True, "at": asked["at"] + JOB_SECONDS, "seconds": 57,
-                      "detail": f"a sandbox ran claude --version and git ls-remote for "
-                                f"{asked['project']}, then was deleted"}
         rows.append({
             "id": preset["id"], "label": preset["label"], "color": preset["color"],
             "job": preset["job"], "stage": preset["stage"], "cli": preset["cli"],
@@ -891,9 +866,6 @@ def host_rows(state):
             "cli_installed": farm["cli_installed"], "login_state": farm["login_state"],
             "account": farm["account"], "detail": farm["detail"],
             "checked_at": farm["checked_at"],
-            "secrets": [{"name": name, "stored": name in stored,
-                         "account": stored.get(name, "")} for name in preset["secrets"]],
-            "tested": tested,
             "summary": preset["summary"],
             "login": preset["login"], "install": preset["install"], "terms": preset["terms"],
             "pricing": preset["pricing"], "sizes": preset["sizes"], "regions": preset["regions"],
@@ -972,8 +944,8 @@ PUBLIC_KEY_RE = re.compile(r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-[a-z0-9-]+)\s+[A-Z
 # refusal never repeats the value: a sentence that echoes a token has leaked it.
 TOKEN_SHAPES = re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36,}"
                           r"|github_pat_[A-Za-z0-9_]{50,}|dop_v1_[a-f0-9]{64}")
-SECRET_REFUSAL = ("a secret never goes through this page: store it in a terminal with "
-                  "fleet hosts secret <provider> <NAME>")
+SECRET_REFUSAL = ("a secret never goes through this page: run the login command in a "
+                  "terminal on this farm")
 
 
 def advance(row):
@@ -1139,7 +1111,7 @@ def quiet_payload(path, query):
         # state that produces that reading.
         rows = host_rows("ready")
         for row in rows:
-            if row["id"] == "do-agents":
+            if row["id"] == "do-droplet":
                 row["login_state"] = "no_answer"
                 row["cli_installed"] = True
                 row["detail"] = ("the check did not come back within fifteen seconds, so this "
@@ -1619,7 +1591,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             SENT["removed"].append(wanted)
             return self._json(200, {"ok": True, "removed": wanted})
         if parsed.path in ("/api/mode", "/api/models"):
-            # Only a model this run added is mutated here. The five fixture rows are one per
+            # Only a model this run added is mutated here. The fixture rows are one per
             # status on purpose, and a check that pressed a switch must not rewrite the table
             # every later check reads.
             mine = next((item for item in SENT["models"]
@@ -1804,15 +1776,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return 404, {"error": f"there is no provider called {provider or 'that'}"}
         if path == "/api/hosts/check":
             return 202, {"job": job_new("check host", f"asking {provider} who this farm is")}
-        if path == "/api/hosts/test":
-            if body.get("confirm") is not True:
-                return 400, {"error": "a test starts a real sandbox and costs money: it needs "
-                                      "confirm"}
-            project = str(body.get("project") or "").strip()
-            if not project:
-                return 400, {"error": "a test needs the project whose repository it clones"}
-            TESTS[provider] = {"at": time.time(), "project": project}
-            return 202, {"job": job_new("test runner", f"starting a {provider} sandbox")}
         return 404, {"error": f"the stub does not serve {path}"}
 
     def _machine_create(self, body):
@@ -1896,20 +1859,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return 400, {"error": f"{mid} is already in this farm's catalog"}
         run = str(body.get("run") or base["run"]).strip()
         binary = str(body.get("bin") or base["bin"]).strip()
-        if preset == "custom" and (not binary or not run):
-            return 400, {"error": "a custom command needs the command and the line that runs it"}
-        # A custom command is called what the person called it. "Custom command" is the name of
-        # the CARD, not of a farm's own command: two of them would be two identical rows,
-        # separable only by the mono id under the name. model_presets.entry_from() hands the
-        # naming over for that preset and models.add_model() falls back to the id.
-        label = str(body.get("label") or "").strip()
-        if not label:
-            label = mid if preset == "custom" else base["label"]
+        label = str(body.get("label") or "").strip() or base["label"]
         variant = str(body.get("variant") or "").strip()
         if base["variants"] and variant not in base["variants"]:
             variant = base["variants"][0]
         # A key preset with no key pasted yet is exactly that, and says so in the table.
-        status = "needs_key" if base["kind"] == "key" and preset != "custom" else "off"
+        status = "needs_key" if base["kind"] == "key" else "off"
         # Exactly the fields model_presets.ENTRY_FIELDS carries into a catalog entry, plus what
         # engine_row() adds on top. No role, quality, caps or docs: the add route writes none of
         # them, so a page that leaned on any of them would be leaning on this stub alone.
@@ -1924,8 +1879,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "limits": "", "enabled": False, "routable": False, "status": status,
             "command": binary, "installed": True,
             "path": f"/home/farm/.local/bin/{binary or mid}", "last_test": None,
+            # Written from a preset the server serves, so it is in the catalog by definition.
+            "in_catalog": True, "catalog_note": "",
         }
         SENT["models"].append(row)
+        # An id taken out earlier in this run and added again is in the catalog again, as it is
+        # on a farm: `removed` hides what was removed, not what was added after.
+        while mid in SENT["removed"]:
+            SENT["removed"].remove(mid)
         # The envelope the server uses: {"model": row}, so the page reads the answer the farm
         # gives it and not a shape only this stub ever had.
         return 200, {"model": row}

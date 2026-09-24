@@ -27,7 +27,6 @@ import shutil
 import os
 import re
 import secrets
-import signal
 import socket
 import socketserver
 import struct
@@ -127,20 +126,12 @@ DEFAULT_HQ_AGENT = "dashboard"
 # A tool that does not answer must not hold a page open. Three seconds is longer than any of
 # these take when the machine is well, and short enough that a hung one reads as a failed check.
 TOOL_TIMEOUT = 3
-# How long a killed tool's pipes are read before this page stops waiting for them.
-KILL_WAIT = 5
 
 
-def run_tool(args, timeout=TOOL_TIMEOUT, env=None, grace=0):
+def run_tool(args, timeout=TOOL_TIMEOUT, env=None):
     """(returncode, stdout, stderr) from a command line tool. Never raises: a missing binary, a
     hung one and a failing one are all answers this page has to draw, not crashes.
-
-    `grace` is for a tool that holds something paid while it runs. Past the timeout it gets
-    SIGTERM, to its whole process group, and `grace` seconds to tidy up before the SIGKILL that
-    a plain timeout sends at once: a killed `fleet runner test` could not delete its sandbox.
     """
-    if grace > 0:
-        return _run_tool_gracefully(args, timeout, env, grace)
     try:
         done = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=env)
         return done.returncode, done.stdout or "", done.stderr or ""
@@ -150,51 +141,6 @@ def run_tool(args, timeout=TOOL_TIMEOUT, env=None, grace=0):
         return 124, "", f"{args[0]} did not answer within {timeout}s"
     except OSError as exc:
         return 1, "", str(exc)
-
-
-def _run_tool_gracefully(args, timeout, env, grace):
-    try:
-        child = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, env=env, start_new_session=True)
-    except FileNotFoundError:
-        return 127, "", f"{args[0]} is not installed"
-    except OSError as exc:
-        return 1, "", str(exc)
-    try:
-        out, err = child.communicate(timeout=timeout)
-        return child.returncode, out or "", err or ""
-    except subprocess.TimeoutExpired:
-        pass
-    stopped = False
-    for signum, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, KILL_WAIT)):
-        try:
-            os.killpg(child.pid, signum)
-        except OSError:
-            pass
-        try:
-            child.communicate(timeout=wait)
-            stopped = stopped or signum == signal.SIGTERM
-            break
-        except subprocess.TimeoutExpired:
-            # Exited on the SIGTERM, only its pipes are still open: it did stop when asked.
-            stopped = stopped or (signum == signal.SIGTERM and child.poll() is not None)
-            continue
-    else:
-        # The group is dead and the pipes are still open: something that left the group (a
-        # `setsid`, a daemon) holds them, and reading on would wait for it forever while this job
-        # keeps its key. Stop reading and collect the child itself.
-        for stream in (child.stdout, child.stderr):
-            try:
-                stream.close()
-            except OSError:
-                pass
-        try:
-            child.wait(timeout=KILL_WAIT)
-        except subprocess.TimeoutExpired:
-            pass
-    # A page has to tell "timed out and tidied up" from "timed out and was killed mid-way".
-    how = "and stopped when asked" if stopped else f"and was killed after a {grace}s grace"
-    return 124, "", f"{args[0]} did not answer within {timeout}s {how}"
 
 
 def tool_message(rc, out, err, what):
@@ -1330,8 +1276,7 @@ def model_presets_listing():
             taken.add(str(entry["preset"]))
     rows = []
     for preset in MODEL_PRESETS.presets():
-        # Custom command is never "already added": a farm may hold any number of its own.
-        preset["added"] = preset["id"] != MODEL_PRESETS.CUSTOM and preset["id"] in taken
+        preset["added"] = preset["id"] in taken
         rows.append(preset)
     return rows
 
@@ -1970,9 +1915,9 @@ def _finish_job(record, rc, out, err):
     return finished
 
 
-def _run_job(record, args, timeout, after=None, grace=0):
+def _run_job(record, args, timeout, after=None):
     try:
-        rc, out, err = run_tool(args, timeout=timeout, grace=grace)
+        rc, out, err = run_tool(args, timeout=timeout)
         _finish_job(record, rc, out, err)
     finally:
         # Whatever the tool did, the caller's own tidying runs: a temporary file to delete, a
@@ -2019,7 +1964,7 @@ def claim_job(action, args=None, label=None, key=None, command=None):
     return 202, record
 
 
-def start_job(action, args, timeout, label=None, key=None, after=None, grace=0):
+def start_job(action, args, timeout, label=None, key=None, after=None):
     """(status, payload) for a write that runs on a thread.
 
     202 and the record when it started, 409 and the record of the one already holding this
@@ -2028,13 +1973,13 @@ def start_job(action, args, timeout, label=None, key=None, after=None, grace=0):
 
     `after` runs on that thread once the job has ended, however it ended. A caller that started
     the job with a temporary file, or that wants a snapshot refreshed the moment the work is
-    done, hangs it here rather than polling the record. `grace` is run_tool's.
+    done, hangs it here rather than polling the record.
     """
     code, payload = claim_job(action, args, label=label, key=key)
     if code != 202:
         return code, payload
     threading.Thread(target=_run_job, args=(payload, list(args), timeout),
-                     kwargs={"after": after, "grace": grace},
+                     kwargs={"after": after},
                      name="job-" + payload["id"], daemon=True).start()
     return 202, {"job": payload}
 
@@ -2531,7 +2476,7 @@ def _stream_text(event):
             said = said.get("message") or ""
         if isinstance(said, str) and said.strip():
             return "error: " + said.strip()
-    # A generic engine's own words (Grok Build's streaming-json keeps them under "data").
+    # A generic engine's own words (a streaming-json CLI may keep them under "data").
     for key in ("data", "text"):
         value = event.get(key)
         if isinstance(value, str) and value.strip():
@@ -2883,12 +2828,12 @@ def ci_cancel(body):
     return 200, {"ok": True, "id": run_id, "detail": (out or "").strip()[:200]}
 
 
-# ---------------------------------------------------------------- hosting: machines and runners
+# ---------------------------------------------------------------- hosting: machines
 #
-# A farm can own other machines, and can borrow a provider's sandbox to run one lane in. Two
-# tools say where that stands: `fleet machines list --json` reconciles this farm's registry with
-# the provider and advances each row one step, and `fleet hosts list --json` says which provider
-# CLIs are installed, logged in and holding their secrets.
+# A farm can own other machines: your own box over SSH, or a DigitalOcean Droplet. Two tools say
+# where that stands: `fleet machines list --json` reconciles this farm's registry with the
+# provider and advances each row one step, and `fleet hosts list --json` says which provider
+# CLIs are installed and logged in.
 #
 # Both reach the network, so neither may ever run on a request. They are read by a thread of
 # their own on the 45 second cadence, exactly as the machine strip is, and the two answers are
@@ -2914,11 +2859,6 @@ HOSTING_CHECK_TIMEOUT = 120        # SSH, cloud-init status, then `fleet capacit
 HOSTING_DESTROY_TIMEOUT = 120
 HOSTING_REGISTRY_TIMEOUT = 60      # adopt and forget: the registry, and one read of the provider
 HOSTING_HOSTS_CHECK_TIMEOUT = 60
-HOSTING_TEST_TIMEOUT = 600         # it creates a sandbox, runs two commands inside it, deletes it
-# Past that timeout the test is sent SIGTERM and given this long to delete its sandbox before it
-# is killed. The reaper, not this, is what owns a sandbox that outlives both: `fleet runner test`
-# writes its runner handle before it asks the provider for anything (OPERATIONS.md, Hosting).
-HOSTING_TEST_GRACE = 60
 
 # Every value below becomes part of an argv, so each is checked against a pattern first and a
 # body that does not match never reaches a command line at all.
@@ -2946,11 +2886,10 @@ SSH_PUBLIC = re.compile(r"(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)
 # dashboard that carried its own copy would drift from it. This map is only the guard that keeps
 # an unknown word out of an argv, and a provider the snapshot reports is accepted as well, so a
 # preset added to the library needs no change here.
-# Confirmed against `fleet/lib/host_presets.py` on the hosting-core branch (2026-09-23): the same
-# five ids with the same jobs. HostingProvidersTest compares the two once that file is in the
-# tree, so a renamed id fails a test instead of refusing a real provider until the first listing.
-HOSTING_PROVIDERS = {"ssh": "machine", "do-droplet": "machine",
-                     "do-agents": "runner", "railway": "runner", "vercel": "runner"}
+# The same ids as `fleet/lib/host_presets.py` since runners were removed (2026-09-24).
+# HostingProvidersTest compares the two, so a renamed id fails a test instead of refusing a real
+# provider until the first listing.
+HOSTING_PROVIDERS = {"ssh": "machine", "do-droplet": "machine"}
 
 HOSTING_KEY_REFUSAL = ("A token never goes through this page. Run the login command in a "
                        "terminal on this farm.")
@@ -3035,25 +2974,11 @@ def hosting_hosts():
     return _envelope(snapshot, {"providers": providers if isinstance(providers, list) else []})
 
 
-def _secrets_stored(row):
-    """Every secret a runner lists is stored. Logged in is not connected: a lane cannot be
-    spawned on a runner without its two secrets, and a row that lists none cannot show it has
-    them."""
-    listed = row.get("secrets")
-    return (isinstance(listed, list) and bool(listed)
-            and all(isinstance(each, dict) and each.get("stored") is True for each in listed))
-
-
 def hosting_counts():
-    """The two numbers /api/config carries, so the page knows whether this farm has any hosting
-    at all before it draws the section. Read from the snapshot, never from a tool."""
+    """The number /api/config carries, so the page knows whether this farm has any hosting at
+    all before it draws the section. Read from the snapshot, never from a tool."""
     machines = _copy_snapshot(_hosting_machines_snapshot).get("machines")
-    providers = _copy_snapshot(_hosting_hosts_snapshot).get("providers")
-    connected = [row for row in (providers if isinstance(providers, list) else [])
-                 if isinstance(row, dict) and row.get("job") == "runner"
-                 and row.get("login_state") == "logged_in" and _secrets_stored(row)]
-    return {"machines": len(machines) if isinstance(machines, list) else 0,
-            "runners_connected": len(connected)}
+    return {"machines": len(machines) if isinstance(machines, list) else 0}
 
 
 # ---- the writes
@@ -3093,7 +3018,7 @@ def _echo(value):
 
 
 def _provider_field(body, want_job=""):
-    """(the provider id, a sentence). `want_job` keeps a runner out of the machine routes."""
+    """(the provider id, a sentence). `want_job` keeps a provider of another job out."""
     provider = str((body or {}).get("provider") or "").strip()
     known = _known_providers()
     if provider not in known:
@@ -3101,12 +3026,11 @@ def _provider_field(body, want_job=""):
                     if provider else "which hosting provider?")
     job = known[provider]
     # An empty job is a mismatch, not a pass: a listed row that names no job is a provider this
-    # farm cannot say is a machine or a runner, so it reaches neither kind of route.
+    # farm cannot say is a machine, so it reaches no machine route.
     if want_job and job != want_job:
-        if job not in ("machine", "runner"):
-            return "", f"{provider} does not say whether it is a machine or a runner provider"
-        other = "a machine" if job == "machine" else "a runner"
-        return "", f"{provider} is {other} provider, and this asks for a {want_job}"
+        if not job:
+            return "", f"{provider} does not say whether it is a machine provider"
+        return "", f"{provider} is a {job} provider, and this asks for a {want_job}"
     return provider, ""
 
 
@@ -3173,15 +3097,14 @@ def _pubkey_file(value, required):
     return path, ""
 
 
-def _hosting_job(action, args, timeout, label, key, cleanup="", grace=0):
+def _hosting_job(action, args, timeout, label, key, cleanup=""):
     """One hosting write as a job. However it ends, the temporary file it was handed is gone and
     the snapshot has been asked to look again."""
     def after():
         _remove_quietly(cleanup)
         _hosting_wake.set()
 
-    code, payload = start_job(action, args, timeout, label=label, key=key, after=after,
-                              grace=grace)
+    code, payload = start_job(action, args, timeout, label=label, key=key, after=after)
     if code != 202:
         # Nothing started, so nothing will clean up after it.
         _remove_quietly(cleanup)
@@ -3375,36 +3298,6 @@ def hosts_check(body):
                                  f"Checking the {provider} login", "host:" + provider)
     if code == 202:
         payload["provider"] = provider
-    return code, payload
-
-
-def hosts_test(body):
-    """POST /api/hosts/test {provider, project, confirm: true}.
-
-    It creates the smallest sandbox the provider sells, runs two commands in it and deletes it,
-    so it spends a few cents of the person's money. That is what `confirm` is for: a body
-    without it never reaches the CLI.
-    """
-    body = body or {}
-    refusal = hosting_key_refusal(body)
-    if refusal:
-        return 400, {"error": refusal}
-    provider, problem = _provider_field(body, want_job="runner")
-    if problem:
-        return 400, {"error": problem}
-    project = str(body.get("project") or "").strip()
-    if not PROJECT_NAME.fullmatch(project) or project not in _projects_registry():
-        return 400, {"error": f"'{_echo(project)}' is not a project registered on this farm",
-                     "projects": sorted(_projects_registry())}
-    if body.get("confirm") is not True:
-        return 400, {"error": "a test creates a sandbox and spends a few cents, so it has to "
-                              "be confirmed"}
-    args = [fleet_bin(), "runner", "test", provider, "--project", project]
-    code, payload = _hosting_job("hosts_test", args, HOSTING_TEST_TIMEOUT,
-                                 f"Testing the {provider} runner", "host:" + provider,
-                                 grace=HOSTING_TEST_GRACE)
-    if code == 202:
-        payload.update({"provider": provider, "project": project})
     return code, payload
 
 
@@ -4421,9 +4314,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(code, json.dumps(payload))
             elif path == "/api/hosts/check":
                 code, payload = hosts_check(body)
-                self._send(code, json.dumps(payload))
-            elif path == "/api/hosts/test":
-                code, payload = hosts_test(body)
                 self._send(code, json.dumps(payload))
             elif path == "/api/agents/kill":
                 code, payload = agent_kill(body)

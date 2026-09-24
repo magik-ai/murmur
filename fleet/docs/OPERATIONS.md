@@ -4,6 +4,12 @@ How to set up a machine that runs headless coding agents (a **farm**), and how t
 is up. Everything here is generic: substitute your own values for `<FARM_HOST>`, `<PROJECT>`,
 `<OWNER>/<REPO>` and `<LANE>`.
 
+murmur runs two engines, **Claude Code** and **Codex**, and a farm runs on **your own machine**
+(any Linux box you reach over SSH) or on a **DigitalOcean Droplet** the farm creates for you.
+Those are the ones we have run for real. The other engine presets and the remote runners were
+removed on 2026-09-24; adding one back is a contribution, see
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md).
+
 The shape of the thing:
 
 ```
@@ -168,22 +174,25 @@ fleet models off claude haiku          # refuses the default model
 | Provider | Where `discover` reads the list |
 |---|---|
 | Codex | `codex debug models` (the codex lanes run, `CODEX_BIN`), rows with `visibility` `list` |
-| Ollama | `GET /api/tags` on `OLLAMA_HOST` (default `127.0.0.1:11434`) |
-| Qwen Code | `~/.qwen/settings.json` `modelProviders` |
-| Kimi Code | `~/.kimi/config.toml` `[models.*]` |
-| OpenCode | `opencode models` |
-| Claude Code, Gemini CLI, Grok Build, Aider | the docs list in `lib/model_discovery.py` |
-| Custom, or a hand-written row | none: the name a person types, and a sentence saying there is no list |
+| Claude Code | the docs list in `lib/model_discovery.py` |
+| A hand-written row, or one whose preset was removed | none: the name a person types, and a sentence saying there is no list |
 
 Only an id, a label and a description are kept from any source, and the answer passes
-`lib/scrub.py` with every credential-looking value of the provider's file added (the Qwen and Kimi
-files hold keys). A failure answers the docs list with one fixed sentence: the CLI is not
+`lib/scrub.py` with every credential-looking value a route read on the way added (a vendor's own
+file can hold keys). A failure answers the docs list with one fixed sentence: the CLI is not
 installed, it did not answer in 15 seconds, its output could not be read, the file is missing, the
 CLI exited with an error, nothing answered on its port, it listed no models. A row with no route
 and no documented list answers an eighth: this provider has no list to offer here; add a model by
 its name. A catalog that still
 carries the retired `models = "sonnet, opus"` string reads it as the first `models_on`; the first
 `fleet models on|off` rewrites it.
+
+**A row murmur no longer ships.** A farm that added Gemini CLI, Qwen Code, Kimi Code, Grok Build,
+OpenCode, Aider, Ollama or a Custom command before those presets were removed (2026-09-24) still
+has that table in its own `models.toml`. Nothing deletes it and nothing breaks on it: `fleet
+models` and the dashboard list it as before, marked **not in the catalog**, with one line that
+says how to take it out (Remove on the dashboard for a row this farm added, or delete its table
+from `models.toml` by hand). It keeps running as it did until you do.
 
 **The dashboard** starts on the first spawn, or with `fleet dashboard start`, on port 7878. It is a
 shared, long-lived service: health strip, subscription tiles, one card per lane with status, PR
@@ -224,16 +233,16 @@ keeps the last good values when a pass fails, with `stale_since` saying when the
 | `/api/accounts` | GET | each subscription's windows, with the last good numbers when a read failed |
 | `/api/accounts/login-state` | GET | per account: `logged_in`, `waiting_for_login`, `expired`, `rate_limited` or `unknown`, each with a sentence and when it was last read. `waiting_for_login` means the credentials file is ABSENT; one that is there but cannot be read is `unknown`, never an invitation to log in over it |
 | `/api/jobs`, `/api/jobs/<id>` | GET | the long actions in flight, and one action's record |
-| `/api/engines` | GET | the model catalog as the Models table reads it: one row per model with how it is paid for (`access`), one status word (`on`, `off`, `needs_key`, `not_installed`, `failing`), whether this farm added it (`source`), the model it runs (`variant`), the ids switched on (`models_on`), the model a bare spawn runs (`default_model`), and whether its command is on this machine. It starts nothing: running a model is what Test is for |
+| `/api/engines` | GET | the model catalog as the Models table reads it: one row per model with how it is paid for (`access`), one status word (`on`, `off`, `needs_key`, `not_installed`, `failing`), whether this farm added it (`source`), the model it runs (`variant`), the ids switched on (`models_on`), the model a bare spawn runs (`default_model`), whether murmur still ships it (`in_catalog`, with `catalog_note`, the sentence on how to take out a row it does not), and whether its command is on this machine. It starts nothing: running a model is what Test is for |
 | `/api/models` | GET | the catalog as the library sees it, without the machine's own facts |
-| `/api/models/presets` | GET | the services "Add a model" offers (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, Grok Build, OpenCode, Aider, Ollama local, Custom command), each with its install hint, its key variable, its variants, how it is paid for and whether running it headless is permitted. `added` is true for a service this farm already has |
+| `/api/models/presets` | GET | the services "Add a model" offers (Claude Code and Codex), each with its install hint, its key variable, its variants, how it is paid for and whether running it headless is permitted. `added` is true for a service this farm already has |
 | `/api/power/preview?action=` | GET | what throttle, drain or resume will do, with the lanes a drain would stop, by name |
 | `/api/mail/boxes` | GET | the head office's mailboxes, with a count for the last day |
 | `/api/mail/thread?box&since` | GET | one mailbox's messages, newest last |
 | `/api/mail/feed?hours=24` | GET | the whole office as one timeline, newest first, built here |
 | `/api/mail/who` | GET | the live sessions, from `hq who` |
 | `/api/machines` | GET | this farm, the machines it owns and what they cost a month, each with one `state` (`creating`, `preparing`, `needs-login`, `ready`, `unreachable`, `failed`, `destroyed`, `unrecorded`), the command that finishes a new one and the command that tunnels to its dashboard, and the provider's own `provider_id`. From `fleet machines list --json`, read on a thread and never on the request |
-| `/api/hosts` | GET | one row per hosting provider: which job it does (`machine` or `runner`), whether its CLI is installed, `login_state` (`logged_in`, `logged_out`, `not_installed`, `no_answer`, so a slow provider is never drawn as logged out), which of its secrets are stored, the last Test, its `cli`, `color`, `engines` and `docs`, and its terms, pricing, sizes (each with `default`, true on exactly one) and regions. From `fleet hosts list --json`, passed through untouched |
+| `/api/hosts` | GET | one row per hosting provider (your own machine over `ssh`, and `do-droplet`), each with its `job` (`machine`), whether its CLI is installed, `login_state` (`logged_in`, `logged_out`, `not_installed`, `no_answer`, so a slow provider is never drawn as logged out), its `cli`, `color`, `engines` and `docs`, and its terms, pricing, sizes (each with `default`, true on exactly one) and regions. From `fleet hosts list --json`, passed through untouched |
 
 **Write.** Every one of these needs the token, names its own timeout in the code, passes argv as a
 list (never a shell string), and answers with one sentence a person can act on rather than with a
@@ -272,7 +281,6 @@ none is sent to them.
 | `/api/machines/adopt` | `{name}` | `fleet machines adopt N`, for a droplet this farm made and lost: the row is written back from the provider's own facts |
 | `/api/machines/forget` | `{name}` | `fleet machines forget N`: the row goes, the machine is not touched |
 | `/api/hosts/check` | `{provider}` | `fleet hosts check <provider>`, as a job |
-| `/api/hosts/test` | `{provider, project, confirm: true}` | `fleet runner test <provider> --project P`, as a job. It creates the smallest sandbox the provider sells, runs two commands in it and deletes it, so it spends a few cents: `400` without `confirm: true` |
 
 ### Long actions are jobs
 
@@ -294,21 +302,13 @@ not only by the next job to start.
 
 Hosting jobs take a key of their own: `machine:<name>` for everything about one machine, so a
 second machine can be ordered while the first one is still booting, and `host:<provider>` for a
-provider's check and test. When one of them ends, the hosting snapshot is asked to look again at
+provider's check. When one of them ends, the hosting snapshot is asked to look again at
 once, rather than at the end of its 45 second sleep. A token never goes through any of these
 routes: a body with a field whose name carries key, secret, token, credential or password is
 refused with `A token never goes through this page. Run the login command in a terminal on this
 farm.`, and the refusal repeats neither the value nor the field's name. A person's SSH public key
 is not a credential and may be typed in, under the field name `ssh_public`; it is written to a
 0600 temporary file, passed as `--pubkey-file`, and deleted the moment the job ends.
-
-A runner test holds a paid sandbox while it runs. Past its 600 second timeout it is sent SIGTERM,
-to its whole process group, and given 60 seconds to delete the sandbox before it is killed; the
-grace only helps a `fleet runner test` that turns SIGTERM into its own delete. The grace is not
-what owns a leak. The contract is that `fleet runner test` writes its handle,
-`$FLEET_STATE/runners/<slug>.json`, before it asks the provider for anything, exactly as a runner
-lane does (design section 5), so a test that is killed anyway leaves a sandbox `fleet runner reap`
-finds and deletes on the next sweep.
 
 The refusal is about the RESOURCE, not the verb. A job holds a `key`, and starting anything that
 holds the same key is refused with `409` and the record of the one in flight, because pressing

@@ -60,14 +60,15 @@ fs.mkdirSync(OUT, { recursive: true });
 const { chromium } = await loadPlaywright();
 const browser = await chromium.launch();
 
-/* The catalog as a server of design section 6 answers it, built from the stub's own rows. Kimi
-   takes a model here, so its sidebar reaches the request that fails. */
+/* The catalog as a server of design section 6 answers it, built from the stub's own rows.
+   demo-strict (a row of the stub's fictional contributed presets) takes a model here, so its
+   sidebar reaches the request that fails. */
 const STUB_ROWS = await (await fetch(`${BASE}/api/engines`)).json();
 const CONTRACT = {
   claude: { models_on: ["opus", "sonnet"], default_model: "opus" },
   codex: { models_on: ["gpt-6-sol"], default_model: "gpt-6-sol" },
-  qwen: { models_on: [], default_model: "" },
-  kimi: { models_on: [], default_model: "", run: "{bin} -m {variant} -p {task}" },
+  "demo-plain": { models_on: [], default_model: "" },
+  "demo-strict": { models_on: [], default_model: "", run: "{bin} -m {variant} -p {task}" },
   local: { models_on: [], default_model: "" },
 };
 const ENGINES = JSON.stringify(STUB_ROWS.map((row) => ({ ...row, ...(CONTRACT[row.id] || {}) })));
@@ -146,6 +147,10 @@ for (const state of STATES) {
         switches: [...document.querySelectorAll("#view .mo-providers [data-model-switch]")]
           .filter((node) => node.offsetParent).map((node) => node.textContent),
         counts: [...document.querySelectorAll("#view [data-model-count]")].map((node) => node.textContent),
+        orphans: [...document.querySelectorAll("#view .mo-providers [data-model-orphan]")]
+          .map((node) => `${node.getAttribute("data-model-orphan")}:${node.innerText}`),
+        heights: [...document.querySelectorAll("#view .mo-providers tbody tr")]
+          .map((row) => Math.round(row.getBoundingClientRect().height)),
       }));
       const columns = size.width > 640
         ? "Provider|Access|Status|Models|Last test|Actions" : "Provider|Status|Models";
@@ -156,6 +161,10 @@ for (const state of STATES) {
           .every((word) => seen.pills.includes(word)), seen.pills.join(", "));
       check(`${label} counts the models that are on`,
         seen.counts.includes("2 on") && seen.counts.includes("1 on"), seen.counts.join(", "));
+      check(`${label} marks the one row murmur no longer ships, and keeps every row one line`,
+        seen.orphans.join(",") === "grok:Not in the catalog"
+        && Math.max(...seen.heights) - Math.min(...seen.heights) <= 2,
+        `${seen.orphans.join(",")} ${seen.heights.join(",")}`);
       if (size.width > 640) {
         check(`${label} labels every switch with the press it makes`,
           seen.switches.length > 0 && seen.switches.every((word) => /^Switch (on|off)$/.test(word)),
@@ -232,9 +241,9 @@ for (const size of SIZES) {
 
   await page.click("#drawerClose");
   await page.waitForTimeout(300);
-  await page.click("[data-model-open='kimi']");
+  await page.click("[data-model-open='demo-strict']");
   await page.waitForTimeout(500);
-  await page.click("[data-model-request='kimi']");
+  await page.click("[data-model-request='demo-strict']");
   await page.waitForTimeout(900);
   await page.evaluate(() => {
     const block = document.querySelector("#drawer .mo-list-block");
@@ -251,12 +260,22 @@ for (const size of SIZES) {
 
   await page.click("#drawerClose");
   await page.waitForTimeout(300);
-  await page.click("[data-model-open='qwen']");
+  await page.click("[data-model-open='demo-plain']");
   await page.waitForTimeout(500);
   const cannot = await page.evaluate(() => Boolean(document.querySelector("#drawer [data-model-cannot]")));
   check(`${label("no model list")} says the provider runs its own model`, cannot);
   await wide(page, label("no model list"));
   await shoot(page, "sidebar-cannot", size);
+
+  await page.click("#drawerClose");
+  await page.waitForTimeout(300);
+  await page.click("[data-model-open='grok']");
+  await page.waitForTimeout(500);
+  const orphan = await page.evaluate(() => (document.querySelector("#drawerBody [data-model-orphan-note]") || {}).textContent || "");
+  check(`${label("not in the catalog")} opens with how to take it out`,
+    /Not in murmur's catalog/.test(orphan) && /press Remove/.test(orphan), orphan.slice(0, 200));
+  await wide(page, label("not in the catalog"));
+  await shoot(page, "sidebar-orphan", size);
 
   check(`sidebar ${size.width} logged no error`, problems.length === 0, problems.slice(0, 3).join(" | "));
   await context.close();

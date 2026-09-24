@@ -1,5 +1,14 @@
 # Hosting: machines and runners
 
+> **Note, 2026-09-24.** Runners were removed on this day by the owner's decision: murmur ships
+> only what it has run for real. Gone: the DigitalOcean Managed Agents, Railway and Vercel
+> presets, `fleet/lib/runners/`, `fleet runner`, `fleet spawn --runner` and `--runner-timeout`,
+> `fleet hosts secret`, `POST /api/hosts/test`, and the dashboard's Runners table and Connect a
+> runner drawer. What remains is the machine half of this record: your own machine over SSH and
+> a DigitalOcean Droplet (`fleet/lib/host_presets.py`, `fleet machines`, `fleet hosts list|check`,
+> the Hosting section of the Machine tab). The body below is kept as it was written, as history;
+> adding a runner or a machine back is a contribution (`CONTRIBUTING.md`).
+
 Design record, 2026-09-23. The owner: "add the ability to connect different hostings for the
 machine, so the connectors are there from the start: DigitalOcean (with its new Managed Agents),
 Railway, Vercel; think through the setup, write skills, make onboarding easy through the

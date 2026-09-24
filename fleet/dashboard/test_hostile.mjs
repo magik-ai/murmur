@@ -483,7 +483,10 @@ for (const width of [700, 1024, 1280, 1440]) {
 /* The Accounts table: each subscription carries its engine as a mark at the right of its name. */
 {
   const { page, context } = await open({ hash: "#/machine" });
-  await page.waitForSelector("table.m-accounts tbody tr", { timeout: 10000 }).catch(() => null);
+  /* The Machine tab reads a dozen routes before the Accounts table is drawn, so a fixed pause
+     read the table before it existed. It waits for the rows instead, and still reads nothing
+     into a check that times out. */
+  await page.waitForSelector("table.m-accounts tbody tr", { timeout: 15000 }).catch(() => {});
   const accounts = await page.evaluate(() => ({
     heads: [...document.querySelectorAll("table.m-accounts thead th")].map((node) => node.textContent.trim()),
     marks: [...document.querySelectorAll("table.m-accounts tbody tr")].map((row) => {
@@ -1058,7 +1061,7 @@ for (const width of [700, 1024, 1280, 1440]) {
   const { page, context } = await open({ hash: "#/machine", size: { width: 1024, height: 900 } });
   await page.waitForTimeout(1500);
   const marks = await page.evaluate(() => ["[data-accounts-refresh]", "[data-add-account]", "[data-add-model]",
-    "[data-add-machine]", "[data-connect-runner]"].map((selector) => {
+    "[data-add-machine]"].map((selector) => {
     const node = document.querySelector(selector);
     return [selector, node ? Boolean(node.closest("[data-write]")) : null];
   }));

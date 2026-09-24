@@ -22,6 +22,12 @@
 .mo-name .m-dot { margin-top: 0; }
 .mo-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .mo-name:hover b { color: var(--accent); text-decoration: underline; }
+/* A row murmur no longer ships keeps its name and says so beside it, on the same one line. The
+   pill yields first, down to its mark, and the name keeps what is left: at 1024 the full pill
+   pushed the name to nothing, and a name cut to nothing cannot be clicked. */
+.mo-provider-cell { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.mo-provider-cell .mo-name { min-width: 0; }
+.mo-orphan { flex: 0 1000 auto; min-width: 22px; overflow: hidden; }
 .mo-row-actions { gap: 6px; flex-wrap: nowrap; align-items: center; overflow: hidden; }
 .mo-row-actions > * { flex: none; }
 

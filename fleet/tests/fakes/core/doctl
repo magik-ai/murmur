@@ -12,7 +12,7 @@ variables a test sets:
                              rewrite it, so a test can watch a droplet appear and vanish
   FAKE_DOCTL_SSH_KEYS=<file> the account's SSH keys, a JSON list; import appends to it
   FAKE_DOCTL_FIREWALLS=<file> the account's firewalls, a JSON list; create appends to it
-  FAKE_DOCTL_NO_HARNESS=1    this doctl build has no harness-runtime commands
+  FAKE_DOCTL_LEAK=<text>     a logged-out doctl prints this too, so a test can prove the scrub
   FAKE_DOCTL_SLEEP=20        answer slowly, so a caller's timeout can fire
 """
 import json
@@ -177,11 +177,9 @@ def main():
         out("doctl version 1.0.0-fake")
         return 0
 
-    if args[0] == "harness-runtime" and flag("FAKE_DOCTL_NO_HARNESS"):
-        die('Error: unknown command "harness-runtime" for "doctl"')
-
     if not flag("FAKE_DOCTL_LOGGED_IN"):
-        die(AUTH_ERROR)
+        leak = flag("FAKE_DOCTL_LEAK")
+        die(AUTH_ERROR + (f" (token {leak} was refused)" if leak else ""))
 
     if args[0] == "account" and args[1:2] == ["get"]:
         out(json.dumps([{
@@ -190,12 +188,6 @@ def main():
             "uuid": "0000-fake",
         }]))
         return 0
-
-    if args[0] == "harness-runtime":
-        if args[1:2] == ["list"]:
-            out("[]")
-            return 0
-        die('Error: unknown command for "doctl harness-runtime"')
 
     if args[0] == "compute":
         return compute(argv)

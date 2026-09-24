@@ -47,10 +47,6 @@ Mid-run inbox (the orchestrator may correct course without restarting you):
 Generated artifacts (a repeat CI killer, cheap to avoid):
 - If your change adds or moves a **feature tag** on a test (the `feature('...')` helper), or adds/renames an ADR, a migration, or an API schema, the repo has a generated file that CI diffs against your tree. Regenerate it and COMMIT the result, or the `changes` job fails and every dependent context fails with it in seconds, which reads like a broken build but is only stale generated output. For feature tags that is `python3 scripts/feature-inventory/generate.py` writing `docs/architecture/FEATURE_INVENTORY.md`. Run the repo's generators for whatever you touched before you push.
 
-<!--runner-swap-start-->
 Finish condition:
 - When the slice is complete: run the repo's lint + your touched tests, commit, then open a PR with `gh pr create`, with a descriptive title, body and test plan, and STOP. Do NOT merge; the orchestrator reviews and merges. If your PR adds a migration, say so in the PR body and your final message.
 - If you get blocked or the task is underspecified: do your best, open a DRAFT PR that describes the blocker in its body, and stop. Never loop indefinitely or wait for input that will not come.
-<!--runner-only-->
-You run in a remote sandbox. hq and fleet are not available. Commit your work; do not push and do not run gh. When you are done, write the pull request title on the first line and its body after it into /tmp/fleet-pr.md, outside the repository. The farm pushes your branch and opens the pull request.
-<!--runner-swap-end-->

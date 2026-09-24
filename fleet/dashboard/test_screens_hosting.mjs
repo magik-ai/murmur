@@ -1,6 +1,6 @@
-/* The Hosting section and its two dialogs, in every state the stub can produce and at both
-   widths, step by step. The check is narrow on purpose: nothing may throw, the page may never
-   scroll sideways, every screen must draw something, and every row of both tables must be one
+/* The Hosting section and its Add a machine dialog, in every state the stub can produce and at
+   both widths, step by step. The check is narrow on purpose: nothing may throw, the page may
+   never scroll sideways, every screen must draw something, and every row of the table must be one
    line high. The pictures are the point, so a person can look at a section they have never seen
    and say what it costs them. They are written outside the repository and never committed.
 
@@ -115,11 +115,10 @@ async function measured(page, screen, state) {
     return [
       ["says what this list costs a month", /You pay \$\d+ a month for \d+ machines/.test(text),
         text.slice(0, 120)],
-      ["draws this farm first and both tables after it",
-        /This farm/.test(text) && /Size and price/.test(text) && /Secrets/.test(text),
-        text.slice(0, 200)],
-      ["says the gap the Accounts windows have",
-        /Usage by cloud agents is not in the Accounts windows yet/.test(text), text.slice(-160)],
+      ["draws this farm first and the machines table after it",
+        /This farm/.test(text) && /Size and price/.test(text), text.slice(0, 200)],
+      ["names no runner, since runners were removed on 2026-09-24",
+        !/runner|sandbox/i.test(text), text.slice(-160)],
     ];
   }
   if (state === "empty") {
@@ -199,40 +198,11 @@ async function openScreen(page, screen) {
       /\$48 a month/.test(said) && /billed until you destroy it/.test(said), said.slice(0, 160));
     return true;
   }
-  if (screen.startsWith("runner")) {
-    await closeAnyDrawer(page);
-    const open = await page.evaluate(() => {
-      const button = document.querySelector("[data-connect-runner]");
-      return Boolean(button) && !button.disabled;
-    });
-    if (!open) return false;
-    await page.click("[data-connect-runner]");
-    await page.waitForTimeout(500);
-    if (screen === "runner-1") return true;
-    const pickable = await page.evaluate(() => {
-      const node = document.querySelector("#drawer [data-runner-provider='railway']");
-      return Boolean(node) && !node.disabled;
-    });
-    if (!pickable) return false;
-    await page.click("#drawer [data-runner-provider='railway']");
-    await page.waitForTimeout(400);
-    const step = { "runner-2": 2, "runner-3": 3, "runner-4": 4, "runner-5": 5, "runner-6": 6 }[screen];
-    if (step) await scrollToStep(page, step);
-    if (screen === "runner-4") {
-      const commands = await page.evaluate(() => [...document.querySelectorAll(
-        "#drawer [data-runner-secret]")].map((node) => node.textContent).join(" | "));
-      check("the runner dialog hands over one secret command per name",
-        /fleet hosts secret railway CLAUDE_CODE_OAUTH_TOKEN/.test(commands)
-        && /fleet hosts secret railway GITHUB_TOKEN/.test(commands), commands.slice(0, 200));
-    }
-    return true;
-  }
   return true;
 }
 
 const SCREENS = ["hosting", "add-machine-1", "add-machine-2", "add-machine-3", "add-machine-4",
-  "add-machine-5", "add-machine-own", "runner-1", "runner-2", "runner-3", "runner-4",
-  "runner-5", "runner-6"];
+  "add-machine-5", "add-machine-own"];
 
 for (const state of STATES) {
   for (const size of SIZES) {
@@ -276,7 +246,7 @@ for (const state of STATES) {
         /* The owner's rule, measured in the same pass that photographs it. */
         const heights = await page.evaluate(() => {
           const out = {};
-          for (const table of document.querySelectorAll("#view .h-machines, #view .h-runners")) {
+          for (const table of document.querySelectorAll("#view .h-machines")) {
             out[table.className] = [...table.querySelectorAll("tbody tr")]
               .map((row) => Math.round(row.getBoundingClientRect().height));
           }

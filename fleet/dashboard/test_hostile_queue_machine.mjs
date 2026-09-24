@@ -954,8 +954,8 @@ for (const view of ["queue", "machine"]) {
       installed: false, path: "", command: "codex", source: "shipped",
       access: "Your ChatGPT subscription.", last_test: null,
       install_hint: "npm install -g @openai/codex" },
-    { id: "qwen", label: "Qwen Code", engine: "generic", status: "off", enabled: false,
-      installed: true, path: "/usr/bin/qwen", command: "qwen", source: "added",
+    { id: "democli", label: "Demo CLI", engine: "generic", status: "off", enabled: false,
+      installed: true, path: "/usr/bin/democli", command: "democli", source: "added",
       access: "An API key, held on the farm.", last_test: null },
   ];
   const second = await open({

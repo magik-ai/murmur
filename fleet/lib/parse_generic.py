@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Engine-agnostic parser for a generic model CLI (qwen, etc). It does not try to understand the
+"""Engine-agnostic parser for a generic model CLI (an engine a catalog entry describes). It does not try to understand the
 model's JSON shape — it keeps the SAME per-agent state file the other parsers write by tracking
 the last non-empty line as activity and settling status on close via find_pr. Enough for the
 fleet, dashboard, capacity guard and event stream to treat any CLI uniformly."""
@@ -160,8 +160,8 @@ def find_pr(state):
 
 def words_of(event):
     """The agent's own words in one JSON event, or None when it carries none. Flat keys first
-    (Grok Build keeps its text under "data"), then a message's content blocks, the shape Qwen
-    Code and other stream-json CLIs share with Claude Code."""
+    (some CLIs keep their text under "data"), then a message's content blocks, the shape
+    stream-json CLIs share with Claude Code."""
     for k in ("text", "message", "content", "delta", "command", "output", "data", "result"):
         v = event.get(k)
         if isinstance(v, str) and v.strip():
@@ -193,8 +193,8 @@ for line in sys.stdin:
     line = line.strip()
     if not line:
         continue
-    # Any line at all means the engine started. Aider, Ollama and the other plain-text CLIs never
-    # print JSON, and counting only JSON lines settled every one of their lanes as "never started".
+    # Any line at all means the engine started. A plain-text CLI never prints JSON, and counting
+    # only JSON lines settled every one of its lanes as "never started".
     _saw_event = True
     _last_line = line
     # try to pull human text out of a json line; else use the raw line
@@ -207,8 +207,8 @@ for line in sys.stdin:
                 if isinstance(said, dict):
                     said = said.get("message") or json.dumps(said)
                 _last_error = str(said).strip()
-            # Only an event that carries words moves the card. Bookkeeping events (Grok's usage
-            # and end lines, a tool list) would otherwise leave the card on raw JSON.
+            # Only an event that carries words moves the card. Bookkeeping events (usage and end
+            # lines, a tool list) would otherwise leave the card on raw JSON.
             act = words_of(o)
             if act is None:
                 continue
