@@ -128,7 +128,7 @@ _hq_gate() {
     true)  echo 1;;
     false) echo 0;;
     *)     echo 1
-           echo "hq: the \`hq\` CLI is on PATH and $FLEET_CONFIG/policy.toml has no [hq] table, so head office stays ON for this lane. Settle it with [hq] enabled = true (or false); see docs/MIGRATION.md." >&2;;
+           echo "hq: the \`hq\` CLI is on PATH and $FLEET_CONFIG/policy.toml has no [hq] table, so head office stays ON for this lane. Settle it with [hq] enabled = true (or false); see ${FLEET_HOME:+$FLEET_HOME/}config/policy.example.toml." >&2;;
   esac
 }
 
@@ -1994,8 +1994,7 @@ fleet: headless Claude Code and Codex agents on the farm
                                   balanced ~35% / hard ~20% PAUSE new spawns. Live, no
                                   root, no restart. No arg shows the current mode.
 
-  Setup and day to day: docs/QUICKSTART.md; the whole rig: docs/OPERATIONS.md;
-  upgrading an older farm: docs/MIGRATION.md.
+  Setup and day to day: docs/QUICKSTART.md; the whole rig: docs/OPERATIONS.md.
 H
     ;;
 esac

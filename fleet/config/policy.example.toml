@@ -50,8 +50,9 @@ allow_spawn   = false
 # with no user.email configured would otherwise fail a lane's first commit with
 # "unable to auto-detect email address", which reads as a broken agent; a box
 # that has one would quietly re-author every lane commit as the operator.
-# Set email_format if your deployment wants its own shape (and see MIGRATION.md
-# if this farm was committing under a real address before).
+# Set email_format if your deployment wants its own shape. A farm that has been
+# committing under a real address writes that shape here, or the authorship of
+# every later lane commit changes.
 [identity]
 author_format = "{agent} (agent)"
 # email_format = "you+{agent}@example.com"
