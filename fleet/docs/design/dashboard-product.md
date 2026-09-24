@@ -76,6 +76,9 @@ share, and the routes the shared parts of the page read.
 - *write*: every POST needs the bearer token, on any bind. A request whose `Origin` or
   `Sec-Fetch-Site` header says it came from another site is refused, whatever token it carries.
 
+On a loopback bind, a request is refused at every level unless its `Host` header is `localhost`
+or a loopback address. So a website cannot reach the board through DNS rebinding.
+
 **No read runs a tool.** A GET is answered from memory. Background threads read the machine and
 the head office on their own clock and keep snapshots. The page asks again every 3 seconds, so a
 tool call on a read path would run 1,200 times an hour for each open page. A snapshot answer

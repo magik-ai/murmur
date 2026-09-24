@@ -17,7 +17,9 @@
    token a page can guess or replay is not a permission.
 
    Reads are open on a loopback bind and need the same token once the bind is
-   wide: /api/agent hands out a lane's whole brief and its result."""
+   wide: /api/agent hands out a lane's whole brief and its result. A loopback
+   bind also refuses any request addressed to a name other than this machine's
+   own, so a website cannot read it through DNS rebinding."""
 import datetime
 import glob
 import hmac
@@ -3743,6 +3745,31 @@ def bind_is_loopback(bind=None):
         return False
 
 
+# A Host header: a name or an IPv4 address, or an IPv6 address in brackets, then an optional port.
+HOST_HEADER = re.compile(r"(?:\[(?P<v6>[0-9A-Fa-f:.]+)\]|(?P<name>[A-Za-z0-9.-]+))(?::[0-9]{1,5})?")
+
+
+def host_is_local(header):
+    """True when a Host header names this machine: `localhost`, or a loopback address such as
+    127.0.0.1 or [::1], on any port.
+
+    On a loopback bind, reads need no token, so this is what keeps them on this machine. With
+    DNS rebinding, a website points a name it owns at 127.0.0.1, and its script can then read this
+    server as if it were that site. The browser still sends the site's own name as Host, so a
+    loopback bind refuses every other name. Any port passes, because an ssh tunnel may put the
+    page on another local port."""
+    match = HOST_HEADER.fullmatch((header or "").strip())
+    if not match:
+        return False
+    name = match.group("v6") or match.group("name")
+    if name.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
 def presented_token(headers, query_token=""):
     """The bearer token on a request, or "" when there is none. The query form exists because a
     browser cannot set a header on the address bar: the page is opened once as /?token=... and
@@ -3831,6 +3858,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _query_token(self):
         return parse_qs(urlparse(self.path).query).get("token", [""])[0]
 
+    def _refused_host(self):
+        """On a loopback bind, refuse a request addressed to any name but this machine's own.
+        True when the request was refused. A wide bind needs the token for reads already, and
+        must answer to its own address, so it is not checked."""
+        if not bind_is_loopback() or host_is_local(self.headers.get("Host")):
+            return False
+        self._send(403, json.dumps({"error": "this dashboard only answers on this machine: open "
+                                             "it as http://127.0.0.1 or http://localhost"}))
+        return True
+
     def _read_body(self):
         """(the request's JSON object, an error sentence).
 
@@ -3863,6 +3900,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
+            if self._refused_host():
+                return
             path = urlparse(self.path).path
             if not self._is_open(path):
                 readable, why = may_read(self.headers, self._query_token())
@@ -3968,6 +4007,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            if self._refused_host():
+                return
             writable, why = may_mutate(self.headers, self._query_token())
             if not writable:
                 self._send(403, json.dumps({"error": why}))

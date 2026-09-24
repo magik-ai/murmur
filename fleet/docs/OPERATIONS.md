@@ -377,6 +377,9 @@ board down while every lane keeps working. The farm then looks dead from outside
 | another network | set `FLEET_DASH_BIND` to one of the farm's addresses (an IPv6 literal works too), then restart |
 
 - `FLEET_DASH_BIND` defaults to `127.0.0.1`, so only the farm itself can connect.
+- On a loopback address, the dashboard answers only requests addressed to `localhost` or to a
+  loopback address such as `127.0.0.1` or `[::1]`, on any port. This stops a website that points
+  a name of its own at `127.0.0.1` (DNS rebinding) from reading the board.
 - `tailscale` means the farm's Tailscale IPv4 address, read when the dashboard starts. With no
   such address, the dashboard does not start at all, rather than listen more widely. As a user
   unit, it tries again every 5 seconds until the address is there.
@@ -972,6 +975,8 @@ the dashboard.
   `/api/access`, `/api/version` and `/api/config`.
 - Every other `GET` needs the token once the address is not loopback. Every `POST` always needs
   it, and is refused when `Origin` or `Sec-Fetch-Site` says another site sent it.
+- On a loopback address, every route answers 403 when the `Host` header is not `localhost` or a
+  loopback address.
 - Send the token as `Authorization: Bearer <token>`, or as `?token=<token>`.
 - A request body is a JSON object of at most 256 KB. An error answers `{"error": "<a sentence>"}`.
 - Every time in an answer is an ISO 8601 stamp in UTC.

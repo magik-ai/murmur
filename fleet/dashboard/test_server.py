@@ -4081,6 +4081,76 @@ class DashboardAccessTest(unittest.TestCase):
             self.assertEqual(self._request("GET", "/api/version")[0], 200)
             self.assertEqual(self._request("GET", "/api/identities?token=s3cret")[0], 200)
 
+    @staticmethod
+    def _with_host(base, method, path, host, token=None):
+        """(status, body) for one request carrying exactly this Host header, or none at all when
+        `host` is None. urllib would fill in its own."""
+        connection = http.client.HTTPConnection(base.rsplit("/", 1)[-1], timeout=10)
+        try:
+            connection.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+            if host is not None:
+                connection.putheader("Host", host)
+            if token is not None:
+                connection.putheader("Authorization", "Bearer " + token)
+            if method == "POST":
+                connection.putheader("Content-Type", "application/json")
+                connection.putheader("Content-Length", "15")
+            connection.endheaders(b'{"mode":"auto"}' if method == "POST" else None)
+            response = connection.getresponse()
+            return response.status, response.read()
+        finally:
+            connection.close()
+
+    def test_a_loopback_bind_refuses_a_request_for_any_other_host(self):
+        # DNS rebinding: a website points a name it owns at 127.0.0.1, and its script then reads
+        # this server as if it were that site. Reads need no token here, so the Host header,
+        # which the browser fills in with the site's own name, is what refuses it.
+        with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                mock.patch.object(dashboard, "TOKEN", "s3cret"), \
+                mock.patch.object(dashboard.MODE, "set_setting") as setter, \
+                running_server() as base:
+            for host in ("attacker.example", "attacker.example:7878", "127.0.0.1.nip.io:7878",
+                         "localhost.attacker.example", "evil@127.0.0.1", "", None, "[::1"):
+                for path in ("/api/fleet", "/api/agent?slug=x", "/api/mail/boxes", "/"):
+                    status, body = self._with_host(base, "GET", path, host)
+                    self.assertEqual(status, 403, (host, path))
+                    self.assertIn("only answers on this machine", json.loads(body)["error"])
+            # and a write is refused the same way, token or not
+            status, _ = self._with_host(base, "POST", "/api/mode", "attacker.example:7878",
+                                        token="s3cret")
+            self.assertEqual(status, 403)
+            setter.assert_not_called()
+
+    def test_this_machines_own_names_pass_on_any_port(self):
+        # The page opened on the farm, or through an ssh tunnel on any local port.
+        with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
+                mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+            for host in ("127.0.0.1", "127.0.0.1:17878", "localhost", "localhost:8080",
+                         "LOCALHOST:7878", "[::1]", "[::1]:7878"):
+                status, body = self._with_host(base, "GET", "/api/identities", host)
+                self.assertEqual(status, 200, (host, body))
+
+    def test_a_wide_bind_answers_to_its_own_address_and_still_needs_the_token(self):
+        # FLEET_DASH_BIND=tailscale binds an address like this one, and the browser sends it as
+        # the Host. The token guards reads there already.
+        with mock.patch.object(dashboard, "BIND", "100.64.1.2"), \
+                mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
+            status, body = self._with_host(base, "GET", "/api/identities", "100.64.1.2:7878",
+                                           token="s3cret")
+            self.assertEqual(status, 200, body)
+            status, body = self._with_host(base, "GET", "/api/identities", "100.64.1.2:7878")
+            self.assertEqual(status, 403)
+            self.assertIn("token", json.loads(body)["error"])
+
+    def test_which_host_headers_name_this_machine(self):
+        for value in ("127.0.0.1", "127.0.0.1:1", "127.0.1.5:7878", "localhost", "LocalHost:80",
+                      "[::1]", "[::1]:7878", " localhost:7878 "):
+            self.assertTrue(dashboard.host_is_local(value), value)
+        for value in ("", None, "attacker.example", "127.0.0.1.nip.io", "localhost.example",
+                      "0.0.0.0:7878", "::1", "[::1", "evil@localhost", "localhost:x",
+                      "203.0.113.7:7878", "localhost:7878/x"):
+            self.assertFalse(dashboard.host_is_local(value), value)
+
     def test_which_addresses_count_as_loopback(self):
         for value in ("127.0.0.1", "127.0.1.5", "::1", "localhost"):
             self.assertTrue(dashboard.bind_is_loopback(value), value)
