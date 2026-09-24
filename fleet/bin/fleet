@@ -284,7 +284,7 @@ _rollback_spawn() { # called only by cmd_spawn's EXIT trap
 }
 
 cmd_spawn() {
-  local project="" lane="" model="" issue="" task="" brieffile="" force=0 by="" icon="" color="" engine="claude" effort="" paper=0
+  local project="" lane="" model="" issue="" task="" brieffile="" force=0 by="" icon="" color="" engine="claude" effort=""
   local restart="" donewhen="" issues="" after="" account="" account_dir=""
   while [ $# -gt 0 ]; do case "$1" in
     --project) project="$2"; shift 2;; --lane) lane="$2"; shift 2;;
@@ -293,14 +293,13 @@ cmd_spawn() {
     --issue) issue="$2"; shift 2;;
     --task) task="$2"; shift 2;; --brief-file) brieffile="$2"; shift 2;;
     --by) by="$2"; shift 2;; --icon) icon="$2"; shift 2;; --color) color="$2"; shift 2;;
-    --paper) paper=1; shift;;
     --restart) restart="$2"; shift 2;;      # until-pr|until-merged|until-file:<p>|never
     --done-when) donewhen="$2"; shift 2;;   # pr-open|pr-merged|file:<p>|issue-closed:#N
     --issues) issues="$2"; shift 2;;
     --after) after="$2"; shift 2;;         # gate: defer until <lane>[:cond] delivers
     --account) account="$2"; shift 2;;     # claude subscription account (name or `auto`)
     --force) force=1; shift;; *) echo "unknown $1"; return 1;; esac; done
-  [ -n "$project" ] && [ -n "$lane" ] || { echo "usage: fleet spawn --project X --lane L [--engine claude|codex] [--model M] [--effort low|medium|high|xhigh] [--paper] [--restart until-pr|until-merged|until-file:<p>] [--done-when <contract>] [--issues a,b,c] [--after <lane>[:pr-merged|pr-open]] (--issue N | --task '..' | --brief-file f)"; return 1; }
+  [ -n "$project" ] && [ -n "$lane" ] || { echo "usage: fleet spawn --project X --lane L [--engine claude|codex] [--model M] [--effort low|medium|high|xhigh] [--restart until-pr|until-merged|until-file:<p>] [--done-when <contract>] [--issues a,b,c] [--after <lane>[:pr-merged|pr-open]] (--issue N | --task '..' | --brief-file f)"; return 1; }
   # A policy file that does not parse must not read as "no policy". Every gate below would then
   # take its own default in silence: no head office, the fallback commit identity, and limits
   # that are not the ones the operator wrote. Refuse the spawn, in one line, before anything is
@@ -376,7 +375,7 @@ cmd_spawn() {
 import json, os
 spec = {"lane": "$lane", "project": "$project", "after": "$after",
         "engine": "$engine", "model": "$model", "effort": "$effort", "account": "$account",
-        "by": "$by", "icon": "$icon", "color": "$color", "paper": "$paper",
+        "by": "$by", "icon": "$icon", "color": "$color",
         "restart": "$restart", "done_when": "$donewhen", "issues": "$issues",
         "brief_path": os.environ.get("brief_path", "")}
 json.dump(spec, open(os.path.join(os.environ["FLEET_STATE"], "pending", "$lane.json"), "w"))
@@ -652,12 +651,6 @@ PY
     } > "$log.task"
     echo "note: prompt was ${task_bytes} bytes (> ${arg_limit}); spilled to $spill_path"
   fi
-  # Paper is opt-in per agent (--paper) and ONLY ever via the queue proxy: Paper's canvas is one
-  # global cursor, so agents that skip the queue pull each other's pages mid-write. A worker
-  # without --paper gets no MCP at all and builds from paper-exact.json.
-  local paper_cfg=""
-  [ "$paper" = "1" ] && paper_cfg="-c mcp_servers.paper.url='http://127.0.0.1:29979/mcp'"
-
   # per-agent launcher: fixes PATH, pins the engine binary, streams -> raw log -> state parser
   if [ "$engine" = "codex" ]; then
     cat > "$log.run.sh" <<RUN
@@ -668,14 +661,12 @@ export FLEET_CONFIG="$FLEET_CONFIG"
 unset OPENAI_API_KEY
 cd "$wt" || exit 1
 # </dev/null is MANDATORY: codex exec otherwise blocks forever reading stdin.
-# --ignore-user-config: workers must NOT load ~/.codex/config.toml wholesale — a fleet of them
-# all connecting to Paper would dogpile a single-user desktop app and wedge it (it has, once).
-# Auth still comes from CODEX_HOME, so the subscription works. Paper is instead handed out one
-# agent at a time, explicitly, via --paper -> the queue proxy, which owns 29979 (see
-# contrib/paper/skills/paper).
+# --ignore-user-config: workers must NOT load ~/.codex/config.toml wholesale. Every MCP server a
+# person configured there would be reached by every lane at once, and a single-user desktop app
+# behind one of them wedges under a fleet of clients. Auth still comes from CODEX_HOME, so the
+# subscription works.
 "$CODEX_BIN" exec --json --skip-git-repo-check --ignore-user-config \\
   -m "$model" -c model_reasoning_effort="$effort" \\
-  $paper_cfg \\
   --dangerously-bypass-approvals-and-sandbox \\
   -o "$log.last" \\
   "\$(cat "$log.task")" </dev/null \\

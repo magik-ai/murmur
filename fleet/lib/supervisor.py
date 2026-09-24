@@ -454,19 +454,6 @@ def respawn(rec):
                       ("--icon", "by_icon"), ("--color", "by_color"), ("--issues", "issues")):
         if rec.get(key):
             cmd += [flag, rec[key]]
-    # New records can persist `paper`; legacy records cannot because bin/fleet did not write it.
-    # Their launcher is durable and contains the proxy URL only when --paper was actually enabled,
-    # so use that as a compatibility source instead of silently downgrading the respawn.
-    paper = rec.get("paper") in (True, 1, "1")
-    launcher = os.path.join(STATE, "logs", f"{rec.get('slug', '')}.run.sh")
-    if not paper and rec.get("slug"):
-        try:
-            with open(launcher) as handle:
-                paper = "mcp_servers.paper.url" in handle.read()
-        except OSError:
-            pass
-    if paper:
-        cmd += ["--paper"]
     out = sh(cmd, timeout=120)
     return ("spawned" in out), out.splitlines()[0] if out else "spawn produced no output"
 
@@ -567,8 +554,6 @@ def process_pending(problems=None):
                                   ("--issues", "issues")):
                     if spec.get(key):
                         cmd += [flag, spec[key]]
-                if str(spec.get("paper")) == "1":
-                    cmd += ["--paper"]
                 spawn_ok, out = sh_checked(cmd, timeout=120)
                 if not spawn_ok or "spawned" not in out:
                     failed = {**attempt, "state": "failed", "detail": out[:200]}
