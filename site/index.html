@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>murmur: open-source orchestrator for coding agents</title>
+<meta name="description" content="murmur is an open-source orchestrator for coding agents. It runs Claude Code and Codex as one team: named agents, branch claims, mail between them, and a machine you own that keeps working after you close the lid.">
+<link rel="canonical" href="https://murmur.farm/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://murmur.farm/">
+<meta property="og:title" content="murmur: open-source orchestrator for coding agents">
+<meta property="og:description" content="Run Claude Code and Codex as one team on a machine you own.">
+<meta property="og:image" content="https://murmur.farm/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="murmur. Open-source orchestrator for coding agents. Run Claude Code and Codex as one team on a machine you own.">
+<meta property="og:site_name" content="murmur">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="murmur: open-source orchestrator for coding agents">
+<meta name="twitter:description" content="Run Claude Code and Codex as one team on a machine you own.">
+<meta name="twitter:image" content="https://murmur.farm/assets/og.png">
+<meta name="twitter:image:alt" content="murmur. Open-source orchestrator for coding agents. Run Claude Code and Codex as one team on a machine you own.">
+<meta name="theme-color" content="#F7EEDC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1F1C24" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="favicon.ico" sizes="48x48">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/murmur.css">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="murmur, home">
+      <img class="mark-light" src="assets/murmur-mark.svg" alt="">
+      <img class="mark-dark" src="assets/murmur-mark-dusk.svg" alt="">
+      <span>murmur</span>
+    </a>
+    <nav aria-label="Main">
+      <a href="#pieces">How it works</a>
+      <a href="#roles">Who does what</a>
+      <a href="#night">Night mode</a>
+      <a href="#run">Where it runs</a>
+      <a class="keep" href="https://github.com/magik-ai/murmur">GitHub</a>
+    </nav>
+  </div>
+</header>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+<symbol id="l-claude" viewBox="0 0 24 24"><g fill="currentColor" fill-rule="evenodd"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"></path></g></symbol>
+<symbol id="l-openai" viewBox="0 0 24 24"><g fill="currentColor" fill-rule="evenodd"><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"></path></g></symbol>
+<symbol id="l-digitalocean" viewBox="0 0 24 24"><g fill="currentColor" fill-rule="evenodd"><path d="M12.04 0C5.408-.02.005 5.37.005 11.992h4.638c0-4.923 4.882-8.731 10.064-6.855a6.95 6.95 0 014.147 4.148c1.889 5.177-1.924 10.055-6.84 10.064v-4.61H7.391v4.623h4.61V24c7.86 0 13.967-7.588 11.397-15.83-1.115-3.59-3.985-6.446-7.575-7.575A12.8 12.8 0 0012.039 0zM7.39 19.362H3.828v3.564H7.39zm-3.563 0v-2.978H.85v2.978z"/></g></symbol>
+<symbol id="i-you" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5" /> <path d="M20 21a8 8 0 0 0-16 0" /></g></symbol>
+<symbol id="i-orch" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="8" x="3" y="3" rx="2" /> <path d="M7 11v4a2 2 0 0 0 2 2h4" /> <rect width="8" height="8" x="13" y="13" rx="2" /></g></symbol>
+<symbol id="i-lane" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 7h.01" /> <path d="M3.4 18H12a8 8 0 0 0 8-8V7a4 4 0 0 0-7.28-2.3L2 20" /> <path d="m20 7 2 .5-2 .5" /> <path d="M10 18v3" /> <path d="M14 17.75V21" /> <path d="M7 18a6 6 0 0 0 3.84-10.61" /></g></symbol>
+<symbol id="i-cond" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3" /> <circle cx="6" cy="6" r="3" /> <path d="M6 21V9a9 9 0 0 0 9 9" /></g></symbol>
+<symbol id="i-machine" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2" /> <rect width="20" height="8" x="2" y="14" rx="2" ry="2" /> <line x1="6" x2="6.01" y1="6" y2="6" /> <line x1="6" x2="6.01" y1="18" y2="18" /></g></symbol>
+</svg>
+
+<main id="top">
+  <section class="hero" aria-labelledby="h1" style="padding-block:0">
+    <canvas id="heroFlock" aria-hidden="true"></canvas>
+    <div class="wrap">
+      <div class="hero__text">
+        <h1 id="h1">Open-source orchestrator<br>for coding agents</h1>
+        <p class="lede">Run Claude Code and Codex as one team on a machine you own: each agent claims its branch, another agent reviews it, and only green work reaches main, even after you close the lid</p>
+
+        <div class="install" data-install>
+          <div role="tablist" aria-label="How to start">
+            <button role="tab" id="t-plugin" aria-selected="true" aria-controls="p-plugin">In Claude Code</button>
+            <button role="tab" id="t-farm" aria-selected="false" aria-controls="p-farm" tabindex="-1">On Ubuntu 24.04+</button>
+          </div>
+          <div role="tabpanel" id="p-plugin" aria-labelledby="t-plugin">
+            <pre><span class="p">&gt; </span>/plugin marketplace add magik-ai/murmur
+<span class="p">&gt; </span>/plugin install murmur@murmur
+<span class="p">&gt; </span>/murmur:init</pre>
+            <button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur&#10;/plugin install murmur@murmur&#10;/murmur:init">Copy</button>
+          </div>
+          <div role="tabpanel" id="p-farm" aria-labelledby="t-farm" class="is-off" aria-hidden="true" inert>
+            <pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash</pre>
+            <button class="mm-button mm-button--quiet mm-button--small" data-copy="curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash">Copy</button>
+          </div>
+        </div>
+        <p class="sr-only" aria-live="polite" id="copied"></p>
+
+        <div class="links">
+          <a href="https://github.com/magik-ai/murmur/tree/main/docs">Read the handbook</a>
+          <a href="#how">See how it works</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="team screen" aria-labelledby="h-team">
+    <div class="wrap">
+      <h2 class="h2" id="h-team">One agent is a tool, and ten of them need to work as a team</h2>
+      <p class="prose">Ten agents need what every team needs: an owner for each piece of work, a reviewer who did not write it, and a merge that knows two green branches can still clash</p>
+      <figure class="pair" aria-hidden="true">
+        <svg viewBox="0 0 1000 190" preserveAspectRatio="xMidYMid meet">
+          <path class="trail" d="M 150 96 C 330 30, 520 170, 700 96"/>
+          <path class="lamp" d="M84.3 99.6Q95.7 87.5 110.4 99.1Q121.4 83.9 135.7 92.4Q122.9 94.7 111.8 108.9Q97.2 98.3 84.3 99.6Z"/>
+          <g class="ink"><path d="M827.9 73.4Q836.3 65.1 847.3 72.7Q855.4 62.2 866.0 67.5Q856.6 70.2 848.4 80.0Q837.6 73.1 827.9 73.4Z"/><path d="M827.6 125.9Q836.7 119.6 846.7 127.0Q855.7 118.4 865.5 123.6Q856.2 126.4 847.1 134.2Q837.2 127.5 827.6 125.9Z"/><path d="M773.1 52.9Q782.8 44.7 794.0 53.5Q803.5 42.8 814.5 49.1Q804.3 51.5 794.7 61.4Q783.5 53.4 773.1 52.9Z"/><path d="M783.5 102.9Q792.9 95.4 804.1 102.8Q813.2 92.9 824.2 97.8Q814.3 101.4 805.1 110.5Q793.9 104.0 783.5 102.9Z"/><path d="M772.8 155.3Q781.8 146.1 793.3 154.9Q801.9 143.3 813.1 149.7Q803.1 151.8 794.3 162.5Q783.0 154.6 772.8 155.3Z"/><path d="M725.9 31.9Q734.7 24.9 745.5 31.3Q753.8 21.9 764.3 26.0Q755.1 30.0 746.6 38.6Q735.9 32.9 725.9 31.9Z"/><path d="M726.8 81.8Q735.3 73.3 745.9 81.7Q754.2 71.0 764.5 77.1Q755.2 78.9 746.8 88.9Q736.3 81.3 726.8 81.8Z"/><path d="M721.4 125.9Q731.0 118.6 741.8 126.8Q751.2 117.1 761.8 122.9Q751.9 125.6 742.4 134.5Q731.7 127.1 721.4 125.9Z"/><path d="M728.1 175.7Q737.8 168.1 748.8 176.7Q758.4 166.7 769.1 172.7Q759.0 175.3 749.3 184.5Q738.5 176.8 728.1 175.7Z"/></g><path class="lamp" d="M879.0 100.2Q887.7 91.3 898.9 99.6Q907.2 88.4 918.1 94.2Q908.5 96.6 900.1 107.0Q888.9 99.5 879.0 100.2Z"/>
+        </svg>
+      </figure>
+    </div>
+  </section>
+
+  <section id="board" class="screen" aria-labelledby="h-board">
+    <div class="wrap">
+      <h2 class="h2" id="h-board">murmur is that team, and the whole of it fits on one screen</h2>
+      <p class="prose">Who is running, what is being checked, which account has room, and a stop button for every agent</p>
+      <div class="frame frame--hero"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/board-dark.webp"><img src="assets/shots/board.webp" alt="The Board: the machine, the accounts and every agent at work" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+    </div>
+  </section>
+
+  <section id="pieces" class="pieces" aria-labelledby="h-pieces">
+    <div class="pieces__sticky">
+      <div class="wrap pieces__inner">
+        <h2 class="h2" id="h-pieces">murmur is three parts: the farm, the messenger and the workflow</h2>
+        <div class="pieces__stage">
+          <ol class="pieces__steps">
+          <li class="piece is-on" data-step="0">
+            <h3 class="h3 piece__title">The farm <span class="mm-tag">fleet</span></h3>
+            <p>A machine you own runs the agents within its power, and one dashboard shows every one of them</p>
+            <div class="piece__shot frame"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/machine-dark.webp"><img src="assets/shots/machine.webp" alt="The Machine tab: the power setting, the services and the hosting" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+          </li>
+          <li class="piece" data-step="1">
+            <h3 class="h3 piece__title">The messenger <span class="mm-tag">hq</span></h3>
+            <p>Agents claim a branch before they touch it and write to each other and to you, so every agent knows who is working where</p>
+            <div class="piece__shot frame"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/mail-dark.webp"><img src="assets/shots/mail.webp" alt="The Mail tab: the agents writing to each other and to everyone" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+          </li>
+          <li class="piece" data-step="2">
+            <h3 class="h3 piece__title">The workflow <span class="mm-tag">plugin</span></h3>
+            <p>Seven questions set up your repository, then night mode drives the work to main and reports by morning</p>
+            <div class="piece__shot frame"><picture><img src="assets/shots/plugin.webp" alt="Claude Code running murmur's setup, then night mode" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+          </li>
+          </ol>
+          <div class="pieces__screen" aria-live="off">
+          <div class="frame screen-frame is-on" data-step="0" aria-hidden="false"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/machine-dark.webp"><img src="assets/shots/machine.webp" alt="The Machine tab: the power setting, the services and the hosting" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+          <div class="frame screen-frame" data-step="1" aria-hidden="true"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/mail-dark.webp"><img src="assets/shots/mail.webp" alt="The Mail tab: the agents writing to each other and to everyone" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+          <div class="frame screen-frame" data-step="2" aria-hidden="true"><picture><img src="assets/shots/plugin.webp" alt="Claude Code running murmur's setup, then night mode" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+          </div>
+        </div>
+        <div class="pieces__progress" role="group" aria-label="The three parts">
+          <button type="button" class="pip" data-step="0" aria-label="The farm"><i></i></button>
+          <button type="button" class="pip" data-step="1" aria-label="The messenger"><i></i></button>
+          <button type="button" class="pip" data-step="2" aria-label="The workflow"><i></i></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="roles" class="screen" aria-labelledby="h-roles">
+    <div class="wrap">
+      <h2 class="h2" id="h-roles">You set the goal, and four roles carry it to main</h2>
+      <p class="prose">Nobody does two jobs: the one who plans writes no code, the one who writes code does not merge it, and only you decide what ships</p>
+      <figure class="roles-map" aria-label="You give the orchestrator a goal, it splits the work across lanes, the conductor merges each lane into main, and a report comes back to you">
+        <svg class="roles-svg" viewBox="0 0 1000 300" aria-hidden="true">
+          <path class="flow" d="M 128 110 L 330 110"/>
+          <path class="flow" d="M 400 110 C 470 110, 480 50, 560 50"/>
+          <path class="flow" d="M 400 110 L 560 110"/>
+          <path class="flow" d="M 400 110 C 470 110, 480 170, 560 170"/>
+          <path class="flow" d="M 620 50 C 700 50, 710 110, 790 110"/>
+          <path class="flow" d="M 620 110 L 790 110"/>
+          <path class="flow" d="M 620 170 C 700 170, 710 110, 790 110"/>
+          <path class="flow flow--main" d="M 860 110 L 975 110"/>
+          <path class="flow flow--back" d="M 960 128 C 900 280, 160 280, 96 150"/>
+          <text class="edge" x="229" y="96" text-anchor="middle">a goal</text>
+          <text class="edge" x="975" y="96" text-anchor="end">main</text>
+          <text class="edge" x="530" y="262" text-anchor="middle">a report in plain words</text>
+          <use href="#i-you" class="node" x="72" y="86" width="48" height="48"/>
+          <use href="#i-orch" class="node" x="342" y="86" width="48" height="48"/>
+          <use href="#i-lane" class="node" x="566" y="30" width="40" height="40"/>
+          <use href="#i-lane" class="node" x="566" y="90" width="40" height="40"/>
+          <use href="#i-lane" class="node" x="566" y="150" width="40" height="40"/>
+          <use href="#i-cond" class="node" x="802" y="86" width="48" height="48"/>
+        </svg>
+        <ol class="roles-list">
+          <li><svg class="role-icon" aria-hidden="true"><use href="#i-you"/></svg><h3 class="h3">You</h3><p>Give the goal, answer plain questions, decide what ships</p></li>
+          <li><svg class="role-icon" aria-hidden="true"><use href="#i-orch"/></svg><h3 class="h3">The orchestrator</h3><p>Splits the goal so each agent gets its own files</p></li>
+          <li><svg class="role-icon" aria-hidden="true"><use href="#i-lane"/></svg><h3 class="h3">The lanes</h3><p>One agent each, from the first commit to a reviewed pull request</p></li>
+          <li><svg class="role-icon" aria-hidden="true"><use href="#i-cond"/></svg><h3 class="h3">The conductor</h3><p>Merges each piece into main, and holds the one veto</p></li>
+        </ol>
+      </figure>
+    </div>
+  </section>
+
+  <section id="how" class="band screen" aria-labelledby="h-how">
+    <div class="wrap">
+      <h2 class="h2" id="h-how">Every agent follows a few simple rules, and the team takes shape on its own</h2>
+      <p class="prose">A starling watches only its seven nearest neighbours and ten thousand of them still turn as one, and in murmur every piece of work travels the same five stations back to main</p>
+      <figure class="journey-figure">
+        <svg class="journey-track" id="journeyTrack" aria-hidden="true"></svg>
+        <ol class="journey">
+          <li><span class="step-no">1</span><h3 class="h3">Claim a branch</h3><p>Every other agent sees the claim and keeps off it</p></li>
+          <li><span class="step-no">2</span><h3 class="h3">Work alone</h3><p>Its own copy of the repository and its own files</p></li>
+          <li><span class="step-no">3</span><h3 class="h3">Get reviewed</h3><p>By an agent that did not write the code</p></li>
+          <li><span class="step-no">4</span><h3 class="h3">Test with main</h3><p>Main with this branch on top, before the queue</p></li>
+          <li><span class="step-no">5</span><h3 class="h3">Merge</h3><p>Main stays green, the agent takes the next piece</p></li>
+        </ol>
+      </figure>
+    </div>
+  </section>
+
+  <section id="night" class="night screen" aria-labelledby="h-night">
+    <div class="wrap">
+      <h2 class="h2" id="h-night">Say night mode and read the report over breakfast</h2>
+      <p class="prose">The orchestrator drives the work to a finish while nobody watches, and in the morning one report says what shipped and what waits for you</p>
+      <div class="sky" aria-hidden="true"><canvas id="skyCanvas"></canvas><canvas id="skyFlock"></canvas></div>
+      <p class="sky-caption" id="skyCaption" aria-live="off">Evening, you say night mode and close the lid</p>
+    </div>
+  </section>
+
+  <section id="run" class="tail" aria-labelledby="h-run">
+    <div class="wrap">
+      <div class="field field--butter">
+        <h2 class="h2" id="h-run">BYOK, BYOM, and fully free</h2>
+        <p class="prose">Bring the subscriptions you already pay for and a machine of your own, and murmur itself costs nothing</p>
+        <h3 class="row-title">Your agents</h3>
+        <ul class="brands">
+          <li><svg aria-hidden="true"><use href="#l-claude"/></svg><span>Claude Code</span></li>
+          <li><svg aria-hidden="true"><use href="#l-openai"/></svg><span>Codex</span></li>
+        </ul>
+        <h3 class="row-title">Your machine</h3>
+        <ul class="brands">
+          <li><svg aria-hidden="true"><use href="#i-machine"/></svg><span>An Ubuntu 24.04+ or Debian 12 box you own</span></li>
+          <li><svg aria-hidden="true"><use href="#l-digitalocean"/></svg><span>A DigitalOcean Droplet</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="tail" aria-labelledby="h-faq">
+    <div class="wrap">
+      <h2 class="h2" id="h-faq">Questions people ask first</h2>
+      <div class="faq">
+        <details><summary>Do I need a farm?</summary><p>Not on day one: the plugin and the head office work on your laptop, and a machine that stays on helps once three or four agents run at once</p></details>
+        <details><summary>Which agents does it run?</summary><p>Claude Code and Codex, each on its own subscription, and a lane never falls back to a metered key by accident</p></details>
+        <details><summary>Can I add another agent or cloud?</summary><p>Yes, murmur ships only what we run every day, so another engine is a preset you add yourself and another cloud is a connector you write, and either one is welcome back as a pull request</p></details>
+        <details><summary>Does it need GitHub?</summary><p>Yes, the head office, the branch claims and the merge queue all live there</p></details>
+        <details><summary>Where does the dashboard live?</summary><p>On the farm, next to the agents it shows: on your laptop it opens at a local address, and on a cloud machine you reach it through an ssh tunnel or your own Tailscale network</p></details>
+        <details><summary>Can anyone reach my farm?</summary><p>No, the dashboard answers only on the farm itself or inside your tailnet, nothing is open to the internet, and every change on it needs a token</p></details>
+        <details><summary>What does it cost?</summary><p>Nothing, murmur is MIT licensed, and you pay only for your own subscriptions and machine</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="final tail" aria-labelledby="h-final">
+    <div class="wrap">
+      <h2 class="h2" id="h-final">Start with one repository and one law file</h2>
+      <div class="install" data-install>
+        <div role="tablist" aria-label="How to start">
+          <button role="tab" id="t2-plugin" aria-selected="true" aria-controls="p2-plugin">In Claude Code</button>
+          <button role="tab" id="t2-farm" aria-selected="false" aria-controls="p2-farm" tabindex="-1">On Ubuntu 24.04+</button>
+        </div>
+        <div role="tabpanel" id="p2-plugin" aria-labelledby="t2-plugin">
+          <pre><span class="p">&gt; </span>/plugin marketplace add magik-ai/murmur
+<span class="p">&gt; </span>/plugin install murmur@murmur
+<span class="p">&gt; </span>/murmur:init</pre>
+          <button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur&#10;/plugin install murmur@murmur&#10;/murmur:init">Copy</button>
+        </div>
+        <div role="tabpanel" id="p2-farm" aria-labelledby="t2-farm" class="is-off" aria-hidden="true" inert>
+          <pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash</pre>
+          <button class="mm-button mm-button--quiet mm-button--small" data-copy="curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash">Copy</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap footer__grid">
+    <div class="footer__brand">
+      <a class="brand" href="#top" aria-label="murmur, back to the top">
+        <img class="mark-light" src="assets/murmur-mark.svg" alt="">
+        <img class="mark-dark" src="assets/murmur-mark-dusk.svg" alt="">
+        <span>murmur</span>
+      </a>
+      <p class="footer__line">Ten thousand starlings turn as one because each of them watches only its seven nearest neighbours, and murmur asks the same small discipline of your agents</p>
+      <p class="fine">Free and open source under the MIT license</p>
+    </div>
+    <nav class="footer__cols" aria-label="Footer">
+      <div>
+        <h2>Read</h2>
+        <a href="https://github.com/magik-ai/murmur/tree/main/docs">Handbook</a>
+        <a href="https://github.com/magik-ai/murmur/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="#how">How it works</a>
+      </div>
+      <div>
+        <h2>Project</h2>
+        <a href="https://github.com/magik-ai/murmur">GitHub</a>
+        <a href="https://github.com/magik-ai/murmur/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/magik-ai/murmur/blob/main/LICENSE">MIT license</a>
+      </div>
+      <div class="footer__by">
+        <h2>Delivered by</h2>
+        <a class="footer__name" href="https://github.com/magik-ai">magik-ai</a>
+        <a href="https://github.com/magik-ai">GitHub</a>
+      </div>
+    </nav>
+  </div>
+</footer>
+
+<script src="assets/flock.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

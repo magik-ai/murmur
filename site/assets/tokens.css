@@ -1,0 +1,130 @@
+/* murmur tokens, generated from the Starling Almanac design system (tokens.json).
+   Lamplight by day, Dusk by night: the page follows the reader's setting, and an explicit
+   data-theme on the root element wins in either direction. */
+:root {
+  --paper: #F7EEDC;
+  --paper-raised: #FBF6EC;
+  --paper-sunk: #EFE3CC;
+  --paper-high: #FFFBF3;
+  --ink: #2B1F2E;
+  --ink-muted: #6A5A68;
+  --line: #2B1F2E24;
+  --line-strong: #877C7C;
+  --accent: #5B4A8A;
+  --accent-hover: #4C3D7A;
+  --on-accent: #F7EEDC;
+  --accent-field: #E0CDEA;
+  --lamp: #C8912F;
+  --on-lamp: #2B1F2E;
+  --field-mint: #CBE3D3;
+  --field-butter: #F3E2A6;
+  --field-rose: #EDCBD2;
+  --field-periwinkle: #C9CEF0;
+  --field-lilac: var(--accent-field);
+  --success: #3D6B52;
+  --warning: #8E5410;
+  --danger: #9B3746;
+  --info: #3B5591;
+  --stipple: #2B1F2E0F;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 72px;
+  --radius-xs: 6px;
+  --radius-sm: 7px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --opacity-disabled: 0.45;
+  --opacity-trail: 0.18;
+  --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-sans: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  --paper: #1F1C24;
+  --paper-raised: #28242E;
+  --paper-sunk: #181620;
+  --paper-high: #312C38;
+  --ink: #EDE6D9;
+  --ink-muted: #B3A9B3;
+  --line: #EDE6D924;
+  --line-strong: #86817E;
+  --accent: #B7A6EC;
+  --accent-hover: #CABCF4;
+  --on-accent: #1F1C24;
+  --accent-field: #3E3844;
+  --lamp: #F0C27A;
+  --on-lamp: #1F1C24;
+  --field-mint: #3B3C40;
+  --field-butter: #413C39;
+  --field-rose: #403840;
+  --field-periwinkle: #3A3845;
+  --field-lilac: var(--accent-field);
+  --success: #A8C99A;
+  --warning: #E9BD6E;
+  --danger: #EE9A92;
+  --info: #9EBFE3;
+  --stipple: #EDE6D90D;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #1F1C24;
+  --paper-raised: #28242E;
+  --paper-sunk: #181620;
+  --paper-high: #312C38;
+  --ink: #EDE6D9;
+  --ink-muted: #B3A9B3;
+  --line: #EDE6D924;
+  --line-strong: #86817E;
+  --accent: #B7A6EC;
+  --accent-hover: #CABCF4;
+  --on-accent: #1F1C24;
+  --accent-field: #3E3844;
+  --lamp: #F0C27A;
+  --on-lamp: #1F1C24;
+  --field-mint: #3B3C40;
+  --field-butter: #413C39;
+  --field-rose: #403840;
+  --field-periwinkle: #3A3845;
+  --field-lilac: var(--accent-field);
+  --success: #A8C99A;
+  --warning: #E9BD6E;
+  --danger: #EE9A92;
+  --info: #9EBFE3;
+  --stipple: #EDE6D90D;
+  color-scheme: dark;
+}
+.dusk {
+  --paper: #1F1C24;
+  --paper-raised: #28242E;
+  --paper-sunk: #181620;
+  --paper-high: #312C38;
+  --ink: #EDE6D9;
+  --ink-muted: #B3A9B3;
+  --line: #EDE6D924;
+  --line-strong: #86817E;
+  --accent: #B7A6EC;
+  --accent-hover: #CABCF4;
+  --on-accent: #1F1C24;
+  --accent-field: #3E3844;
+  --lamp: #F0C27A;
+  --on-lamp: #1F1C24;
+  --field-mint: #3B3C40;
+  --field-butter: #413C39;
+  --field-rose: #403840;
+  --field-periwinkle: #3A3845;
+  --field-lilac: var(--accent-field);
+  --success: #A8C99A;
+  --warning: #E9BD6E;
+  --danger: #EE9A92;
+  --info: #9EBFE3;
+  --stipple: #EDE6D90D;
+  color-scheme: dark;
+}

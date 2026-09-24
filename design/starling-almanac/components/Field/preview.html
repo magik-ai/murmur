@@ -1,0 +1,17 @@
+<!-- @dsCard group="Forms" height=330 subtitle="Input, select, affixes, search, textarea, error, disabled" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>preview</title>
+<style>body{margin:0;padding:16px;background:var(--paper)}</style></head>
+<body class="mm-root">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:var(--space-4) var(--space-5)">
+  <div class="mm-field"><label for="f1">Machine name</label><input id="f1" value="athens"><span class="mm-field__hint">Lower case letters, digits and dashes.</span></div>
+  <div class="mm-field"><label for="f2">Region</label><span class="mm-selectwrap"><select id="f2"><option>Frankfurt, fra1</option><option>Amsterdam, ams3</option><option>New York, nyc3</option></select></span><span class="mm-field__hint">The one closest to you, usually.</span></div>
+  <div class="mm-field"><label for="f3">Monthly limit</label><span class="mm-affix"><span class="mm-affix__part">$</span><input id="f3" class="mm-mono" value="48"><span class="mm-affix__part">a month</span></span><span class="mm-field__hint">The farm refuses anything that costs more.</span></div>
+  <div class="mm-field"><label for="f4">Find a lane</label><span class="mm-affix mm-affix--search"><input id="f4" placeholder="Lane or branch"></span></div>
+  <div class="mm-field" data-state="error"><label for="f5">Your SSH public key</label><input id="f5" value="ghp_this-looks-like-a-token"><span class="mm-field__hint">A token never goes through this page. Paste the public key, one line.</span></div>
+  <div class="mm-field"><label for="f6">Port block</label><input id="f6" value="5600" disabled><span class="mm-field__hint">Chosen by the farm: the next free block.</span></div>
+  <div class="mm-field" style="grid-column:1/-1"><label for="f7">Brief</label><textarea id="f7">Add a line to README.md saying this repository is run by agents as a team. Open a pull request.</textarea></div>
+</div>
+</body>
+</html>
