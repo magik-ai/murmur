@@ -304,7 +304,7 @@ it). The move is the live test.
 ## Out of scope
 
 Other providers than DigitalOcean for the one-click path, GPU machines, a hosted dashboard run
-by anyone but the person, and the runner skill (`/murmur:runner`, hosting.md section 6).
+by anyone but the person. Runners were removed from murmur on 2026-09-24 (the owner's decision: murmur ships only what we run every day), so there is no runner skill.
 
 ## Tests
 
