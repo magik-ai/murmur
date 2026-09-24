@@ -14,7 +14,7 @@ two engines and the two places we have run for real; anything else is a contribu
 
 ### 1. Get a box with systemd
 
-Any Ubuntu (22.04 or newer) or comparable systemd distribution: a spare desktop, a VM, a
+Ubuntu 22.04 or newer, Debian 12, or a comparable systemd distribution: a spare desktop, a VM, a
 DigitalOcean Droplet (the dashboard's Machine tab can create one for you, `fleet machines create`
 from a terminal). It needs CPU and RAM rather than a GPU. Everything below runs as an ordinary user, and
 nothing in the fleet needs root.
@@ -22,6 +22,15 @@ nothing in the fleet needs root.
 ```bash
 sudo apt update && sudo apt install -y git tmux python3 curl
 python3 -V          # must be 3.11 or newer
+```
+
+Ubuntu 24.04 and later and Debian 12 ship Python 3.11 or newer, so they work as they are.
+Ubuntu 22.04 ships 3.10: add 3.11 from the deadsnakes PPA and put it first on `PATH` (the
+system's own `/usr/bin/python3` stays 3.10, which apt needs), then check again:
+
+```bash
+sudo apt-get install -y software-properties-common && sudo add-apt-repository -y ppa:deadsnakes/ppa && sudo apt-get install -y python3.11 python3.11-venv && sudo ln -sf /usr/bin/python3.11 /usr/local/bin/python3 && hash -r
+python3 -V          # Python 3.11.x
 ```
 
 ### 2. Let user services run when nobody is logged in

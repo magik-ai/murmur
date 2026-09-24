@@ -22,6 +22,9 @@ CLI:
     pick          print the name of the account with the most headroom (exit 1 if none)
     dir NAME      print the account's CLAUDE_CONFIG_DIR (NAME may be `auto`)
     add NAME      create the directory and print the one-line login instruction
+    balance       print the next engine and account with headroom, round-robin over claude
+                  and codex: `claude <name>` or `codex codex` (exit 1 if none)
+    keepalive     refresh any token near expiry
 """
 
 import json

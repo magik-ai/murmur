@@ -47,9 +47,12 @@ open(STUB, "w").write(f'#!/bin/bash\necho "$@" >> {calls}\necho "spawned stub"\n
 os.chmod(STUB, 0o755)
 
 
+# started_at an hour ago: a lane that has run and exited. A record started "now" sits inside the
+# supervisor's bootstrap grace (FLEET_BOOTSTRAP_GRACE, 120 s), which holds every respawn, so the
+# respawn assertion below would measure the grace instead of the scope check.
 def rec(slug, lane, **extra):
     r = {"slug": slug, "project": "p", "lane": lane, "engine": "codex", "repo": "o/r",
-         "worktree": ROOT, "started_at": int(time.time()), "status": "starting",
+         "worktree": ROOT, "started_at": int(time.time()) - 3600, "status": "starting",
          "brief_path": brief, "respawn_count": 0}
     r.update(extra)
     json.dump(r, open(os.path.join(STATE, slug + ".json"), "w"))

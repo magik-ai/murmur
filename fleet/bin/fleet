@@ -1903,10 +1903,11 @@ case "${1:-help}" in
   dashboard) shift; cmd_dashboard "$@";;
   help|--help|-h|*)
     cat <<'H'
-fleet — headless Claude agent fleet on the farm
+fleet: headless Claude Code and Codex agents on the farm
 
   fleet spawn --project X --lane L [--engine claude|codex]
               [--model M] [--effort low|medium|high|xhigh]
+              [--account NAME|auto]
               --by <codename> [--icon <emoji>] [--color <hex>]
               (--issue N | --task "..." | --brief-file f) [--force]
               [--restart until-pr|until-merged|until-file:<p>] [--done-when <c>]
@@ -1919,6 +1920,9 @@ fleet — headless Claude agent fleet on the farm
                 codex  (OpenAI)   tier by EFFORT:  --effort xhigh | high | medium | low
                                   on --model gpt-5.6-sol (the default)
               Both engines run on their own subscription, never an API key.
+              --account picks the claude subscription account: a NAME from
+              `fleet accounts` pins it, auto (the default) takes one with
+              session and weekly headroom. claude only: codex refuses it.
   fleet group start NAME --project X --spec FILE
                                   spawn disjoint lane branches from a TOML group spec
   fleet group status NAME [--json]
@@ -1957,6 +1961,14 @@ fleet — headless Claude agent fleet on the farm
   fleet machines list|plan|create|add|check|adopt|destroy|forget
                                   farms you own: this one, droplets it created, your own boxes
   fleet hosts list|check          where a farm runs: your own machine (ssh) or a DigitalOcean Droplet
+  fleet accounts [list]           Claude subscription accounts: session and weekly use,
+                                  marking the one with the most headroom
+  fleet accounts pick             the account with the most headroom (exit 1 if none)
+  fleet accounts balance          next engine and account with headroom, round-robin
+                                  over claude and codex: prints `claude <name>` or `codex codex`
+  fleet accounts dir NAME|auto    an account's CLAUDE_CONFIG_DIR
+  fleet accounts add NAME         create an account and print its one login line
+  fleet accounts keepalive        refresh any account token that is near expiry
   fleet kill <slug>               stop an agent
   fleet kill [--retire] <slug>   stop a lane; --retire also stops respawns for that lane
   fleet game-mode on|off|status  free RAM for gaming: salvage+stop the farm, then resume

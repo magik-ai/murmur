@@ -113,9 +113,13 @@ if [ ${#missing[@]} -gt 0 ]; then
   note "installing: ${missing[*]}"
   sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq "${missing[@]}" >/tmp/murmur-apt.log 2>&1 || { tail -5 /tmp/murmur-apt.log; die "apt could not install ${missing[*]}"; }
 fi
+# Ubuntu 22.04 ships 3.10. Its python3 stays as it is (apt runs on it); the line below adds 3.11
+# from the deadsnakes PPA and puts it first on PATH through /usr/local/bin, which the fleet's
+# systemd units also search before /usr/bin. The same line is in fleet/docs/QUICKSTART.md step 1.
+py311_line="sudo apt-get install -y software-properties-common && sudo add-apt-repository -y ppa:deadsnakes/ppa && sudo apt-get install -y python3.11 python3.11-venv && sudo ln -sf /usr/bin/python3.11 /usr/local/bin/python3 && hash -r"
 pyv=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
-  || die "python3 is $pyv; the head office CLI needs 3.11 or newer (Ubuntu 24.04 ships 3.12)"
+  || die "python3 is $pyv; murmur needs 3.11 or newer. Ubuntu 24.04 and later and Debian 12 ship 3.11 or newer and work as they are. On Ubuntu 22.04 run: $py311_line, then run this installer again"
 note "python3 $pyv"
 
 if ! have gh; then

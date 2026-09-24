@@ -22,7 +22,7 @@ If neither is true yet, skip this chapter and come back when it is.
 | Needs | Why |
 |---|---|
 | Linux with systemd (Ubuntu 22.04 or newer, Debian 12) | the daemon, the sweep timer and the dashboard are user services |
-| Python 3.11 or newer | the head office CLI reads its config with the standard library parser |
+| Python 3.11 or newer | the head office CLI reads its config with the standard library parser. Ubuntu 24.04 and later and Debian 12 ship 3.11 or newer; Ubuntu 22.04 ships 3.10 and needs the one line in [the quickstart's step 1](../fleet/docs/QUICKSTART.md#1-get-a-box-with-systemd), which the installer also prints |
 | CPU and RAM, not a GPU | agents are processes that read, write and run tests; nothing here trains a model |
 | Always on, reachable over ssh | you drive it from your laptop; nothing is installed twice |
 | Your own GitHub login and your own Claude subscription | agents push and open pull requests as you; the fleet refuses API keys so a lane cannot bill an account |

@@ -37,7 +37,7 @@ On the farm:
 | Linux with **systemd** and a running **user manager** | the sweep timer, the supervisor daemon and the CI queue are `systemctl --user` units | `systemctl --user is-system-running` |
 | a **delegated cgroup** for the user manager | power modes cap `fleet.slice` live, without root | `cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/cgroup.controllers` lists `cpu` and `memory` |
 | **linger enabled** for your user | units must survive with nobody logged in | `loginctl enable-linger $USER` |
-| **python 3.11 or newer** | the config registry is parsed with `tomllib` | `python3 -V` |
+| **python 3.11 or newer** | the config registry is parsed with `tomllib`; Ubuntu 22.04 ships 3.10, see [`QUICKSTART.md`](QUICKSTART.md) step 1 | `python3 -V` |
 | **git** | worktrees are the isolation mechanism | `git --version` |
 | **gh**, logged in | agents open pull requests; the sweep asks GitHub whether a branch merged | `gh auth status` |
 | **claude** and/or **codex**, logged in on a subscription | the engines the lanes run on | `claude --version`, `codex --version` |
