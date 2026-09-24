@@ -134,7 +134,7 @@ Never spawn without an explicit go from the user.
   fixes.
 - **Codex** (`--engine codex`): one model, with the tier set by
   `--effort low|medium|high|xhigh` (default `medium`). `--effort` works on
-  Claude lanes too.
+  Claude lanes too, but which levels exist depends on the Claude model.
 
 ## What you sequence (lanes do not)
 
@@ -156,8 +156,9 @@ depend on other lanes. Those are yours:
 When several lanes build one change together, do not put them on one shared
 branch, and do not let each open its own pull request. Two agents on one
 branch under one identity push and revert each other's work, and nobody can
-tell whose commit is whose. A lane that pushes to a pull request someone else
-is driving can knock it out of the merge queue and restart its CI.
+tell whose commit is whose. A lane must never push to a pull request someone
+else is driving, least of all one that is in the merge queue: take it out of
+the queue first.
 
 The contract: each lane works on its own branch, inside a declared set of
 files (its territory), and no lane opens a pull request. You assemble the lane

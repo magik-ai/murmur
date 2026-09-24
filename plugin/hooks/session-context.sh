@@ -2,7 +2,7 @@
 # SessionStart hook: put the team's laws in front of the agent before it acts.
 #
 # A plugin cannot ship a CLAUDE.md, so the short version of the law is injected
-# here instead, at startup, resume, clear and compact.
+# here instead, at startup, resume, clear, compact and fork.
 #
 # A repository can replace this text completely: write your own short version to
 # ${CLAUDE_PROJECT_DIR}/.claude/team-laws.md and it is used word for word.

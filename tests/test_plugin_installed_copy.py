@@ -20,7 +20,7 @@ PLUGIN = REPO / "plugin"
 
 def installed_copy(root: Path) -> Path:
     """The cache layout: <cache>/<marketplace>/<plugin>/<version>, symlinks followed."""
-    target = root / "cache" / "murmur" / "murmur" / "0.0.1"
+    target = root / "cache" / "murmur" / "murmur" / "0.1.0"
     shutil.copytree(PLUGIN, target, symlinks=False)
     return target
 

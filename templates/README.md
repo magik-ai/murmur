@@ -68,6 +68,7 @@ The plugin registers this guard for you. Without the plugin, set it up by hand:
 The script is the same file the plugin ships. Use the plugin or this copy, not
 both. With no list file, the guard blocks nothing. `.claude/settings.json` is
 committed, so the guard applies to every agent and every person who opens the
-repository. The `matcher` must name every tool that writes files: a tool left
-out of it can still edit a generated file. The
+repository. The `matcher` names Claude Code's editing tools. It does not cover
+shell commands, so a command such as `sed -i` can still change a generated
+file. The
 [safety hooks chapter](../docs/11-safety-hooks.md) explains the guard in full.

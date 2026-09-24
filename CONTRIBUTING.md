@@ -93,6 +93,17 @@ cannot fail proves nothing.
 - Never put a real secret in a test or an example. Use fake values such as
   `ghp_` followed by `x` characters.
 
+## Releasing (maintainers)
+
+Claude Code sends a plugin update to users only when the plugin's version
+changes. For each release:
+
+1. Set the same new version in `.claude-plugin/marketplace.json` and
+   `plugin/.claude-plugin/plugin.json`.
+2. In [CHANGELOG.md](CHANGELOG.md), move the `Unreleased` entries under a
+   heading with the version and the date.
+3. Tag the release commit (`git tag v0.1.0`, for example) and push the tag.
+
 By contributing, you agree that your contribution is licensed under the
 [MIT License](LICENSE), like the rest of the project.
 
