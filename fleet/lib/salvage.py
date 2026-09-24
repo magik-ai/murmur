@@ -2,10 +2,10 @@
 
 The sweep's dirt() check only sees UNCOMMITTED changes, so a worktree holding local commits that
 were never pushed (branch not merged, not in origin) reads as clean and gets removed — the commits
-lived only there, so they are lost (the brain-prune-145224 data-loss). This pushes those commits to
-a hidden ref namespace (refs/fleet-salvage/<slug>) that does not appear in the branch list, then a
-cleanup pass drops any salvage ref whose tip has since landed in origin/<base>, so the namespace
-never becomes a graveyard.
+lived only there, so they are lost. This pushes those commits to a hidden ref namespace
+(refs/fleet-salvage/<slug>) that does not appear in the branch list, then a cleanup pass drops any
+salvage ref whose tip has since landed in origin/<base>, so the namespace never becomes a
+graveyard.
 """
 import os
 import subprocess

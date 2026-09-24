@@ -3,7 +3,7 @@
 # passed on argv and never touches the farm's real state, projects, services, or remotes.
 set -u
 
-FLEET=${1:-~/work/fleet/bin/fleet}
+FLEET=${1:-$(dirname "$0")/../bin/fleet}
 FLEET=$(readlink -f "$FLEET")
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

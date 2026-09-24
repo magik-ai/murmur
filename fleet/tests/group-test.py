@@ -31,7 +31,10 @@ def _require(path, wanted, hint):
         _sys.exit(f"{_sys.argv[0]}: {path} does not exist.")
     return path
 
-FLEET = Path(_require(str(Path(sys.argv[1] if len(sys.argv) > 1 else "~/work/fleet/bin/fleet").expanduser().resolve()), "fleet", "Pass $PWD/bin/fleet - the default points at ~/work/fleet, a DIFFERENT checkout."))
+FLEET = Path(_require(str(Path(sys.argv[1] if len(sys.argv) > 1
+                                else Path(__file__).resolve().parents[1] / "bin" / "fleet")
+                           .expanduser().resolve()),
+                       "fleet", "Pass the path to bin/fleet in the checkout under test."))
 GH_STATE, GH_CALLS = ROOT / "gh-state", ROOT / "gh-calls"
 SYSTEMD_CALLS, SYSTEMD_FAIL = ROOT / "systemd-calls", ROOT / "systemd-fail"
 ENV = dict(os.environ, FLEET_STATE=str(STATE), FLEET_CONFIG=str(CONFIG),

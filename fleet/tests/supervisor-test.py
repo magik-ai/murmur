@@ -96,7 +96,8 @@ def _require(path, wanted, hint):
     return path
 
 SUP = _require(
-    os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else "~/work/fleet/lib/supervisor.py"),
+    os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib", "supervisor.py")),
     "supervisor.py",
     "This suite drives the supervisor directly; bin/fleet cannot be run by python3.")
 

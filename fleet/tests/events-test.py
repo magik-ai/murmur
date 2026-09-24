@@ -7,8 +7,8 @@ import subprocess
 import sys
 import tempfile
 
-# The library under test is THIS checkout's, not whatever lives at a hardcoded path: a worktree
-# that silently exercised ~/work/fleet produced five false readings in one night, all green.
+# The library under test is this checkout's, not whatever lives at a fixed path: a suite that
+# exercises another checkout reports on code nobody changed.
 FLEET_HOME = os.environ.get("FLEET_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FLEET_LIB = os.path.join(os.path.expanduser(FLEET_HOME), "lib")
 if not os.path.isfile(os.path.join(FLEET_LIB, "events.py")):
