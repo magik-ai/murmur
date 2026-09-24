@@ -4,7 +4,7 @@
    Nothing else belongs here, and nothing here is a summary of a summary. */
 
 import {
-  h, card, panel, pill, emptyState, skeletonStack, widthStyle, agentMeaning,
+  h, card, panel, pill, emptyState, skeletonStack, widthStyle, agentMeaning, engineMark,
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
 import { list } from "../core/api.js";
@@ -98,7 +98,10 @@ function gpuTile(context, metrics) {
     return tile("Graphics card", "No answer",
       "The sensor is configured but returned nothing on the last read.", null);
   }
-  return tile("Graphics card", `${fmt.decimal(metrics.gpu.temp_c, 0)} C`,
+  /* A card that reports 0 degrees has not reported a temperature (a card resting in a power
+     saving state can answer 0), and a room is never at freezing: say there is no reading. */
+  const temp = Number(metrics.gpu.temp_c);
+  return tile("Graphics card", temp > 0 ? `${fmt.decimal(temp, 0)} C` : "No reading",
     `${fmt.percent(metrics.gpu.util_pct)} busy, ${metrics.gpu.name || "unnamed card"}`, null);
 }
 
@@ -178,11 +181,13 @@ function accountCard(account, context) {
       + "Open this subscription on the Machine tab",
     onclick: () => context.go("machine", { section: "accounts", account: account.name }),
   },
+    /* The engine rides in the top right corner as its vendor's mark, where the first farm page
+       drew it (owner, 2026-09-24); an engine without a mark stays a word. */
     h("div", { class: "label" },
       h("b", null, account.label || account.name),
-      account.engine ? h("span", { class: "tag" }, account.engine) : null,
       h("div", { class: "spacer" }),
-      state ? pill(state.meaning, state.word, "") : null),
+      state ? pill(state.meaning, state.word, "") : null,
+      engineMark(account.engine) || (account.engine ? h("span", { class: "tag" }, account.engine) : null)),
     rows.length
       ? h("div", { class: "limits" }, rows.map((row) => h("div", { class: "limit", key: row.name },
         h("span", { class: "lname", title: row.name }, row.name),

@@ -263,6 +263,7 @@ def row(preset):
     return {
         "id": preset["id"],
         "label": preset["label"],
+        "summary": preset["summary"],
         "color": preset["color"],
         "job": preset["job"],
         "stage": preset["stage"],

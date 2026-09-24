@@ -1,12 +1,12 @@
 /* The page: a hash router, a three second tick, the view registry, and the chrome around
-   them (theme, project filter, freshness, capacity, the power setting, the jump palette,
-   the favicon). Four tabs, and the addresses the old seven used still work. */
+   them (theme, project filter, freshness, capacity, the power setting, the jump palette).
+   Four tabs, and the addresses the old seven used still work. */
 
 import * as api from "./core/api.js";
 import * as identity from "./core/identity.js";
 import * as fmt from "./core/fmt.js";
 import {
-  render, paintDrawer, closeDrawer, openDrawerKey, trapFocus, agentMeaning, h,
+  render, paintDrawer, closeDrawer, openDrawerKey, trapFocus, h,
   emptyState, toast, POWER_MODES, powerLabel,
 } from "./core/ui.js";
 import board from "./views/board.js";
@@ -245,7 +245,6 @@ function paintChrome() {
   paintCapacity();
   paintPower();
   paintProjects();
-  paintFavicon();
   const version = api.resource("/api/version").data;
   const label = document.getElementById("versionLabel");
   if (label && version) label.textContent = `build ${version.v}`;
@@ -461,39 +460,6 @@ function paintProjects() {
   if (select.value !== state.project) select.value = state.project;
 }
 
-/* The favicon mirrors the worst thing on the page, so a background tab still says it. */
-function paintFavicon() {
-  const worst = worstMeaning();
-  const link = document.getElementById("favicon");
-  if (!link || link.__meaning === worst) return;
-  link.__meaning = worst;
-  const colour = getComputedStyle(document.documentElement)
-    .getPropertyValue(`--tone-${worst}`).trim() || "#888888";
-  const markup = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
-    `<rect width="32" height="32" rx="8" fill="${colour}"/></svg>`;
-  link.href = `data:image/svg+xml,${encodeURIComponent(markup)}`;
-}
-
-function worstMeaning() {
-  const agentRows = api.list(api.resource("/api/fleet").data);
-  const health = api.list((api.resource("/api/health").data || {}).checks);
-  const queueRows = api.resource("/api/ci").data || {};
-  const meanings = new Set();
-  for (const row of agentRows) meanings.add(agentMeaning(row.status));
-  for (const check of health) {
-    if (check.state === "error") meanings.add("fail");
-    if (check.state === "missing") meanings.add("wait");
-  }
-  for (const row of api.list(queueRows.recent)) {
-    if (row.state === "failed" || row.state === "conflict") meanings.add("fail");
-  }
-  if (meanings.has("fail")) return "fail";
-  if (meanings.has("wait")) return "wait";
-  if (meanings.has("run")) return "run";
-  if (meanings.has("done")) return "done";
-  return "pause";
-}
-
 /* ------------------------------------------------------------ the theme */
 
 function applyTheme(choice) {
@@ -512,9 +478,6 @@ function applyTheme(choice) {
     button.setAttribute("aria-label", `Theme: ${found[1]}. Change it.`);
     button.dataset.theme = found[0];
   }
-  const link = document.getElementById("favicon");
-  if (link) link.__meaning = null;
-  paintFavicon();
 }
 
 function storedTheme() {

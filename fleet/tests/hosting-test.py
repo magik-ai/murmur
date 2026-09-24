@@ -38,7 +38,7 @@ def runner_presets():
 class Presets(unittest.TestCase):
     """The provider facts, as the research pass of 2026-09-23 recorded them."""
 
-    FIELDS = ("id", "label", "color", "job", "cli", "install", "login", "whoami", "docs",
+    FIELDS = ("id", "label", "summary", "color", "job", "cli", "install", "login", "whoami", "docs",
               "terms", "stage", "pricing", "sizes", "regions", "secrets", "engines")
 
     def test_every_preset_carries_every_field(self):
@@ -49,6 +49,9 @@ class Presets(unittest.TestCase):
             self.assertIn(row["job"], ("machine", "runner"), row["id"])
             self.assertIn(row["stage"], ("ga", "preview", "early access"), row["id"])
             self.assertRegex(row["color"], r"^#[0-9A-Fa-f]{6}$", row["id"])
+            # A card says what the provider is in two short lines; prices and caveats wait until
+            # it is picked (owner, 2026-09-24).
+            self.assertLessEqual(len(row["summary"]), 90, row["id"])
 
     def test_the_five_providers_of_the_design_record(self):
         self.assertEqual([row["id"] for row in host_presets.presets()],

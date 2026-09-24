@@ -691,9 +691,17 @@ function providerCard(context, row, mark, extra) {
   h("div", { class: "m-preset-head" },
     h("b", null, row.label || row.id),
     stage ? h("span", { class: "h-stage" }, stage) : null),
-  row.pricing ? h("div", { class: "muted" }, row.pricing) : null,
-  row.terms ? h("div", { class: "muted" }, row.terms) : null,
-  extra ? h("div", { class: "muted" }, extra) : null);
+  /* Two short lines on a card, and the price, the terms and any warning only once it is
+     picked: five cards of fine print is a wall nobody reads (owner, 2026-09-24). */
+  h("div", { class: "muted m-preset-sum", title: row.summary || "" }, row.summary || ""),
+  chosen ? providerFacts(row, extra) : null);
+}
+
+function providerFacts(row, extra) {
+  return h("div", { class: "m-preset-facts", key: "facts" },
+    row.pricing ? h("div", { class: "muted" }, h("b", null, "Price "), row.pricing) : null,
+    row.terms ? h("div", { class: "muted" }, h("b", null, "Good to know "), row.terms) : null,
+    extra ? h("div", { class: "muted m-keyline" }, extra) : null);
 }
 
 function priceOfSize(context) {
@@ -1287,8 +1295,7 @@ function connectRunnerSteps(context, rows) {
   const row = providerById(context, local.runner);
   if (row) startPoll(context); else stopPoll();
   return h("div", { class: "m-steps", key: "steps" },
-    stepHead(1, "Pick a provider", "A runner holds one agent at a time, in a sandbox. The farm "
-      + "keeps the worktree, the claim and the pull request."),
+    stepHead(1, "Pick a provider", ""),
     h("div", { class: "m-presets", role: "radiogroup", "aria-label": "Runner", key: "cards" },
       rows.map((item) => providerCard(context, item, "runner-provider",
         item.id === "do-agents" ? DO_AGENTS_LINE : ""))),

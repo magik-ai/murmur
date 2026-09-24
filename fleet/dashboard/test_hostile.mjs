@@ -385,6 +385,116 @@ for (const [from, wanted, name] of [
   }));
   check("a sortable column is a button", rows.header, JSON.stringify(rows));
   check("a table row can take focus", rows.row === "0", JSON.stringify(rows));
+  /* The table says what each lane runs on: the vendor's mark and the model with its effort
+     (owner, 2026-09-24). */
+  const models = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll("thead th")].map((node) => node.textContent.trim());
+    const at = heads.indexOf("Model");
+    return {
+      at,
+      cells: at < 0 ? [] : [...document.querySelectorAll("tbody tr")].map((row) => {
+        const cell = row.children[at];
+        const mark = cell.querySelector("svg.engine-mark");
+        return `${mark ? mark.getAttribute("aria-label") : "-"}:${cell.innerText.trim()}`;
+      }),
+    };
+  });
+  check("the agents table has a Model column", models.at > 0, JSON.stringify(models));
+  check("and a Claude lane shows Claude's mark with its model and effort",
+    models.cells.includes("Claude:opus high"), JSON.stringify(models.cells));
+  check("and a Codex lane with no model recorded shows OpenAI's mark and says default",
+    models.cells.includes("Codex (OpenAI):default xhigh"), JSON.stringify(models.cells));
+  await context.close();
+}
+
+/* The agents table keeps to the window at laptop widths with its Model column in, and a cell
+   its fixed columns cut keeps its words on a title. */
+for (const width of [700, 1024, 1280, 1440]) {
+  const { page, context } = await open({ hash: "#/board", size: { width, height: 900 } });
+  await page.evaluate(() => {
+    const table = [...document.querySelectorAll(".segmented button")].find((node) => node.textContent === "Table");
+    if (table) table.click();
+  });
+  await page.waitForSelector("table.agents-table tbody tr", { timeout: 10000 }).catch(() => null);
+  const fit = await page.evaluate(() => {
+    const wrap = document.querySelector("table.agents-table") && document.querySelector("table.agents-table").closest(".tablewrap");
+    const untitled = [];
+    for (const cell of document.querySelectorAll("table.agents-table :is(td, th)")) {
+      const cut = [cell, ...cell.querySelectorAll("*")].some((node) => node.scrollWidth > node.clientWidth + 1);
+      const words = cell.innerText.replace(/\s+/g, " ").trim().toLowerCase();
+      const title = (cell.title || "").toLowerCase();
+      if (cut && !(title && words.split(" ").every((word) => title.includes(word.replace(/\u2026$/, ""))))) untitled.push(words.slice(0, 40));
+    }
+    return { rows: document.querySelectorAll("table.agents-table tbody tr").length,
+      over: wrap ? wrap.scrollWidth - wrap.clientWidth : -1, untitled };
+  });
+  check(`the agents table does not scroll sideways at ${width}`, fit.rows > 0 && fit.over <= 1, JSON.stringify(fit));
+  check(`and every cut cell in it carries its words on a title at ${width}`, fit.untitled.length === 0, JSON.stringify(fit.untitled));
+  await context.close();
+}
+
+/* A card carries its engine as the vendor's mark at the right of its foot, and no longer as
+   a word in the line under its name. */
+{
+  const { page, context } = await open({ hash: "#/board" });
+  const marks = await page.evaluate(() => [...document.querySelectorAll("[data-agent-card]")].map((card) => {
+    const mark = card.querySelector(".foot svg.engine-mark");
+    return {
+      slug: card.dataset.agentCard,
+      mark: mark ? mark.getAttribute("aria-label") : "",
+      right: mark ? Math.round(card.getBoundingClientRect().right - mark.getBoundingClientRect().right) : -1,
+      word: card.querySelector(".sub .tag") ? card.querySelector(".sub .tag").textContent : "",
+    };
+  }));
+  const claude = marks.find((row) => row.slug === "demo-api-3f2a") || {};
+  check("a Claude card carries Claude's mark in its foot", claude.mark === "Claude", JSON.stringify(claude));
+  check("and the mark sits at the right edge, not after the words",
+    claude.right >= 0 && claude.right <= 24, JSON.stringify(claude));
+  check("and the engine is no longer a word under the name", claude.word === "", JSON.stringify(claude));
+  await context.close();
+}
+
+/* The Board's subscription cards carry their engine as the vendor's mark in the top right
+   corner, not as a word next to the name. */
+{
+  const { page, context } = await open({ hash: "#/board" });
+  await page.waitForSelector("[data-account]", { timeout: 10000 }).catch(() => null);
+  const chips = await page.evaluate(() => [...document.querySelectorAll("[data-account]")].map((chip) => {
+    const mark = chip.querySelector(".label svg.engine-mark");
+    const box = chip.getBoundingClientRect();
+    return {
+      name: chip.dataset.account,
+      mark: mark ? mark.getAttribute("aria-label") : "",
+      right: mark ? Math.round(box.right - mark.getBoundingClientRect().right) : -1,
+      top: mark ? Math.round(mark.getBoundingClientRect().top - box.top) : -1,
+      word: chip.querySelector(".label .tag") ? chip.querySelector(".label .tag").textContent : "",
+    };
+  }));
+  const one = chips.find((chip) => chip.name === "farm-one") || {};
+  const two = chips.find((chip) => chip.name === "farm-two") || {};
+  check("a Claude subscription card carries Claude's mark", one.mark === "Claude", JSON.stringify(one));
+  check("a Codex subscription card carries OpenAI's mark", two.mark === "Codex (OpenAI)", JSON.stringify(two));
+  check("and the mark sits in the top right corner", one.right >= 0 && one.right <= 24 && one.top >= 0 && one.top <= 28,
+    JSON.stringify(one));
+  check("and the engine is no longer a word beside the name", one.word === "" && two.word === "", JSON.stringify(chips));
+  await context.close();
+}
+
+/* The Accounts table: each subscription carries its engine as a mark at the right of its name. */
+{
+  const { page, context } = await open({ hash: "#/machine" });
+  await page.waitForSelector("table.m-accounts tbody tr", { timeout: 10000 }).catch(() => null);
+  const accounts = await page.evaluate(() => ({
+    heads: [...document.querySelectorAll("table.m-accounts thead th")].map((node) => node.textContent.trim()),
+    marks: [...document.querySelectorAll("table.m-accounts tbody tr")].map((row) => {
+      const mark = row.querySelector("td:first-child svg.engine-mark");
+      return mark ? mark.getAttribute("aria-label") : "";
+    }),
+  }));
+  check("the Accounts table has no Engine column of words",
+    accounts.heads.length > 0 && !accounts.heads.includes("Engine"), JSON.stringify(accounts.heads));
+  check("and each account shows its engine's mark", accounts.marks.includes("Claude")
+    && accounts.marks.includes("Codex (OpenAI)"), JSON.stringify(accounts.marks));
   await context.close();
 }
 
@@ -592,6 +702,32 @@ for (const [from, wanted, name] of [
   check("the header pill says No room on a farm with no room", said.pill === "No room", said.pill);
   check("the Board draws no second capacity reading", said.tile === "", said.tile);
   check("Full on this screen means only the power setting", said.power.includes("Full"), said.power);
+  await context.close();
+}
+
+/* A graphics card that answers 0 degrees has given no temperature (a resting card can), and
+   the tile says there is no reading instead of drawing a freezing card (owner, 2026-09-24). */
+{
+  const { page, context } = await open({
+    hash: "#/board",
+    overrides: {
+      "/api/metrics": JSON.stringify({
+        ts: Date.now() / 1000, agents: 1, can_spawn: true, level: "ok", reasons: [],
+        block_reasons: [], warnings: [],
+        load: { load1: 1.2, load5: 1.1, load15: 1.0, cores: 12 },
+        mem: { ram_total_gb: 17.6, ram_avail_gb: 11.6, ram_used_gb: 6, swap_total_gb: 4, swap_used_gb: 0, swap_churn_kbps: 0 },
+        disk: { path: "/", total_gb: 1000, used_gb: 700, free_gb: 300 },
+        gpu: { name: "generic card", temp_c: 0, util_pct: 0, mem_used_mb: 2000, mem_total_mb: 16000 },
+        cpu_temp_c: null, cpu_temp_source: null, sensors_unavailable: true,
+      }),
+    },
+  });
+  const gpu = await page.evaluate(() => {
+    const found = [...document.querySelectorAll(".tile")]
+      .find((node) => node.querySelector(".label").textContent.startsWith("Graphics card"));
+    return found ? found.querySelector(".value").textContent : "";
+  });
+  check("a graphics card that answers 0 degrees reads No reading, not 0 C", gpu === "No reading", gpu);
   await context.close();
 }
 
@@ -1279,7 +1415,7 @@ for (const [hash, name] of [["#/mail", "mail"], ["#/queue", "queue"], ["#/machin
     countShown: document.querySelector(".people-count") && getComputedStyle(document.querySelector(".people-count")).display !== "none",
   }));
   check("under 1100 px the people pane is a count in the thread header",
-    narrow.people === "none" && narrow.countShown && /^People \(\d\)$/.test(narrow.count), JSON.stringify(narrow));
+    narrow.people === "none" && narrow.countShown && /^Agents \(\d\)$/.test(narrow.count), JSON.stringify(narrow));
   await page.click(".people-count");
   await page.waitForTimeout(400);
   const opened = await page.evaluate(() => getComputedStyle(document.querySelector(".people-pane")).display);
@@ -1353,9 +1489,9 @@ for (const [hash, name] of [["#/mail", "mail"], ["#/queue", "queue"], ["#/machin
   const said = await page.evaluate(() => document.querySelector(".people-pane").innerText.replace(/\s+/g, " "));
   check("an old reading of the office says so in the reader's words",
     /The office last answered \d/.test(said), said.slice(0, 120));
-  // Nothing in the People pane is a message, so the sentence over it says what it is about.
-  check("and the sentence over a list of people is about people",
-    /people it knew about then/.test(said) && !/message/i.test(said), said.slice(0, 160));
+  // Nothing in the Agents pane is a message, so the sentence over it says what it is about.
+  check("and the sentence over a list of agents is about agents",
+    /agents it knew about then/.test(said) && !/message/i.test(said), said.slice(0, 160));
   await context.close();
 }
 

@@ -6,6 +6,7 @@
 
 import {
   h, card, panel, pill, emptyState, skeletonStack, toast, widthStyle, openDrawer, closeDrawer,
+  engineMark,
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
 import { apiPost, access, list, serverReason } from "../core/api.js";
@@ -714,16 +715,19 @@ function accountsSection(context) {
         h("div", { class: "tablewrap", key: "table" }, h("table", { class: "m-accounts" },
           h("thead", null, h("tr", null,
             h("th", { class: "m-col-account", title: "Account" }, "Account"),
-            h("th", { class: "m-col-engine", title: "Engine" }, "Engine"),
             h("th", { class: "m-col-login", title: "Login" }, "Login"),
             h("th", { title: "Windows" }, "Windows"),
             h("th", { class: "m-col-read", title: "Last read" }, "Last read"),
             h("th", { class: "actions one", title: "Actions" }, "Actions"))),
           h("tbody", null, list(data.accounts).map((account) => h("tr", { key: account.name },
-            h("td", { title: `${account.email || account.label || account.name}, folder ${account.name}` },
-              h("span", { class: "m-account" }, account.label || account.name,
-                fmt.room(account) ? pill(fmt.room(account).meaning, fmt.room(account).word, "") : null)),
-            h("td", { title: account.engine || "unknown" }, account.engine || "unknown"),
+            /* The engine rides at the right of the account as its vendor's mark, the way the
+               first farm page drew it (owner, 2026-09-24); an engine with no mark is a word. */
+            h("td", { title: `${account.email || account.label || account.name}, folder ${account.name}, `
+              + `${account.engine || "engine unknown"}` },
+              h("span", { class: "m-account-row" },
+                h("span", { class: "m-account" }, account.label || account.name,
+                  fmt.room(account) ? pill(fmt.room(account).meaning, fmt.room(account).word, "") : null),
+                engineMark(account.engine) || h("span", { class: "tag" }, account.engine || "unknown"))),
             h("td", null, loginCell(states, account.name)),
             h("td", { class: "m-windows" }, windowBars(account)),
             h("td", { class: "num", title: account.read_at ? fmt.ago(account.read_at) : "never" }, account.read_at ? fmt.ago(account.read_at) : "never"),

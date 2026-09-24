@@ -611,13 +611,25 @@ th.actions.one, td.actions.one { width: 104px; min-width: 104px; max-width: 104p
   table.m-services .m-col-svc-state { width: 11%; }
   table.m-services .m-col-change { width: 12%; }
 }
+/* The agents table has eight columns since the Model column joined (owner, 2026-09-24), and
+   below 1600 it lays them out in fixed shares so it fits the window: a cut cell keeps its
+   words on its title, as the Machine tables do. */
+@media (min-width: 641px) and (max-width: 1599px) {
+  table.agents-table { table-layout: fixed; }
+  table.agents-table th { overflow: hidden; text-overflow: ellipsis; }
+  table.agents-table th:nth-child(1) { width: 22%; }
+  table.agents-table th:nth-child(2) { width: 11%; }
+  table.agents-table th:nth-child(3) { width: 14%; }
+  table.agents-table th:nth-child(4) { width: 17%; }
+  table.agents-table th:nth-child(5) { width: 12%; }
+  table.agents-table .model-cell { display: flex; overflow: hidden; }
+}
 /* Accounts need the fixed columns only below 1440: at 1440 its three subscription windows fit
    the natural layout, and fixed columns would cut the third. */
 @media (min-width: 641px) and (max-width: 1439px) {
   table.m-accounts { table-layout: fixed; }
   table.m-accounts th { overflow: hidden; text-overflow: ellipsis; }
-  table.m-accounts .m-col-account { width: 15%; }
-  table.m-accounts .m-col-engine { width: 9%; }
+  table.m-accounts .m-col-account { width: 24%; }
   table.m-accounts .m-col-login { width: 20%; }
   table.m-accounts .m-col-read { width: 12%; }
   table.m-accounts td.m-windows { max-width: none; }
@@ -818,6 +830,11 @@ body.fixed-page .update-strip { margin-bottom: 0; }
   font-size: 12px; color: var(--text-dim);
 }
 .foot > * { min-width: 0; overflow-wrap: anywhere; }
+/* The engine a lane or an account spends, as its vendor's mark, at the right edge like the
+   first farm page drew it. The words stay on the title. */
+.engine-mark { width: 16px; height: 16px; flex: none; color: var(--text); opacity: 0.8; }
+.foot .engine-at { margin-left: auto; display: inline-flex; }
+.model-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .foot .num { font-size: 12px; }
 button.agent-card {
   font: inherit; color: inherit; text-align: left; width: 100%;

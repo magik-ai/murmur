@@ -356,7 +356,7 @@ function threadHead(context, rows, people) {
         local.peopleOpen = !local.peopleOpen;
         context.paint();
       },
-    }, `People (${people})`),
+    }, `Agents (${people})`),
     h("button", {
       class: "ghost-button small",
       "data-timeline": "",
@@ -462,7 +462,7 @@ function peoplePane(context) {
   const resource = context.watch("/api/mail/who");
   return card({ class: `mail-pane people-pane${local.peopleOpen ? " open" : ""}`, key: "people" },
     h("div", { class: "pane-head" },
-      h("h2", null, "People"),
+      h("h2", null, "Agents"),
       h("div", { class: "spacer" }),
       h("button", {
         class: "ghost-button small people-close",
@@ -474,15 +474,15 @@ function peoplePane(context) {
     h("div", { class: "pane-scroll" }, panel(resource, {
       loading: () => skeletonStack(3),
       isEmpty: (data) => listOf(data, "sessions").length === 0,
-      empty: () => h("p", { class: "muted" }, "Nobody has said hello today."),
+      empty: () => h("p", { class: "muted" }, "No agent has said hello today."),
       ready: (data) => {
         const sessions = listOf(data, "sessions");
         const here = sessions.filter((person) => person.state !== "stale");
         const quiet = sessions.filter((person) => person.state === "stale");
         return [
-          officeNote(data, "These are the people it knew about then."),
+          officeNote(data, "These are the agents it knew about then."),
           h("h3", { key: "here" }, "Here now"),
-          here.length ? here.map(personRow) : h("p", { class: "muted", key: "none" }, "Nobody right now."),
+          here.length ? here.map(personRow) : h("p", { class: "muted", key: "none" }, "No agent right now."),
           quiet.length ? h("button", {
             key: "quiet-toggle",
             class: "ghost-button small",

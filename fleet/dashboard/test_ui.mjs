@@ -46,6 +46,19 @@ ok("the page is a shell, not an application", () => {
   assert.match(html, /<link rel="stylesheet" href="\/static\/machine\.css">/);
 });
 
+/* The tab shows the murmur mark, the same file the landing uses, in both themes: a status
+   square in the tab read as a broken icon, and every murmur page should look like one product
+   (owner, 2026-09-24). */
+ok("the favicon is the murmur mark, drawn from the mark's own paths", () => {
+  assert.match(html, /<link rel="icon" id="favicon" href="\/static\/favicon\.svg" type="image\/svg\+xml">/);
+  const icon = read("static/favicon.svg");
+  const paths = (text) => [...text.matchAll(/ d="([^"]+)"/g)].map((found) => found[1]).join("|");
+  assert.equal(paths(icon), paths(read("static/mark.svg")), "the favicon is not the mark");
+  assert.match(icon, /prefers-color-scheme:\s*dark/, "the favicon has no dark variant");
+  assert.ok(!read("static/app.js").includes("getElementById(\"favicon\")"),
+    "something still repaints the favicon");
+});
+
 ok("the page carries the chrome the views expect", () => {
   for (const id of ["sidebar", "navlinks", "topbar", "productTitle", "viewTitle", "capacity", "farmState",
     "projectFilter", "freshness", "themeSwitch", "paletteOpen", "palette", "paletteInput",
@@ -547,7 +560,7 @@ ok("stopping a lane and retiring it are asked about before they happen", () => {
 ok("every word the mail amendment fixes is on the page, and no jargon with it", () => {
   const source = read("static/views/mail.js");
   for (const label of ["Conversations", "Everyone", "every agent on this farm",
-    "Unread since you last looked", "Show all ", "People", "Here now",
+    "Unread since you last looked", "Show all ", "Agents", "Here now",
     "Not heard from lately (", "Last seen ", "Message to ", "Sent as dashboard, not as you",
     "Everything the office did", "The office last answered "]) {
     assert.ok(source.includes(label), `the mail page never says "${label}"`);
@@ -623,7 +636,8 @@ await okAsync("a check keeps the name the farm gave it, whatever that name is", 
 
 ok("the status vocabulary is written down once", () => {
   const shell = read("static/app.js");
-  assert.match(shell, /agentMeaning/, "the shell reads the one table in core/ui.js");
+  /* The shell used the table only for the status favicon, which is gone; what stays true is
+     that it never carries a copy of it. */
   assert.ok(!/pr_open:\s*"wait"/.test(shell) && !/done_no_pr:/.test(shell),
     "the shell must not carry a second copy of the status table");
   for (const relative of REQUIRED_FILES.filter((name) => name.endsWith(".js") && !name.endsWith("core/ui.js"))) {

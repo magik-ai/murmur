@@ -702,11 +702,17 @@ for (const [opener, picker, controls] of [
   }));
   check("hosting: the dialog offers the two machine providers and no runner",
     steps.providers.join(",") === "ssh,do-droplet", steps.providers.join(","));
-  check("hosting: each provider card carries its price line and its stage",
-    /From \$24 a month/.test(steps.text) && /generally available/.test(steps.text),
+  /* The price waits for the pick (owner, 2026-09-24): an unpicked card is its stage and a
+     summary, and the picked one carries its price line. */
+  check("hosting: an unpicked provider card carries its stage and no price line",
+    /generally available/.test(steps.text) && !/From \$24 a month/.test(steps.text),
     steps.text.slice(0, 300));
   await page.click("#drawer [data-machine-provider='do-droplet']");
   await page.waitForTimeout(400);
+  const pickedText = await page.evaluate(() =>
+    (document.querySelector("#drawer [data-machine-provider='do-droplet']") || {}).innerText || "");
+  check("hosting: and the picked card carries its price line",
+    /From \$24 a month/.test(pickedText), pickedText.slice(0, 300));
   const droplet = await page.evaluate(() => ({
     numbers: [...document.querySelectorAll("#drawer .m-step-no")].map((node) => node.textContent),
     sizes: [...document.querySelectorAll("#drawer [data-size]")]
@@ -1164,13 +1170,27 @@ for (const [opener, picker, controls] of [
   }));
   check("hosting: the dialog offers the three runners and no machine provider",
     cards.providers.join(",") === "do-agents,railway,vercel", cards.providers.join(","));
-  check("hosting: every card carries its stage, its price and its terms",
-    /preview/.test(cards.doCard) && /\$0.25 an hour/.test(cards.doCard)
-    && /RIC1/.test(cards.doCard), cards.doCard.slice(0, 300));
+  /* A card before it is picked is its name, its stage and two short lines; the price, the
+     terms and the warning wait for the pick (owner, 2026-09-24: "short descriptions, two lines
+     each, and the rest after the choice"). */
+  const lines = await page.evaluate(() => [...document.querySelectorAll("#drawer .m-preset-sum")]
+    .map((node) => Math.round(node.getBoundingClientRect().height
+      / parseFloat(getComputedStyle(node).lineHeight))));
+  check("hosting: an unpicked card is its stage and a summary, with no fine print",
+    /preview/.test(cards.doCard) && /cloud sandboxes/.test(cards.doCard)
+    && !/\$0.25 an hour/.test(cards.doCard) && !/RIC1/.test(cards.doCard), cards.doCard.slice(0, 300));
+  check("hosting: and every summary fits in two lines",
+    lines.length === 3 && lines.every((count) => count <= 2), JSON.stringify(lines));
+  await page.click("#drawer [data-runner-provider='do-agents']");
+  await page.waitForTimeout(400);
+  const picked = await page.evaluate(() =>
+    (document.querySelector("#drawer [data-runner-provider='do-agents']") || {}).innerText || "");
+  check("hosting: a picked card carries its price and its terms",
+    /\$0.25 an hour/.test(picked) && /RIC1/.test(picked), picked.slice(0, 300));
   check("hosting: and DigitalOcean's card says it may bill its own inference",
-    /may need DigitalOcean's own inference, billed by DigitalOcean/.test(cards.doCard)
-    && /does not show the claude-code adapter taking a subscription token/.test(cards.doCard),
-    cards.doCard.slice(0, 400));
+    /may need DigitalOcean's own inference, billed by DigitalOcean/.test(picked)
+    && /does not show the claude-code adapter taking a subscription token/.test(picked),
+    picked.slice(0, 400));
   await page.click("#drawer [data-runner-provider='vercel']");
   await page.waitForTimeout(500);
   const steps = await page.evaluate(() => ({
@@ -1351,7 +1371,7 @@ for (const [opener, picker, controls] of [
   const machines = await (await fetch(`${BASE}/api/machines`)).json();
   const HOST_KEYS = ["id", "label", "job", "stage", "cli_installed", "login_state", "account",
     "detail", "checked_at", "secrets", "tested", "login", "install", "terms", "pricing", "sizes",
-    "regions", "cli", "color", "engines", "docs"].sort().join(",");
+    "regions", "cli", "color", "engines", "docs", "summary"].sort().join(",");
   const MACHINE_KEYS = ["name", "provider", "user", "address", "size", "monthly_usd", "region",
     "state", "detail", "checked_at", "finish_command", "tunnel_command", "provider_id"]
     .sort().join(",");

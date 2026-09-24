@@ -790,12 +790,12 @@ def power_preview(action):
 # the research pass of 2026-09-23: sizes, prices, stages and what each one is honest about.
 # Nothing in this file talks to a provider, and no secret value is ever held here.
 HOST_PRESETS = [
-    {"id": "ssh", "label": "Your own machine", "color": "#7A8699", "job": "machine", "cli": "ssh",
+    {"id": "ssh", "label": "Your own machine", "summary": "A Linux box you already reach over SSH. Nothing new to pay for.", "color": "#7A8699", "job": "machine", "cli": "ssh",
      "stage": "ga", "install": "", "login": "", "docs": "https://man.openbsd.org/ssh",
      "engines": ["claude", "codex"],
      "terms": "Any Linux box you already reach over SSH: a spare PC, WSL2, a company VM.",
      "pricing": "Whatever you already pay for it.", "secrets": [], "sizes": [], "regions": []},
-    {"id": "do-droplet", "label": "DigitalOcean Droplet", "color": "#0069FF", "job": "machine",
+    {"id": "do-droplet", "label": "DigitalOcean Droplet", "summary": "A cloud server that runs the whole farm, billed by the second until you destroy it.", "color": "#0069FF", "job": "machine",
      "cli": "doctl", "stage": "ga", "install": "sudo snap install doctl",
      "login": "doctl auth init --context murmur",
      "docs": "https://docs.digitalocean.com/reference/doctl/", "engines": ["claude", "codex"],
@@ -813,7 +813,7 @@ HOST_PRESETS = [
      ],
      "regions": [{"slug": "fra1", "label": "Frankfurt"}, {"slug": "ams3", "label": "Amsterdam"},
                  {"slug": "nyc3", "label": "New York"}]},
-    {"id": "do-agents", "label": "DigitalOcean Managed Agents", "color": "#0069FF",
+    {"id": "do-agents", "label": "DigitalOcean Managed Agents", "summary": "DigitalOcean's cloud sandboxes for one agent. In preview.", "color": "#0069FF",
      "job": "runner", "cli": "doctl", "stage": "preview", "install": "sudo snap install doctl",
      "login": "doctl auth init --context murmur",
      "docs": "https://docs.digitalocean.com/products/managed-agents/", "engines": ["claude"],
@@ -821,14 +821,14 @@ HOST_PRESETS = [
               "pauses after 15 idle minutes.",
      "pricing": "About $0.25 an hour for 4 vCPU and 8 GB, billed by DigitalOcean.",
      "secrets": ["CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN"], "sizes": [], "regions": ["ric1"]},
-    {"id": "railway", "label": "Railway sandboxes", "color": "#8A63D2", "job": "runner",
+    {"id": "railway", "label": "Railway sandboxes", "summary": "Railway's cloud sandboxes for one agent. The one this farm is built around.", "color": "#8A63D2", "job": "runner",
      "cli": "railway", "stage": "early access", "install": "npm install -g @railway/cli",
      "login": "railway login --browserless", "docs": "https://docs.railway.com/cli/sandbox",
      "engines": ["claude"],
      "terms": "A sandbox stops itself after 30 idle minutes, which is Railway's own backstop.",
      "pricing": "$50 per vCPU-month and $50 per GB-month, while it runs.",
      "secrets": ["CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN"], "sizes": [], "regions": []},
-    {"id": "vercel", "label": "Vercel Sandbox", "color": "#000000", "job": "runner",
+    {"id": "vercel", "label": "Vercel Sandbox", "summary": "Vercel's cloud sandboxes for one agent. Billed by the CPU, memory and data it uses.", "color": "#000000", "job": "runner",
      "cli": "sandbox", "stage": "ga", "install": "npm install -g sandbox", "login": "sandbox login",
      "docs": "https://vercel.com/docs/sandbox/cli-reference", "engines": ["claude"],
      "terms": "Up to 24 hours a session on Pro, 45 minutes on Hobby. UNVERIFIED: live streaming "
@@ -894,6 +894,7 @@ def host_rows(state):
             "secrets": [{"name": name, "stored": name in stored,
                          "account": stored.get(name, "")} for name in preset["secrets"]],
             "tested": tested,
+            "summary": preset["summary"],
             "login": preset["login"], "install": preset["install"], "terms": preset["terms"],
             "pricing": preset["pricing"], "sizes": preset["sizes"], "regions": preset["regions"],
         })

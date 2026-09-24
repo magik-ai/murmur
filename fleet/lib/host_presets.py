@@ -77,6 +77,7 @@ PRESETS = [
     {
         "id": "ssh",
         "label": "Your own machine",
+        "summary": "A Linux box you already reach over SSH. Nothing new to pay for.",
         "color": "#7A8699",
         "job": "machine",
         "cli": "ssh",
@@ -97,6 +98,7 @@ PRESETS = [
     {
         "id": "do-droplet",
         "label": "DigitalOcean Droplet",
+        "summary": "A cloud server that runs the whole farm, billed by the second until you destroy it.",
         "color": "#0069FF",
         "job": "machine",
         "cli": "doctl",
@@ -121,6 +123,7 @@ PRESETS = [
     {
         "id": "do-agents",
         "label": "DigitalOcean Managed Agents",
+        "summary": "DigitalOcean's cloud sandboxes for one agent. In preview.",
         "color": "#0069FF",
         "job": "runner",
         "cli": "doctl",
@@ -157,6 +160,7 @@ PRESETS = [
     {
         "id": "railway",
         "label": "Railway sandboxes",
+        "summary": "Railway's cloud sandboxes for one agent. The one this farm is built around.",
         "color": "#8A63D2",
         "job": "runner",
         "cli": "railway",
@@ -183,6 +187,7 @@ PRESETS = [
     {
         "id": "vercel",
         "label": "Vercel Sandbox",
+        "summary": "Vercel's cloud sandboxes for one agent. Billed by the CPU, memory and data it uses.",
         "color": "#000000",
         "job": "runner",
         "cli": "sandbox",

@@ -5,7 +5,7 @@
 
 import {
   h, card, panel, pill, emptyState, skeletonStack, agentMeaning, MEANINGS,
-  openDrawer, closeDrawer, openDrawerKey, toast, safeHref, activate,
+  openDrawer, closeDrawer, openDrawerKey, toast, safeHref, activate, engineMark,
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
 import { apiPost, access, list, serverReason } from "../core/api.js";
@@ -198,7 +198,7 @@ function agentCard(row, context) {
       pill(meaning, statusWord(row), row.status || "")),
     h("div", { class: "sub" },
       h("span", { class: "where" }, [row.project, row.lane].filter(Boolean).join("/") || "no project"),
-      row.engine ? h("span", { class: "tag" }, row.engine) : null),
+      row.engine && !engineMark(row.engine) ? h("span", { class: "tag" }, row.engine) : null),
     statusDetail(row) ? h("div", { class: "why" }, statusDetail(row)) : null,
     droppedScope(row) ? h("div", { class: "why wait", "data-scope-dropped": "" }, droppedScope(row)) : null,
     row.task ? h("div", { class: "task" }, fmt.shorten(row.task, 150)) : null,
@@ -207,7 +207,23 @@ function agentCard(row, context) {
       h("span", { "data-flash": "" }, fmt.ago(row.updated_at || row.started_at)),
       row.cost_usd != null ? h("span", { class: "num" }, fmt.money(row.cost_usd)) : null,
       row.tokens_out != null ? h("span", { class: "num" }, `${fmt.num(row.tokens_out)} out`) : null,
-      row.pr_url ? h("span", null, "change open") : null));
+      row.pr_url ? h("span", null, "change open") : null,
+      engineMark(row.engine)
+        ? h("span", { class: "engine-at", title: modelWords(row) }, engineMark(row.engine)) : null));
+}
+
+/* The Model column: an engine with a mark shows the mark and the model beside it, one without
+   says its name in words. No model recorded means the engine's own default. */
+function modelCell(row) {
+  const words = [engineMark(row.engine) ? null : row.engine, row.model, row.effort].filter(Boolean);
+  if (!row.model && row.engine) words.splice(words.length - (row.effort ? 1 : 0), 0, "default");
+  return words.join(" ") || "not recorded";
+}
+
+/* What a lane runs on, in the words a person picks it by: the engine, the model, the effort. */
+function modelWords(row) {
+  return [row.engine, row.model || (row.engine ? "default" : ""), row.effort].filter(Boolean).join(" ")
+    || "not recorded";
 }
 
 function statusWord(row) {
@@ -267,6 +283,7 @@ const COLUMNS = [
   { key: "slug", label: "Lane" },
   { key: "project", label: "Project" },
   { key: "status", label: "Status" },
+  { key: "model", label: "Model" },
   { key: "spawned_by", label: "Started by" },
   { key: "started_at", label: "Started", num: true },
   { key: "cost_usd", label: "Cost", num: true },
@@ -283,10 +300,11 @@ function table(rows, context) {
     return (a > b ? 1 : a < b ? -1 : 0) * local.sortDir;
   });
   return h("div", { class: "tablewrap" },
-    h("table", null,
+    h("table", { class: "agents-table" },
       h("thead", null, h("tr", null, COLUMNS.map((column) => h("th", {
         key: column.key,
         class: column.num ? "num" : null,
+        title: column.label,
         "aria-sort": local.sortKey === column.key ? (local.sortDir === 1 ? "ascending" : "descending") : "none",
       }, h("button", {
         type: "button",
@@ -309,13 +327,15 @@ function table(rows, context) {
         onclick: () => context.go("board", { agent: row.slug }),
         onkeydown: activate(() => context.go("board", { agent: row.slug })),
       },
-        h("td", null, row.slug),
-        h("td", null, row.project || "none"),
-        h("td", null, pill(agentMeaning(row.status), statusWord(row), statusDetail(row) || row.status || "")),
-        h("td", null, row.spawned_by || "none"),
-        h("td", { class: "num" }, fmt.ago(row.started_at)),
-        h("td", { class: "num" }, fmt.money(row.cost_usd)),
-        h("td", { class: "num" }, fmt.num(row.tokens_out)))))));
+        h("td", { title: row.slug || "" }, row.slug),
+        h("td", { title: row.project || "none" }, row.project || "none"),
+        h("td", { title: statusWord(row) }, pill(agentMeaning(row.status), statusWord(row), statusDetail(row) || row.status || "")),
+        h("td", { title: modelWords(row) }, h("span", { class: "model-cell" },
+          engineMark(row.engine), modelCell(row))),
+        h("td", { title: row.spawned_by || "none" }, row.spawned_by || "none"),
+        h("td", { class: "num", title: fmt.ago(row.started_at) }, fmt.ago(row.started_at)),
+        h("td", { class: "num", title: fmt.money(row.cost_usd) }, fmt.money(row.cost_usd)),
+        h("td", { class: "num", title: fmt.num(row.tokens_out) }, fmt.num(row.tokens_out)))))));
 }
 
 /* -------------------------------------------------------------- drawer */
