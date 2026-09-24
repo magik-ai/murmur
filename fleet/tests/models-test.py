@@ -1325,6 +1325,13 @@ with world() as (room, calls):
     _bad = fleet("models", "on", "claude", "--rf")
     check("a name the rule refuses is not written",
           _bad.returncode != 0 and "not a model name" in _bad.stderr, _bad.stderr)
+    # A person's shell carries no FLEET_HOME: the listing finds this checkout's lib by itself,
+    # from any directory, rather than from a fixed path only one machine has.
+    _plain = {k: v for k, v in os.environ.items() if k != "FLEET_HOME"}
+    _list = subprocess.run([str(FLEET_BIN), "models"], capture_output=True, text=True,
+                           env=_plain, cwd=tempfile.gettempdir(), timeout=60)
+    check("fleet models lists the catalog from a shell with no FLEET_HOME",
+          _list.returncode == 0 and "claude" in _list.stdout, _list.stdout + _list.stderr)
     os.environ["FLEET_CODEX_MODEL"] = "gpt-6-luna"
     check("the codex default is the one spawn resolves: FLEET_CODEX_MODEL",
           M.effective("codex")["default_model"] == "gpt-6-luna")

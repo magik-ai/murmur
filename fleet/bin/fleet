@@ -755,9 +755,9 @@ cmd_models() {
   local sub="${1:-list}"; shift 2>/dev/null || true
   case "$sub" in
     list|"")
-      "$PY" - <<'PY'
+      FLEET_HOME="$FLEET_HOME" "$PY" - <<'PY'
 import json, os, sys
-sys.path.insert(0, os.path.join(os.environ.get("FLEET_HOME", os.path.expanduser("~/work/fleet")), "lib"))
+sys.path.insert(0, os.path.join(os.environ["FLEET_HOME"], "lib"))
 import models
 # A hand-edited catalog may hold anything, so every field is read as text: a row this farm
 # cannot describe is still listed, never a traceback.
