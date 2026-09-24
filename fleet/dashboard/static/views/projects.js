@@ -925,7 +925,8 @@ function chooseStep(context, data) {
           /* The owner is the select above the list, so a row names the repository alone. */
           h("span", { class: "p-repo-name", title: [repo.full_name, repo.description].filter(Boolean).join("\n") },
             repo.name || repo.full_name),
-          pill(repo.private ? "pause" : "run", repo.private ? "Private" : "Public", ""),
+          /* Private or public is a fact about the repository, not a state, so it is a tag. */
+          h("span", { class: "tag" }, repo.private ? "private" : "public"),
           pill(meaning, word, tip),
           h("span", { class: "muted p-pushed", title: repo.pushed_at || "" }, pushedAgo(repo.pushed_at)),
           h("button", {
@@ -1250,7 +1251,8 @@ function importBlocked(data) {
 function importButton(context, data, primary) {
   const why = importBlocked(data);
   return h("button", {
-    class: primary ? "button primary" : "button small",
+    "data-write": "",
+    class: primary ? "button primary" : "button",
     key: "import",
     "data-import-open": "",
     disabled: why ? true : null,
@@ -1325,7 +1327,7 @@ function projectRow(context, row) {
     .filter(Boolean).join("\n");
   const visibility = row.visibility
     ? h("span", { class: "p-visibility", key: "vis" },
-      pill(row.visibility === "private" ? "pause" : "run", fmt.titleCase(row.visibility), "")) : null;
+      h("span", { class: "tag" }, String(row.visibility).toLowerCase())) : null;
   return h("tr", { key: row.name, "data-project": row.name },
     h("td", { title, "data-col": "Project" }, row.name),
     h("td", { class: "p-repo-cell", title: row.repo || "none", "data-col": "Repository" },
@@ -1337,14 +1339,15 @@ function projectRow(context, row) {
       pill(meaning, word, tip)),
     h("td", { class: "p-optional", title: row.base_branch || "none" }, row.base_branch || "none"),
     h("td", { class: "num p-optional" }, fmt.num(row.lanes_open, "0")),
-    h("td", { class: "p-actions", title: href ? `Open ${row.repo} on GitHub, or Remove ${row.name}` : `Remove ${row.name}` },
+    h("td", { class: "p-actions actions", title: href ? `Open ${row.repo} on GitHub, or Remove ${row.name}` : `Remove ${row.name}` },
       h("span", { class: "p-inline" },
         href ? h("a", {
           class: "ghost-button small p-open", href, target: "_blank", rel: "noopener noreferrer",
           "data-open-github": row.name,
-        }, "Open on GitHub") : null,
+          title: `Open ${row.repo} on GitHub`,
+        }, "GitHub") : null,
         h("button", {
-          class: "ghost-button small",
+          class: "ghost-button small danger",
           "data-remove-project": row.name,
           disabled: access.writable ? null : true,
           title: blocked(),
@@ -1369,7 +1372,7 @@ function table(context, rows) {
         h("th", null, "Your access"),
         h("th", { class: "p-optional" }, "Base branch"),
         h("th", { class: "num p-optional" }, "Lanes open"),
-        h("th", null, "Actions"))),
+        h("th", { class: "actions" }, "Actions"))),
       h("tbody", null, rows.map((row) => projectRow(context, row))))),
     gh.confirm ? h("div", { class: "card-pad", key: "confirm" }, removeConfirm(context, rows, gh.confirm)) : null,
     gh.removeError ? h("p", { class: "m-bad card-pad", key: "rerr" }, gh.removeError) : null,

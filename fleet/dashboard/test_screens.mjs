@@ -46,11 +46,14 @@ async function measured(page, state, tab, size) {
         oneRow: tops.length > 0 && Math.max(...tops) - Math.min(...tops) <= 1,
         agentsFull: Boolean(canvas && agents) && agents.getBoundingClientRect().width >= canvas.getBoundingClientRect().width - 2,
         controls: ["agentSpawner", "agentStatus", "agentSearch"].filter((id) => document.getElementById(id)).length,
-        power: document.querySelectorAll("#powerMode button").length,
+        power: document.querySelectorAll("#powerPick option").length,
+        sweep: (document.getElementById("sweepNote") || {}).textContent || "",
       };
     });
     return [
-      ["puts the machine on one strip", seen.strip >= 6, JSON.stringify(seen)],
+      // Five tiles since the owner's audit of 2026-09-23: Capacity and the sweep are header lines.
+      ["puts the machine on one strip", seen.strip === 5, JSON.stringify(seen)],
+      ["says when the sweep runs in the header", /^Sweep /.test(seen.sweep), seen.sweep],
       ["puts every subscription on the strip under it", seen.accounts >= 2, String(seen.accounts)],
       ["keeps the queue off the Board", !seen.queueOnBoard, JSON.stringify(seen)],
       ["draws every machine tile at one height", seen.oneHeight, JSON.stringify(seen)],
@@ -71,7 +74,7 @@ async function measured(page, state, tab, size) {
     const seen = await page.evaluate(() => ({
       checklist: Boolean([...document.querySelectorAll(".card")].find((node) => /^Finish setting up/.test(node.innerText))),
       note: document.getElementById("view").innerText.includes("This page was opened without the dashboard token."),
-      power: [...document.querySelectorAll("#powerMode button")].every((node) => node.disabled),
+      power: document.getElementById("powerPick").disabled,
     }));
     return [
       ["a farm that is not finished says what is missing, first", seen.checklist, JSON.stringify(seen)],

@@ -4,7 +4,7 @@
    Nothing else belongs here, and nothing here is a summary of a summary. */
 
 import {
-  h, card, panel, pill, emptyState, skeletonStack, widthStyle, agentMeaning, powerLabel,
+  h, card, panel, pill, emptyState, skeletonStack, widthStyle, agentMeaning,
 } from "../core/ui.js";
 import * as fmt from "../core/fmt.js";
 import { list } from "../core/api.js";
@@ -92,11 +92,11 @@ function diskNote(path, total) {
 function gpuTile(context, metrics) {
   if (!context.features.gpu) {
     return tile("Graphics card", "Not configured",
-      "Power mode has no signal from it and stays on full.", ["pause", "off"]);
+      "Power mode has no signal from it and stays on full.", null);
   }
   if (!metrics.gpu) {
     return tile("Graphics card", "No answer",
-      "The sensor is configured but returned nothing on the last read.", ["fail", "no answer"]);
+      "The sensor is configured but returned nothing on the last read.", null);
   }
   return tile("Graphics card", `${fmt.decimal(metrics.gpu.temp_c, 0)} C`,
     `${fmt.percent(metrics.gpu.util_pct)} busy, ${metrics.gpu.name || "unnamed card"}`, null);
@@ -105,48 +105,19 @@ function gpuTile(context, metrics) {
 function heatTile(context, metrics) {
   if (!context.features.cpu_temp) {
     return tile("Temperature", "Not configured",
-      "No temperature sensor is enabled here.", ["pause", "off"]);
+      "No temperature sensor is enabled here.", null);
   }
   if (metrics.cpu_temp_c == null) {
     return tile("Temperature", "No answer",
       metrics.sensors_unavailable ? "The sensor package is not installed." : "The sensor returned nothing.",
-      ["fail", "no answer"]);
+      null);
   }
   return tile("Temperature", `${fmt.decimal(metrics.cpu_temp_c, 0)} C`,
     metrics.cpu_temp_source || "", null);
 }
 
-function capacityTile(context, metrics) {
-  const blocked = metrics.can_spawn === false;
-  const warnings = list(metrics.warnings);
-  const note = blocked
-    ? list(metrics.block_reasons).join(", ") || "no room for another agent"
-    : warnings.join(", ") || "there is room for another agent";
-  const mode = context.res("/api/mode").data;
-  /* The header pill's word, for the header pill's reason: the power setting a few inches away
-     has a setting called Full which means the opposite of this, so this tile never says it. */
-  return tile("Capacity",
-    blocked ? "No room" : warnings.length ? "Tight" : "Ready",
-    mode ? `${note}, power on ${powerLabel(mode.setting === "auto" ? mode.effective : mode.setting)}` : note,
-    blocked ? ["fail", "no room"] : warnings.length ? ["wait", "tight"] : null);
-}
-
-/* The sweep countdown lives here, next to the machine it looks after, and not in the header
-   where it was one more thing to read before the reader got to the agents. */
-function sweepTile(context) {
-  const resource = context.res("/api/sweep");
-  const data = resource.data;
-  if (!data) return tile("Sweep", "not known", "waiting for the machine", null, "sweep");
-  if (!data.enabled) {
-    return tile("Sweep", "Off", "Dead worktrees are never cleared away on their own here.",
-      ["pause", "off"], "sweep");
-  }
-  const failed = Boolean(data.result && data.result !== "success");
-  return tile("Sweep",
-    data.secs_left == null ? "Scheduled" : `in ${fmt.duration(data.secs_left)}`,
-    failed ? `last run: ${data.result}` : "clears dead worktrees",
-    failed ? ["fail", "last run failed"] : null, "sweep");
-}
+/* Capacity and the sweep are not tiles any more: both are one short line in the header, which
+   is on every tab (owner audit 2026-09-23), and a tile here only said the same thing again. */
 
 function machineStrip(context) {
   const resource = context.res("/api/metrics");
@@ -161,9 +132,7 @@ function machineStrip(context) {
         tile("Disk free", fmt.gigabytes((metrics.disk || {}).free_gb),
           diskNote((metrics.disk || {}).path, (metrics.disk || {}).total_gb)),
         gpuTile(context, metrics),
-        heatTile(context, metrics),
-        capacityTile(context, metrics),
-        sweepTile(context)),
+        heatTile(context, metrics)),
     }));
 }
 
@@ -216,12 +185,12 @@ function accountCard(account, context) {
       state ? pill(state.meaning, state.word, "") : null),
     rows.length
       ? h("div", { class: "limits" }, rows.map((row) => h("div", { class: "limit", key: row.name },
-        h("span", { class: "lname" }, row.name),
+        h("span", { class: "lname", title: row.name }, row.name),
         h("span", { class: `bar ${severity(row.percent) === "bad" ? "fail" : severity(row.percent) === "warn" ? "wait" : ""}`.trim() },
           h("i", { style: widthStyle(row.percent) })),
         h("span", { class: `lpct ${severity(row.percent)}`.trim(), "data-flash": "" },
           fmt.percent(row.percent)))))
-      : h("p", { class: "muted" }, "No window has reported a number yet."),
+      : h("p", { class: "muted" }, "No numbers yet"),
     h("div", { class: "foot" },
       soonest ? h("span", null, `resets ${fmt.until(soonest)}`) : null,
       account.stale_error ? h("span", null, "not refreshing") : null));
@@ -261,7 +230,7 @@ function canvas(context) {
 export default {
   id: "board",
   title: "Board",
-  needs: ["/api/fleet", "/api/projects", "/api/metrics", "/api/accounts", "/api/sweep"],
+  needs: ["/api/fleet", "/api/projects", "/api/metrics", "/api/accounts"],
   badge(context) {
     const rows = list(context.res("/api/fleet").data);
     return rows.filter((row) => agentMeaning(row.status) === "run").length || "";

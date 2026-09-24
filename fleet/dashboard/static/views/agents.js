@@ -119,7 +119,7 @@ function controls(rows, context, shown) {
   const { spawners, statuses } = counts(rows, context);
   const started = [["", `Anyone (${rows.length})`],
     ...[...spawners.entries()].sort().map(([name, count]) => [name, `${name} (${count})`])];
-  const states = [["", `Any status (${rows.length})`],
+  const states = [["", `Any (${rows.length})`],
     ...Object.keys(MEANINGS).map((meaning) => [meaning,
       `${MEANINGS[meaning].label} (${statuses.get(meaning) || 0})`])];
   return h("div", { class: "pane-controls", key: "controls" },
@@ -196,17 +196,18 @@ function agentCard(row, context) {
       h("div", { class: "name" }, row.slug),
       h("div", { class: "spacer" }),
       pill(meaning, statusWord(row), row.status || "")),
-    statusDetail(row) ? h("span", { class: "tag" }, statusDetail(row)) : null,
-    droppedScope(row) ? h("span", { class: "tag", "data-scope-dropped": "" }, droppedScope(row)) : null,
     h("div", { class: "sub" },
-      [row.project, row.lane, row.engine].filter(Boolean).join(" · ") || "no project"),
+      h("span", { class: "where" }, [row.project, row.lane].filter(Boolean).join("/") || "no project"),
+      row.engine ? h("span", { class: "tag" }, row.engine) : null),
+    statusDetail(row) ? h("div", { class: "why" }, statusDetail(row)) : null,
+    droppedScope(row) ? h("div", { class: "why wait", "data-scope-dropped": "" }, droppedScope(row)) : null,
     row.task ? h("div", { class: "task" }, fmt.shorten(row.task, 150)) : null,
     row.ci ? checkRow(row.ci) : null,
     h("div", { class: "foot" },
       h("span", { "data-flash": "" }, fmt.ago(row.updated_at || row.started_at)),
       row.cost_usd != null ? h("span", { class: "num" }, fmt.money(row.cost_usd)) : null,
       row.tokens_out != null ? h("span", { class: "num" }, `${fmt.num(row.tokens_out)} out`) : null,
-      row.pr_url ? h("span", null, "has a change open") : null));
+      row.pr_url ? h("span", null, "change open") : null));
 }
 
 function statusWord(row) {
@@ -289,7 +290,7 @@ function table(rows, context) {
         "aria-sort": local.sortKey === column.key ? (local.sortDir === 1 ? "ascending" : "descending") : "none",
       }, h("button", {
         type: "button",
-        class: "sortby",
+        class: `sortby${local.sortKey === column.key ? (local.sortDir === 1 ? " asc" : " desc") : ""}`,
         onclick: () => {
           if (local.sortKey === column.key) local.sortDir *= -1;
           else {

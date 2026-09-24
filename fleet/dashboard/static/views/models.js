@@ -232,7 +232,7 @@ function modelActions(context, model, where) {
   if (isAdded(model)) {
     out.push(h("button", {
       key: `${where}:remove`,
-      class: "ghost-button small",
+      class: "ghost-button small danger",
       "data-model-remove": model.id,
       disabled: access.writable ? null : true,
       title: blocked(),
@@ -257,12 +257,16 @@ function modelActions(context, model, where) {
           toast(`Run in a terminal: ${command}`, "bad");
         }
       },
-    }, "Key command"));
+    }, "Key"));
   }
   if (!out.length) {
     out.push(h("span", { key: `${where}:none`, class: "muted" }, "Install it first"));
   }
-  return out;
+  /* One order in every row: the switch, the key, the test, and a removal last, so a column of
+     equal buttons reads the same way down the table. */
+  const RANK = { switch: 0, auth: 1, test: 2, none: 3, remove: 9 };
+  const rank = (node) => RANK[String((node.props || {}).key || "").split(":").pop()] ?? 5;
+  return out.sort((one, other) => rank(one) - rank(other));
 }
 
 function removeModelConfirm(context, id) {
@@ -380,7 +384,7 @@ function modelRow(context, model) {
       pill(meaning, label, statusTitle(model, status))),
     h("td", { class: "mo-col-models", "data-model-count": model.id, title: names }, count),
     h("td", { class: "num mo-col-last" }, model.last_test ? fmt.ago(model.last_test) : "never"),
-    h("td", { class: "mo-col-actions" },
+    h("td", { class: "mo-col-actions actions" },
       h("div", { class: "row mo-row-actions" }, modelActions(context, model, "row"))));
 }
 
@@ -827,12 +831,6 @@ function openModelDrawer(context, id) {
    belong, in a terminal. Nothing here ever asks for a key. */
 const ADD_MODEL_KEY = "add-model";
 
-const KIND_WORD = {
-  subscription: "A subscription you already pay for.",
-  key: "An API key you hold.",
-  local: "Weights on this machine.",
-};
-
 function presetById(context, id) {
   return list(context.res("/api/models/presets").data).find((row) => row && row.id === id) || null;
 }
@@ -870,8 +868,9 @@ function presetCards(context, presets) {
         h("span", { class: "m-dot", style: dotStyle(preset.color), "aria-hidden": "true" }),
         h("b", null, preset.label || preset.id),
         added ? pill("pause", "already added", "") : tosPill(preset)),
-      h("div", { class: "muted" }, accessOf(preset)),
-      h("div", { class: "muted" }, KIND_WORD[preset.kind] || ""));
+      /* One line on how it is paid for: a second line naming the kind of payment again ("An API
+         key you hold" under "An API key, billed per token") only doubled every card. */
+      h("div", { class: "muted" }, accessOf(preset)));
     }));
 }
 
@@ -1243,26 +1242,27 @@ function openAddModel(context) {
 export function modelsSection(context) {
   const resource = context.res("/api/engines");
   const removing = local.confirm.startsWith("remove-model:");
-  /* The same footer under a full table and under an empty one. A farm with nothing registered
-     is exactly the farm that needs the Add button, and hiding it there left a new operator
-     with a sentence and no way to act on it. */
-  const footer = () => h("div", { class: "card-pad", key: "add" },
-    removing
-      ? removeModelConfirm(context, local.confirm.slice("remove-model:".length))
-      : h("button", {
-        class: "button small",
-        "data-add-model": "",
-        disabled: access.writable ? null : true,
-        title: blocked(),
-        onclick: () => openAddModel(context),
-      }, "Add a provider"),
-    h("p", { class: "muted", key: "note" },
-      "A provider key is given on the command line, never in a web form: "
-      + "fleet models auth <id>."),
-    local.modelError ? h("p", { class: "m-bad", key: "err" }, local.modelError) : null,
-    readOnlyLine("ro-models"));
+  /* The Add button is in the heading, where every section keeps its one action, so it is there
+     over a full table and over an empty one alike: a farm with nothing registered is exactly the
+     farm that needs it. The footer only appears when it has something to say. */
+  const footer = () => (removing || local.modelError || !access.writable
+    ? h("div", { class: "card-pad", key: "add" },
+      removing ? removeModelConfirm(context, local.confirm.slice("remove-model:".length)) : null,
+      local.modelError ? h("p", { class: "m-bad", key: "err" }, local.modelError) : null,
+      readOnlyLine("ro-models"))
+    : null);
+  const add = h("button", {
+    key: "add-model",
+    class: "button",
+    "data-add-model": "",
+    "data-write": "",
+    disabled: access.writable ? null : true,
+    title: blocked() || "A provider key is given on the command line, never in a web form: fleet models auth <id>",
+    onclick: () => openAddModel(context),
+  }, "Add a provider");
   return h("section", { class: "section", key: "models" },
-    sectionHead("Models", "The providers agents are spawned with. Open one to choose its models."),
+    sectionHead("Models", "The providers agents are spawned with. Open one to choose its models.",
+      resource.everLoaded ? add : null),
     card({ key: "models", "data-write": "" }, panel(resource, {
       loading: () => h("div", { class: "card-pad" }, skeletonStack(3)),
       isEmpty: (data) => !modelRows(data).length,
@@ -1282,7 +1282,7 @@ export function modelsSection(context) {
             h("th", { class: "mo-col-status" }, "Status"),
             h("th", { class: "mo-col-models" }, "Models"),
             h("th", { class: "num mo-col-last" }, "Last test"),
-            h("th", { class: "mo-col-actions" }, "Actions"))),
+            h("th", { class: "mo-col-actions actions" }, "Actions"))),
           h("tbody", null, modelRows(data).map((model) => modelRow(context, model))))),
         footer(),
       ],

@@ -12,7 +12,11 @@
 .m-choice[aria-pressed="true"] b { color: var(--accent); }
 .m-choice[disabled] { opacity: 0.5; cursor: not-allowed; }
 
-.m-actions { display: grid; gap: 10px; margin-top: 14px; }
+.m-actions { display: grid; gap: 10px; }
+.m-power-row { gap: 10px; }
+/* Five settings may be wider than a phone: the track wraps rather than pushing the page. */
+.m-power-row .segmented { flex-wrap: wrap; height: auto; max-width: 100%; }
+.m-power-now { color: var(--text); }
 
 /* An action that cannot be taken back says what it will do, by name, before it does it. */
 .m-confirm {

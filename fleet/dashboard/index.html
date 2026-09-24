@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>murmur</title>
 <link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..600,0..100,0..1&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400..700&display=swap">
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/queue.css">
 <link rel="stylesheet" href="/static/models.css">
@@ -32,17 +35,23 @@
   </aside>
 
   <header id="topbar">
-    <h1 id="productTitle">murmur</h1>
-    <span class="crumb-sep" aria-hidden="true">/</span>
-    <span id="viewTitle" class="crumb"></span>
-    <div class="top-right">
+    <h1 class="sr-only"><span id="productTitle">murmur</span>, <span id="viewTitle"></span></h1>
+    <div class="top-status" aria-label="The farm">
       <span id="capacity" class="pill" title=""><span class="dot"></span><span class="pill-text">capacity</span></span>
-      <div id="powerMode" class="segmented power" role="group" aria-label="What share of this machine the agents may use" hidden></div>
-      <label class="field">
-        <span class="sr-only">Project filter</span>
-        <select id="projectFilter"><option value="">All projects</option></select>
+      <span id="sweepNote" class="sweep-note" hidden></span>
+      <span id="freshness" class="freshness" aria-live="polite" hidden></span>
+    </div>
+    <div class="top-controls">
+      <label class="field-label">
+        <span>Project</span>
+        <select id="projectFilter" aria-label="Project filter"><option value="">All</option></select>
       </label>
-      <span id="freshness" class="freshness" aria-live="polite"></span>
+      <label class="field-label" id="powerField" hidden>
+        <span>Power</span>
+        <select id="powerPick" data-write aria-label="What share of this machine the agents may use"></select>
+      </label>
+    </div>
+    <div class="top-tools">
       <button id="paletteOpen" class="ghost-button" aria-label="Search">Search <kbd>&#8984;K</kbd></button>
       <button id="themeSwitch" class="icon-button" aria-label="Theme: system"></button>
     </div>

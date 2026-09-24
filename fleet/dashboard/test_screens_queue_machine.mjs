@@ -94,6 +94,10 @@ const browser = await chromium.launch();
    person would otherwise have to find in the pictures by hand. */
 async function measured(page, state, screen, size) {
   const body = await page.evaluate(() => document.getElementById("view").innerText);
+  const powerTitle = await page.evaluate(() => {
+    const head = [...document.querySelectorAll("#view .section-head h2")].find((node) => node.textContent === "Power");
+    return head ? head.title : "";
+  });
   if (screen === "queue" && state === "ready") {
     const counted = await page.evaluate(() => ({
       rows: document.querySelectorAll(".q-row").length,
@@ -134,8 +138,8 @@ async function measured(page, state, screen, size) {
         !body.includes("written where they live"), "the owner asked for it gone"],
       ["draws no Health section on a farm that has not asked for one",
         !body.includes("What this farm needs"), "Health is off unless FLEET_DASH_HEALTH=on"],
-      ["says the dashboard keeps running through a power action",
-        /keeps running through all of these/.test(body), body.slice(0, 160)],
+      ["says the dashboard keeps running through a power action, on the Power heading",
+        /keeps running through all of these/.test(powerTitle), powerTitle],
     ];
     return out;
   }
@@ -259,8 +263,9 @@ for (const state of STATES) {
   }
 }
 
-/* The five meanings, measured on the row edge in both themes. The pill colours come from
-   app.css and are measured by the verdict check; the row edge is this stylesheet's own. */
+/* The five meanings, measured on each row's state mark in both themes. The coloured row edge is
+   gone (owner audit 2026-09-23: a state is a mark and a word, never a rail), so the colour a
+   reader sees for a run is the mark's, and that is what is measured. */
 for (const scheme of ["light", "dark"]) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: scheme });
   const page = await context.newPage();
@@ -271,12 +276,13 @@ for (const scheme of ["light", "dark"]) {
     for (const row of document.querySelectorAll(".q-row")) {
       const meaning = ["run", "wait", "fail", "done", "pause"].find((name) => row.classList.contains(name));
       if (!meaning || out[meaning]) continue;
-      out[meaning] = getComputedStyle(row.querySelector("td")).boxShadow;
+      const mark = row.querySelector("td .pill .dot");
+      out[meaning] = mark ? getComputedStyle(mark).backgroundColor : "";
     }
     return out;
   });
   for (const [meaning, want] of Object.entries({ run: "blue", wait: "amber", fail: "red", done: "green", pause: "grey" })) {
-    check(`${scheme}: a ${meaning} run has a ${want} edge`, edges[meaning] && hue(edges[meaning]) === want,
+    check(`${scheme}: a ${meaning} run has a ${want} mark`, edges[meaning] && hue(edges[meaning]) === want,
       `${edges[meaning]} reads ${hue(edges[meaning] || "")}`);
   }
   await context.close();

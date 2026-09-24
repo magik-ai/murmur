@@ -359,7 +359,7 @@ for (const view of ["queue", "machine"]) {
   await page.selectOption("#view select[aria-label='Filter by state']", "failed");
   await page.waitForTimeout(500);
   const narrowed = await count();
-  await page.selectOption("#view select[aria-label='Filter by state']", { label: "Any state" });
+  await page.selectOption("#view select[aria-label='Filter by state']", { label: "Any" });
   await page.waitForTimeout(500);
   const back = await count();
   check("queue: Any state gives every run back", all > 0 && narrowed > 0 && narrowed < all
@@ -367,7 +367,7 @@ for (const view of ["queue", "machine"]) {
   await page.selectOption("#view select[aria-label='Filter by project']", "demo");
   await page.waitForTimeout(500);
   const oneProject = await count();
-  await page.selectOption("#view select[aria-label='Filter by project']", { label: "Every project" });
+  await page.selectOption("#view select[aria-label='Filter by project']", { label: "All" });
   await page.waitForTimeout(500);
   const bothProjects = await count();
   check("queue: Every project gives every run back", oneProject > 0 && oneProject < all
@@ -727,6 +727,7 @@ for (const view of ["queue", "machine"]) {
     return {
       waiting: pick("farm three"),
       unknown: pick("farm unread"),
+      loggedTitle: (document.querySelector("#view .m-login[title*='Lanes can be spawned']") || {}).title || "",
       body: document.getElementById("view").innerText,
     };
   });
@@ -738,10 +739,13 @@ for (const view of ["queue", "machine"]) {
   check("machine: the sentence that says what to do is in the row",
     /Log in once: ssh -t farm claude/.test(seen.waiting)
     && /could not read this account/.test(seen.unknown), seen.waiting.slice(0, 260));
-  check("machine: every account's sentence is on the page",
-    ["Lanes can be spawned", "has expired", "Log in once", "asked the farm to slow down",
+  check("machine: every account that needs something done says it in the row",
+    ["has expired", "Log in once", "asked the farm to slow down",
       "could not read this account"].every((line) => seen.body.includes(line)),
     seen.body.slice(0, 400));
+  check("machine: a login that is in keeps its sentence in the cell's title, not in the row",
+    /Lanes can be spawned/.test(seen.loggedTitle) && !seen.body.includes("Lanes can be spawned"),
+    seen.loggedTitle);
   await context.close();
 }
 

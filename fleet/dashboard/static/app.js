@@ -4,6 +4,7 @@
 
 import * as api from "./core/api.js";
 import * as identity from "./core/identity.js";
+import * as fmt from "./core/fmt.js";
 import {
   render, paintDrawer, closeDrawer, openDrawerKey, trapFocus, agentMeaning, h,
   emptyState, toast, POWER_MODES, powerLabel,
@@ -32,7 +33,7 @@ const BY_ID = new Map(VIEWS.map((view) => [view.id, view]));
 /* Asked for on every tab: the page cannot draw its chrome without them, and the jump
    palette can only offer a conversation it has heard of. */
 const ALWAYS = ["/api/config", "/api/access", "/api/identities", "/api/health",
-  "/api/metrics", "/api/mode", "/api/mail/boxes", "/api/version"];
+  "/api/metrics", "/api/mode", "/api/mail/boxes", "/api/version", "/api/sweep"];
 const TICK = 3000;
 
 /* An address the old seven tabs answered on, and where that reader is taken now. A bookmark
@@ -239,6 +240,7 @@ function readOnlyNote() {
 function paintChrome() {
   paintNav();
   paintFreshness();
+  paintSweep();
   paintCapacity();
   paintPower();
   paintProjects();
@@ -293,10 +295,38 @@ function paintFreshness() {
       .map((row) => `${row.path}: last good answer at ${clockTime(row.since)}${row.reason ? `, ${row.reason}` : ""}`)
       .join("\n");
   } else {
-    node.textContent = `Live, as of ${at == null ? "not yet" : clockTime(at)}`;
-    node.title = "Every panel on this screen is showing a fresh answer.";
+    /* Fresh is the normal case and says nothing: the header only speaks when something on the
+       page is an old answer. */
+    node.textContent = "";
+    node.title = `Every panel on this screen is showing a fresh answer, as of ${at == null ? "not yet" : clockTime(at)}.`;
   }
   node.classList.toggle("stale", failing || stale.length > 0);
+  node.hidden = !(failing || stale.length > 0);
+}
+
+/* The sweep's countdown is one short line in the header, where the owner's first dashboard
+   kept it: it looks after the whole machine, so it belongs on every tab, not on a Board tile. */
+function paintSweep() {
+  const node = document.getElementById("sweepNote");
+  if (!node) return;
+  const data = api.resource("/api/sweep").data;
+  node.hidden = !data;
+  if (!data) return;
+  const failed = Boolean(data.enabled && data.result && data.result !== "success");
+  node.classList.toggle("bad", failed);
+  if (!data.enabled) {
+    node.textContent = "Sweep off";
+    node.title = "Dead worktrees are never cleared away on their own here.";
+  } else {
+    // Whole minutes: a header line that ticks every few seconds is movement nobody asked for.
+    const next = data.secs_left == null ? "scheduled"
+      : `in ${fmt.duration(Math.max(60, Math.round(data.secs_left / 60) * 60))}`;
+    /* A failed sweep says so in words: colour alone is not a warning anybody can read. */
+    node.textContent = failed ? "Sweep failed" : `Sweep ${next}`;
+    node.title = failed
+      ? `The last sweep ended with: ${data.result}. The next one runs ${next}.`
+      : "The sweep clears dead worktrees and finished cards on a timer.";
+  }
 }
 
 function paintCapacity() {
@@ -324,29 +354,35 @@ function paintCapacity() {
    tab. It is only drawn on a machine that has a slice to cap with, because a switch that
    cannot do anything is worse than no switch. */
 function paintPower() {
-  const host = document.getElementById("powerMode");
-  if (!host) return;
+  const field = document.getElementById("powerField");
+  const pick = document.getElementById("powerPick");
+  if (!field || !pick) return;
   const mode = api.resource("/api/mode").data;
-  if (!context.features.slice || !mode) {
-    host.hidden = true;
-    render(host, []);
-    return;
-  }
-  host.hidden = false;
+  field.hidden = !context.features.slice || !mode;
+  if (!field.hidden) paintPowerPick(pick, mode);
+}
+
+/* The five settings are a select, the same field as the project filter beside it: five
+   buttons on a sunk track were the widest and the odd one out in the header (owner audit,
+   2026-09-24), and on a phone they did not fit at all. */
+function paintPowerPick(pick, mode) {
   const allowed = api.access.writable;
-  host.title = mode.setting === "auto"
-    ? `The setting is Automatic. Right now the agents are on ${powerLabel(mode.effective)}.`
-    : `The agents are on ${powerLabel(mode.setting)}.`;
-  render(host, POWER_MODES.map(([id, label, line]) => h("button", {
-    key: id,
-    type: "button",
-    "data-power": id,
-    "data-write": "",
-    "aria-pressed": String(mode.setting === id),
-    disabled: allowed && !state.powerBusy ? null : true,
-    title: allowed ? line : api.access.reason || "This dashboard is read-only.",
-    onclick: () => setPower(id, label),
-  }, label)));
+  pick.disabled = !allowed || Boolean(state.powerBusy);
+  pick.title = allowed
+    ? (mode.setting === "auto" ? `Automatic, the agents are on ${powerLabel(mode.effective)} now.`
+      : `The agents are on ${powerLabel(mode.setting)}.`)
+    : api.access.reason || "This dashboard is read-only.";
+  render(pick, POWER_MODES.map(([id, label]) => h("option", {
+    key: id, value: id, selected: mode.setting === id,
+  }, mode.setting === "auto" && id === "auto" ? `Automatic (${powerLabel(mode.effective)})` : label)));
+  pick.value = mode.setting;
+  if (!pick.__wired) {
+    pick.__wired = true;
+    pick.addEventListener("change", () => {
+      const found = POWER_MODES.find((row) => row[0] === pick.value);
+      if (found) setPower(found[0], found[1]);
+    });
+  }
 }
 
 async function setPower(id, label) {
@@ -377,7 +413,7 @@ function paintProjects() {
     for (const value of options) {
       const option = document.createElement("option");
       option.value = value;
-      option.textContent = value || "All projects";
+      option.textContent = value || "All";
       select.append(option);
     }
   }

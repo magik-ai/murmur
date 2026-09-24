@@ -50,7 +50,7 @@ ok("the page carries the chrome the views expect", () => {
   for (const id of ["sidebar", "navlinks", "topbar", "productTitle", "viewTitle", "capacity",
     "projectFilter", "freshness", "themeSwitch", "paletteOpen", "palette", "paletteInput",
     "paletteList", "view", "drawer", "drawerTitle", "drawerBody", "drawerScrim", "toasts",
-    "favicon", "sidebarTitle", "powerMode"]) {
+    "favicon", "sidebarTitle", "powerField", "powerPick"]) {
     assert.ok(html.includes(`id="${id}"`), `index.html is missing #${id}`);
   }
   const shell = read("static/app.js");
@@ -138,8 +138,13 @@ ok("every colour in the stylesheet is a token", () => {
 });
 
 ok("the measurements the record fixes are tokens", () => {
-  assert.match(css, /--control: 32px/);
-  assert.match(css, /--radius: 8px/);
+  // One height for every control on a screen (owner audit 2026-09-23), the Almanac's button.
+  assert.match(css, /--control: 34px/);
+  assert.match(css, /--control-sm: 28px/);
+  // The Starling Almanac design system (owner, 2026-09-23): cards and dialogs on the 12px step,
+  // controls on 7px. It replaced the 8px of dashboard-v2.md.
+  assert.match(css, /--radius: 12px/);
+  assert.match(css, /--radius-sm: 7px/);
   assert.match(css, /--head: 40px/);
   assert.match(css, /ui-monospace/);
   assert.match(css, /font-variant-numeric: tabular-nums/);
@@ -151,7 +156,9 @@ ok("every colour a reader has to read passes AA in both themes", () => {
   // Nothing here is large text: the smallest of it is eleven pixels, so 4.5 is the bar.
   const TEXT = ["text", "text-dim", "text-faint", "accent",
     "tone-run", "tone-wait", "tone-fail", "tone-done", "tone-pause"];
-  const BEHIND = ["surface", "surface-2", "bg"];
+  // accent-soft is the ground of a selected row, tab, card and conversation, all of them
+  // carrying small state words.
+  const BEHIND = ["surface", "surface-2", "bg", "accent-soft"];
   const thin = [];
   for (const gamut of ["srgb", "oklch"]) {
     for (const theme of ["light", "dark"]) {
@@ -456,7 +463,8 @@ ok("the header carries the power setting as a control, not as a word", () => {
   const shell = read("static/app.js");
   assert.match(shell, /POWER_MODES/, "the header does not read the one table of settings");
   assert.match(shell, /apiPost\("\/api\/mode"/, "the header control does not post the setting");
-  assert.match(shell, /"data-write": ""/, "the header control is not marked as a write");
+  // The control is a select written in the page itself, so its write mark is there too.
+  assert.match(read("index.html"), /<select id="powerPick" data-write/, "the header control is not marked as a write");
   const ui = read("static/core/ui.js");
   for (const word of ["Full", "Shared", "Background", "Paused", "Automatic"]) {
     assert.ok(ui.includes(`"${word}"`), `the power setting cannot reach ${word}`);
@@ -575,7 +583,9 @@ ok("the mail page holds itself to the window and sends before the office answers
 ok("every write control on these pages is marked and switched off without a token", () => {
   for (const relative of ["static/views/agents.js", "static/views/mail.js", "static/app.js"]) {
     const source = read(relative);
-    assert.ok(source.includes("data-write"), `${relative} has a write control nobody marked`);
+    // The header's one write control is written in index.html, so app.js is checked there.
+    const marked = relative === "static/app.js" ? read("index.html") : source;
+    assert.ok(marked.includes("data-write"), `${relative} has a write control nobody marked`);
     assert.ok(/access\.reason|api\.access\.reason/.test(source),
       `${relative} switches a control off without saying why`);
   }

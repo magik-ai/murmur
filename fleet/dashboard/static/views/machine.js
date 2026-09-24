@@ -80,10 +80,12 @@ function labelFor(id) {
   return found ? found[1] : id || "unknown";
 }
 
+/* A section is named by its heading alone. The sentence that used to follow every heading is
+   the heading's title now (owner audit 2026-09-23: less text), so it is one hover away and
+   never a second line of grey under a word that already said it. */
 export function sectionHead(title, note, ...extra) {
   return h("div", { class: "section-head" },
-    h("h2", null, title),
-    note ? h("span", { class: "muted" }, note) : null,
+    h("h2", { title: note || null }, title),
     extra.length ? h("div", { class: "spacer" }) : null,
     ...extra);
 }
@@ -136,13 +138,13 @@ async function startJob(context, action, body, path) {
 /* --------------------------------------------------------------------- power */
 
 function powerModes(context, mode) {
-  return h("div", { class: "grid tiles", key: "modes" }, POWER.map(([id, label, line]) => h("button", {
+  return h("div", { class: "segmented", key: "modes", role: "group", "aria-label": "Power" }, POWER.map(([id, label, line]) => h("button", {
     key: id,
-    class: "m-choice",
+    type: "button",
     "data-mode": id,
     "aria-pressed": String(mode.setting === id),
     disabled: access.writable ? null : true,
-    title: blocked(),
+    title: blocked() || line,
     onclick: async () => {
       try {
         await apiPost("/api/mode", { mode: id });
@@ -153,7 +155,7 @@ function powerModes(context, mode) {
         context.refresh("/api/mode");
       }
     },
-  }, h("b", null, label), h("div", { class: "muted" }, line))));
+  }, label)));
 }
 
 const POWER_CONFIRMS = ["throttle", "drain", "resume"];
@@ -223,14 +225,14 @@ function confirmBody(context, action) {
   });
 }
 
-function powerActions(context) {
+function powerActions(context, lead) {
   const actions = [
     ["throttle", "Throttle the farm and stop new agents"],
     ["drain", "Drain"],
     ["resume", "Resume"],
   ];
   return h("div", { class: "m-actions", key: "actions" },
-    h("div", { class: "row" }, actions.map(([action, label]) => {
+    h("div", { class: "row m-power-row" }, lead, h("div", { class: "spacer" }), actions.map(([action, label]) => {
       const job = jobFor(context, action);
       const running = Boolean(job && job.state === "running");
       return h("button", {
@@ -273,13 +275,24 @@ function powerSection(context) {
     sectionHead("Power", "The dashboard keeps running through all of these."),
     card({ class: "card-pad", "data-write": "" }, panel(resource, {
       loading: () => skeletonStack(3),
-      ready: (mode) => [
-        h("p", { class: "muted", key: "now" },
-          `The setting is ${labelFor(mode.setting)}. Right now the agents are on ${labelFor(mode.effective)}.`),
-        powerModes(context, mode),
-        powerActions(context),
-        readOnlyLine("ro-power"),
-      ],
+      /* The five settings are switched from the header on every tab, so here they are only drawn
+         when the header has none to draw (a machine with no slice to cap). What is left is one
+         line: where the power stands, and the three actions that change the whole farm. */
+      ready: (mode) => {
+        /* Only once the farm's settings have answered: before that the page cannot know whether
+           the header holds the switch, and drawing it here for a moment pushed a phone sideways. */
+        const config = context.res("/api/config").data;
+        const here = Boolean(config) && !(config.features || {}).slice;
+        return [
+          powerActions(context, [
+            here ? powerModes(context, mode) : null,
+            h("span", { class: "m-power-now", key: "now" }, mode.setting === "auto"
+              ? `Automatic, the agents are on ${labelFor(mode.effective)} now`
+              : `The agents are on ${labelFor(mode.setting)}`),
+          ]),
+          readOnlyLine("ro-power"),
+        ];
+      },
     })));
 }
 
@@ -324,13 +337,13 @@ function servicesSection(context) {
             h("th", null, "State"),
             h("th", null, "Last change"),
             h("th", null, "What it does"),
-            h("th", null, "Controls"))),
+            h("th", { class: "actions" }, "Actions"))),
           h("tbody", null, list(data.services).map((row) => h("tr", { key: row.id },
             h("td", null, row.label || row.id),
             h("td", null, pill(serviceMeaning(row.state), fmt.titleCase(row.state || "unknown"), row.detail || "")),
             h("td", { class: "num" }, row.since ? fmt.ago(row.since) : "not known"),
             h("td", { title: row.what || "" }, row.what || ""),
-            h("td", null, list(row.actions).length
+            h("td", { class: "actions" }, list(row.actions).length
               ? h("div", { class: "row" }, list(row.actions).map((action) => h("button", {
                 key: action,
                 class: "ghost-button small",
@@ -377,17 +390,19 @@ function windowBars(account) {
     h("span", { class: "num" }, fmt.percent(row.percent)))));
 }
 
-/* Two words and then the whole sentence. The sentence is the server's, it is the only part
-   that says what to do about a login that is not in, and a tooltip is not somewhere a person
-   finds it: it goes in the row. */
+/* The state, and then the server's sentence when there is something to do about it. A login
+   that is in needs no sentence (owner audit 2026-09-23: less text), so it keeps its sentence in
+   the title; one that is not in says what to do, in the row, because a tooltip is not
+   somewhere a person finds an instruction. */
 function loginCell(states, name) {
   const found = states.find((row) => row.name === name);
   if (!found) return h("span", { class: "muted" }, "not read yet");
   const [meaning, word] = LOGIN[found.state] || ["pause", fmt.titleCase(found.state || "unknown")];
   const sentence = found.sentence || "";
+  const quiet = found.state === "logged_in";
   return h("div", { class: "m-login", title: sentence },
     pill(meaning, word, sentence),
-    sentence ? h("span", { class: "muted cell-text" }, sentence) : null);
+    sentence && !quiet ? h("span", { class: "muted cell-text" }, sentence) : null);
 }
 
 async function refreshAccounts(context) {
@@ -408,8 +423,10 @@ function refreshButton(context) {
   const left = REFRESH_QUIET_MS - (Date.now() - local.refreshedAt);
   const quiet = left > 0;
   return h("button", {
-    class: "ghost-button small",
+    key: "refresh",
+    class: "ghost-button",
     "data-accounts-refresh": "",
+    "data-write": "",
     disabled: access.writable && !quiet ? null : true,
     title: quiet ? "Asking the vendor again this soon changes nothing." : blocked(),
     onclick: () => refreshAccounts(context),
@@ -664,11 +681,13 @@ function addDialogBody(context) {
   return local.addStep ? [addSteps(context)] : addForm(context);
 }
 
-/* The button under the table; the dialog is the drawer. */
+/* The button in the heading, beside Refresh; the dialog is the drawer. */
 function addAccount(context) {
   return h("button", {
-    class: "button small",
+    key: "add",
+    class: "button",
     "data-add-account": "",
+    "data-write": "",
     disabled: access.writable ? null : true,
     title: blocked(),
     onclick: () => openAddDialog(context),
@@ -679,7 +698,10 @@ function accountsSection(context) {
   const resource = context.res("/api/accounts");
   const states = list((context.res("/api/accounts/login-state").data || {}).accounts);
   return h("section", { class: "section", key: "accounts" },
-    sectionHead("Accounts", "The subscriptions the agents spend.", refreshButton(context)),
+    /* Add is drawn once the list has answered, as it was under the table: the dialog checks a new
+       name against the accounts already there, which it cannot do while they are loading. */
+    sectionHead("Accounts", "The subscriptions the agents spend.", refreshButton(context),
+      resource.everLoaded ? addAccount(context) : null),
     card({ key: "accounts", "data-write": "" }, panel(resource, {
       loading: () => h("div", { class: "card-pad" }, skeletonStack(4)),
       isEmpty: (data) => !list(data.accounts).length,
@@ -696,7 +718,7 @@ function accountsSection(context) {
             h("th", null, "Login"),
             h("th", null, "Windows"),
             h("th", null, "Last read"),
-            h("th", null, ""))),
+            h("th", { class: "actions one" }, "Actions"))),
           h("tbody", null, list(data.accounts).map((account) => h("tr", { key: account.name },
             h("td", { title: `${account.email || account.label || account.name}, folder ${account.name}` },
               h("span", { class: "m-account" }, account.label || account.name,
@@ -705,19 +727,21 @@ function accountsSection(context) {
             h("td", null, loginCell(states, account.name)),
             h("td", { class: "m-windows" }, windowBars(account)),
             h("td", { class: "num" }, account.read_at ? fmt.ago(account.read_at) : "never"),
-            h("td", null, h("button", {
-              class: "ghost-button small",
+            h("td", { class: "actions one" }, h("button", {
+              class: "ghost-button small danger",
               "data-remove-account": account.name,
               disabled: access.writable ? null : true,
               title: blocked(),
               onclick: () => setConfirm(context, `remove-account:${account.name}`),
             }, "Remove"))))))),
-        h("div", { class: "card-pad", key: "add" },
-          local.confirm.startsWith("remove-account:")
-            ? removeAccountConfirm(context, local.confirm.slice("remove-account:".length))
-            : addAccount(context),
-          local.sectionError ? h("p", { class: "m-bad" }, local.sectionError) : null,
-          readOnlyLine("ro-accounts")),
+        local.confirm.startsWith("remove-account:") || local.sectionError || !access.writable
+          ? h("div", { class: "card-pad", key: "add" },
+            local.confirm.startsWith("remove-account:")
+              ? removeAccountConfirm(context, local.confirm.slice("remove-account:".length))
+              : null,
+            local.sectionError ? h("p", { class: "m-bad" }, local.sectionError) : null,
+            readOnlyLine("ro-accounts"))
+          : null,
       ],
     })));
 }

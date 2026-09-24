@@ -1373,15 +1373,15 @@ HARNESS = r"""<!doctype html>
     <div class="side-foot"><span id="versionLabel" class="muted">harness</span></div>
   </aside>
   <header id="topbar">
-    <h1 id="productTitle">murmur</h1>
-    <span class="crumb-sep" aria-hidden="true">/</span>
-    <span id="viewTitle" class="crumb"></span>
-    <div class="top-right">
+    <h1 class="sr-only"><span id="productTitle">murmur</span>, <span id="viewTitle"></span></h1>
+    <div class="top-status">
       <span id="capacity" class="pill pause" title="The harness draws no capacity reading."><span
         class="dot"></span><span class="pill-text">harness</span></span>
-      <label class="field"><span class="sr-only">Project filter</span>
-        <select id="projectFilter"><option value="">All projects</option></select></label>
       <span id="freshness" class="freshness" aria-live="polite"></span>
+    </div>
+    <div class="top-controls">
+      <label class="field-label"><span>Project</span>
+        <select id="projectFilter" aria-label="Project filter"><option value="">All</option></select></label>
     </div>
   </header>
   <main id="view" tabindex="-1"></main>
@@ -1493,7 +1493,7 @@ function fillProjects() {
   if (projectFilter.dataset.names === names.join("|")) return;
   projectFilter.dataset.names = names.join("|");
   projectFilter.replaceChildren();
-  for (const [value, label] of [["", "All projects"], ...names.map((name) => [name, name])]) {
+  for (const [value, label] of [["", "All"], ...names.map((name) => [name, name])]) {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = label;

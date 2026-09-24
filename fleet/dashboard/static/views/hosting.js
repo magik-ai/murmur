@@ -321,9 +321,11 @@ function actionButton(context, row, action, label, path, body) {
     class: "ghost-button small",
     [`data-machine-${action}`]: row.name,
     disabled: access.writable && !busy ? null : true,
-    title: blocked(),
+    /* The button keeps its own word while its job runs (every button in an actions column is
+       the same width, so "Forget, running" no longer fits): it is switched off, and says why. */
+    title: busy ? `${label} is running` : blocked(),
     onclick: () => startJob(context, key, body || { name: row.name }, path),
-  }, busy ? `${label}, running` : label);
+  }, label);
 }
 
 /* Forget drops a row from the registry and buys nothing back, so it is offered only where
@@ -339,7 +341,7 @@ function canForget(row) {
 function machineActions(context, row) {
   const out = [];
   if (row.state === "needs-login" && row.finish_command) {
-    out.push(copyButton(row.finish_command, "machine-finish", "Finish command", FINISH_LINE));
+    out.push(copyButton(row.finish_command, "machine-finish", "Finish", `Copy the finish command. ${FINISH_LINE}`));
   }
   if (row.state === "ready" && row.tunnel_command) {
     out.push(copyButton(row.tunnel_command, "machine-tunnel", "Tunnel",
@@ -351,18 +353,19 @@ function machineActions(context, row) {
   if (row.state === "unrecorded") {
     out.push(actionButton(context, row, "adopt", "Adopt", "/api/machines/adopt"));
   }
+  if (canForget(row)) {
+    out.push(actionButton(context, row, "forget", "Forget", "/api/machines/forget"));
+  }
+  /* Destroy is last in the row, like every destructive action in an actions column. */
   if (row.provider !== "ssh" && row.state !== "destroyed") {
     out.push(h("button", {
       key: "destroy",
-      class: "ghost-button small",
+      class: "ghost-button small danger",
       "data-machine-destroy": row.name,
       disabled: access.writable ? null : true,
       title: blocked(),
       onclick: () => setConfirm(context, `destroy:${row.name}`),
     }, "Destroy"));
-  }
-  if (canForget(row)) {
-    out.push(actionButton(context, row, "forget", "Forget", "/api/machines/forget"));
   }
   return h("div", { class: "row h-do" }, out);
 }
@@ -430,7 +433,7 @@ function thisFarmRow(context, here) {
     h("td", null, "Not billed here"),
     h("td", null, pill("done", "Ready", "You are reading this page on it.")),
     h("td", null, "now"),
-    h("td", { class: "h-do-cell" }, ""));
+    h("td", { class: "h-do-cell actions" }, ""));
 }
 
 function machineRow(context, row) {
@@ -442,7 +445,7 @@ function machineRow(context, row) {
     h("td", { title: sizeLine(context, row) }, sizeLine(context, row)),
     h("td", null, statePill(row)),
     h("td", null, row.checked_at ? fmt.ago(row.checked_at) : "not checked"),
-    h("td", { class: "h-do-cell" }, machineActions(context, row)));
+    h("td", { class: "h-do-cell actions" }, machineActions(context, row)));
 }
 
 /* A snapshot the farm could not refresh still answers, with the rows it last read and since
@@ -475,7 +478,7 @@ function machinesCard(context) {
           h("th", null, "Size and price"),
           h("th", null, "State"),
           h("th", null, "Last check"),
-          h("th", null, "Actions"))),
+          h("th", { class: "actions" }, "Actions"))),
         h("tbody", null,
           data.this ? thisFarmRow(context, data.this) : null,
           list(data.machines).filter(Boolean).map((row) => machineRow(context, row))))),
@@ -547,23 +550,27 @@ function cliCell(context, row) {
       h("span", null, "Installed"),
       h("span", { class: "muted cell-text mono" }, row.cli || ""));
   }
-  if (!row.install) return h("span", { class: "muted" }, "Not installed");
-  return copyButton(row.install, "host-install", "Copy install command",
-    `Run it on this farm: ${row.install}`);
+  /* The install command is an action, so it is the Install button in the actions column. */
+  return h("span", { class: "muted" }, "Not installed");
 }
 
 function runnerActions(context, row) {
   const key = runnerKey(row.id);
   const busy = Boolean(running(context, key));
+  /* Three buttons at most, like every actions column: without the CLI the spawn line would
+     spawn nothing, so Install takes its place and comes first. */
+  const install = !row.cli_installed && row.install;
   return h("div", { class: "row h-do" },
+    install ? copyButton(row.install, "host-install", "Install",
+      `Copy the install command, then run it on this farm: ${row.install}`) : null,
     h("button", {
       key: "check",
       class: "ghost-button small",
       "data-host-check": row.id,
       disabled: access.writable && !busy ? null : true,
-      title: blocked(),
+      title: busy ? "Check is running" : blocked(),
       onclick: () => startJob(context, key, { provider: row.id }, "/api/hosts/check"),
-    }, busy ? "Check, running" : "Check"),
+    }, "Check"),
     h("button", {
       key: "test",
       class: "ghost-button small",
@@ -574,8 +581,8 @@ function runnerActions(context, row) {
     }, "Test"),
     /* The project is the one the header is filtered to, or the one picked in the dialog; with
        neither, the line carries a placeholder rather than a project nobody chose. */
-    copyButton(spawnLine(row.id, local.project || context.project), "host-spawn", "Spawn line",
-      "The line that spawns a lane in this provider's sandbox."));
+    install ? null : copyButton(spawnLine(row.id, local.project || context.project), "host-spawn", "Spawn",
+      "Copy the line that spawns a lane in this provider's sandbox."));
 }
 
 function runnerRow(context, row) {
@@ -587,7 +594,7 @@ function runnerRow(context, row) {
     h("td", null, loginPill(row)),
     h("td", null, secretsCell(row)),
     h("td", null, testCell(row)),
-    h("td", { class: "h-do-cell" }, runnerActions(context, row)));
+    h("td", { class: "h-do-cell actions" }, runnerActions(context, row)));
 }
 
 function runnersCard(context) {
@@ -610,11 +617,10 @@ function runnersCard(context) {
           h("th", null, "Login"),
           h("th", null, "Secrets"),
           h("th", null, "Test"),
-          h("th", null, "Actions"))),
+          h("th", { class: "actions" }, "Actions"))),
         h("tbody", null, list(data.providers)
           .filter((row) => row && row.job === "runner")
           .map((row) => runnerRow(context, row))))),
-      h("p", { class: "muted card-pad", key: "gap" }, GAP_LINE),
       readOnlyLine("ro-runners"),
     ],
   }));
@@ -1323,21 +1329,28 @@ export function hostingSection(context) {
       h("div", { class: "row h-head-do", key: "buttons" },
         h("button", {
           key: "add-machine",
-          class: "button small",
+          class: "button",
           "data-add-machine": "",
+          "data-write": "",
           disabled: access.writable ? null : true,
           title: blocked(),
           onclick: () => openAddMachine(context),
         }, "Add a machine"),
         h("button", {
           key: "connect-runner",
-          class: "button small",
+          class: "button",
           "data-connect-runner": "",
+          "data-write": "",
           disabled: access.writable ? null : true,
           title: blocked(),
           onclick: () => openConnectRunner(context, ""),
         }, "Connect a runner"))),
+    h("h3", { class: "subhead", key: "machines-head" }, "Machines"),
     machinesCard(context),
-    h("div", { class: "gap-sm", key: "gap" }),
+    /* The one sentence under a heading on this tab that stays visible: it names a spend the page
+       does not count, and a warning in a tooltip is a warning a keyboard or a finger never finds. */
+    h("div", { class: "subhead-row", key: "runners-head" },
+      h("h3", { class: "subhead" }, "Runners"),
+      h("span", { class: "muted", "data-runner-gap": "" }, GAP_LINE)),
     runnersCard(context));
 }

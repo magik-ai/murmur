@@ -3,16 +3,14 @@
 
 /* ------------------------------------------------------------ the controls bar */
 
-.q-controls {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-}
+.q-controls { gap: 8px 12px; margin-bottom: 12px; }
 .q-controls-right {
-  margin-left: auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-left: auto; display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap;
 }
 .q-filters { gap: 8px; position: relative; }
 .q-verify { gap: 8px; }
 .q-runner { gap: 8px; }
-.q-pr { width: 92px; }
+.q-pr { width: 120px; }
 .q-help {
   font-family: var(--font-mono); font-weight: 600;
 }
@@ -39,29 +37,34 @@
 }
 .q-band b { color: var(--text); }
 
-.q-row td { border-left: 0; }
-.q-row td:first-child { box-shadow: inset 3px 0 0 var(--tone-pause); }
-.q-row.run td:first-child { box-shadow: inset 3px 0 0 var(--tone-run); }
-.q-row.wait td:first-child { box-shadow: inset 3px 0 0 var(--tone-wait); }
-.q-row.fail td:first-child { box-shadow: inset 3px 0 0 var(--tone-fail); }
-.q-row.done td:first-child { box-shadow: inset 3px 0 0 var(--tone-done); }
 .q-row { cursor: pointer; }
 .q-row:hover td { background: var(--surface-2); }
 .q-row.open td { background: var(--accent-soft); }
 .q-branch { font-family: var(--font-mono); }
 .q-divergent { color: var(--tone-wait); }
 
-.q-stages { display: inline-flex; gap: 3px; align-items: center; }
+/* A stage is its state's mark in its state's ink, one small button each: the same marks as
+   every state on the page, never a coloured square that says nothing without its colour. */
+.q-stages { display: inline-flex; gap: 2px; align-items: center; vertical-align: middle; }
 .q-stage {
-  width: 16px; height: 16px; padding: 0; flex: none;
-  border: 1px solid var(--line-strong); border-radius: 3px;
-  background: var(--tone-pause-bg); cursor: pointer;
+  width: 22px; height: 22px; padding: 0; flex: none;
+  display: inline-grid; place-items: center;
+  border: 0; border-radius: var(--radius-xs);
+  background: transparent; color: var(--tone-pause); cursor: pointer;
 }
-.q-stage.run { background: var(--tone-run-bg); border-color: var(--tone-run); }
-.q-stage.wait { background: var(--tone-wait-bg); border-color: var(--tone-wait); }
-.q-stage.fail { background: var(--tone-fail-bg); border-color: var(--tone-fail); }
-.q-stage.done { background: var(--tone-done-bg); border-color: var(--tone-done); }
-.q-stage:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.q-stage::before {
+  content: ""; width: 12px; height: 12px; background: currentColor;
+  -webkit-mask: var(--m-pause) center / contain no-repeat; mask: var(--m-pause) center / contain no-repeat;
+}
+.q-stage.run { color: var(--tone-run); }
+.q-stage.run::before { width: 14px; -webkit-mask-image: var(--m-run); mask-image: var(--m-run); }
+.q-stage.wait { color: var(--tone-wait); }
+.q-stage.wait::before { -webkit-mask-image: var(--m-wait); mask-image: var(--m-wait); }
+.q-stage.fail { color: var(--tone-fail); }
+.q-stage.fail::before { -webkit-mask-image: var(--m-fail); mask-image: var(--m-fail); }
+.q-stage.done { color: var(--tone-done); }
+.q-stage.done::before { -webkit-mask-image: var(--m-done); mask-image: var(--m-done); }
+.q-stage:hover { background: var(--surface-3); }
 
 /* ------------------------------------------------------------ the detail panel */
 
@@ -101,6 +104,10 @@
 
 .q-logwrap { display: grid; gap: 8px; min-width: 0; }
 .q-find { gap: 6px; }
+/* Everything in the log's tool row is the small step, the field included, so it is one row of
+   one height inside a panel that has no room for the full one. */
+.q-find input { height: var(--control-sm); font-size: 12.5px; }
+.q-detail-head .ghost-button, .q-detail-head .button { height: var(--control-sm); padding: 0 10px; font-size: 12px; }
 .q-findbox { flex: 1 1 140px; min-width: 120px; }
 .q-log { max-height: 320px; }
 .q-log.nowrap { white-space: pre; overflow-wrap: normal; }

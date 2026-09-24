@@ -439,7 +439,16 @@ for (const [from, wanted, name] of [
       focused: document.activeElement === input,
       outline: style.outlineStyle,
       edge: style.borderBottomColor,
-      accent: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
+      // The accent as the browser computes a colour, so a token written in hex and an edge
+      // reported in rgb() compare as the same colour.
+      accent: (() => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--accent)";
+        document.body.appendChild(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      })(),
     };
   });
   check("the search field takes the whole width of its box", Math.abs(field.input - field.box) <= 2, JSON.stringify(field));
@@ -505,7 +514,7 @@ for (const [from, wanted, name] of [
   const { page, context } = await open({ hash: "#/board", size: { width: 390, height: 844 } });
   const header = await page.evaluate(() => {
     const bar = document.getElementById("topbar");
-    const right = document.querySelector(".top-right");
+    const right = document.querySelector(".top-controls");
     return {
       bar: bar.scrollWidth <= bar.clientWidth + 1,
       right: right.scrollWidth <= right.clientWidth + 1,
@@ -554,7 +563,8 @@ for (const [from, wanted, name] of [
 
 /* One word, one meaning, on one screen. A farm with no room for another agent has a header
    pill that says "No room" and a power setting a few inches away whose top setting is called
-   "Full": the Capacity tile must not be the third thing, saying "Full" for the opposite. */
+   "Full". The Capacity tile is gone (owner audit 2026-09-23: the header already says it), so
+   nothing on the Board may be a second capacity reading that could disagree with the pill. */
 {
   const { page, context } = await open({
     hash: "#/board",
@@ -576,13 +586,11 @@ for (const [from, wanted, name] of [
     return {
       tile: found ? found.querySelector(".value").textContent : "",
       pill: document.querySelector("#capacity .pill-text").textContent,
-      power: document.getElementById("powerMode").textContent.replace(/\s+/g, " "),
+      power: document.getElementById("powerPick").textContent.replace(/\s+/g, " "),
     };
   });
-  check("the capacity tile does not say Full on a farm with no room",
-    said.tile === "No room", said.tile);
-  check("the tile and the header pill say the same word", said.tile === said.pill,
-    `${said.tile} / ${said.pill}`);
+  check("the header pill says No room on a farm with no room", said.pill === "No room", said.pill);
+  check("the Board draws no second capacity reading", said.tile === "", said.tile);
   check("Full on this screen means only the power setting", said.power.includes("Full"), said.power);
   await context.close();
 }
@@ -596,7 +604,7 @@ for (const [from, wanted, name] of [
   check("the started-by select counts the lanes behind every name",
     started[0] === "Anyone (6)" && started.some((row) => /^winston \(\d\)$/.test(row)), started.join(" | "));
   check("the status select offers the five meanings and counts them",
-    states.length === 6 && states[0] === "Any status (6)" && states.some((row) => /^Running \(\d\)$/.test(row)),
+    states.length === 6 && states[0] === "Any (6)" && states.some((row) => /^Running \(\d\)$/.test(row)),
     states.join(" | "));
   await page.fill("#agentSearch", "checkout");
   await page.waitForTimeout(500);
@@ -753,7 +761,7 @@ for (const [from, wanted, name] of [
     overrides: { "/api/access": READ_ONLY },
   });
   const off = await page.evaluate(() => {
-    const controls = [...document.querySelectorAll("#powerMode button, [data-lane-end], #drawerBody .composer button, #drawerBody .composer textarea")];
+    const controls = [...document.querySelectorAll("#powerPick, [data-lane-end], #drawerBody .composer button, #drawerBody .composer textarea")];
     return {
       count: controls.length,
       allOff: controls.every((node) => node.disabled),
@@ -761,8 +769,10 @@ for (const [from, wanted, name] of [
       marked: document.body.classList.contains("readonly"),
     };
   });
+  // The header's power setting is one select since 2026-09-24 (it was five buttons): the power
+  // select, the lane's endings and the composer's button and field.
   check("a page with no token has every write control on the board switched off",
-    off.count >= 8 && off.allOff, JSON.stringify(off));
+    off.count >= 4 && off.allOff, JSON.stringify(off));
   check("and it says why, in the server's own words", off.said && off.marked, JSON.stringify(off));
   check("a read-only board breaks nothing", thrown.length === 0, thrown[0]);
   await context.close();
@@ -801,13 +811,95 @@ for (const [from, wanted, name] of [
       },
     },
   });
-  const buttons = await page.evaluate(() => [...document.querySelectorAll("#powerMode button")].map((node) => node.textContent));
+  const options = await page.evaluate(() => [...document.querySelectorAll("#powerPick option")].map((node) => node.value));
   check("the header offers the four settings and Automatic",
-    buttons.join(" | ") === "Full | Shared | Background | Paused | Automatic", buttons.join(" | "));
-  await page.click('[data-power="balanced"]');
+    options.join(" | ") === "full | soft | balanced | hard | auto", options.join(" | "));
+  await page.selectOption("#powerPick", "balanced");
   await page.waitForTimeout(900);
-  check("pressing one posts it", writes.some((row) => row.mode === "balanced"), JSON.stringify(writes));
+  check("choosing one posts it", writes.some((row) => row.mode === "balanced"), JSON.stringify(writes));
   check("the power setting breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* The power setting is a select at every width (owner audit 2026-09-24): at 1024 it has to be
+   on screen, post what it says, and carry the write mark. */
+{
+  const writes = [];
+  const { page, context, thrown } = await open({
+    hash: "#/board",
+    size: { width: 1024, height: 800 },
+    overrides: {
+      "/api/mode": (handler) => {
+        const request = handler.request();
+        if (request.method() !== "POST") return handler.continue();
+        writes.push(JSON.parse(request.postData() || "{}"));
+        return handler.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      },
+    },
+  });
+  const seen = await page.evaluate(() => {
+    const pick = document.getElementById("powerPick");
+    return {
+      pick: Boolean(pick) && getComputedStyle(pick.closest("label")).display !== "none",
+      right: pick ? Math.round(pick.getBoundingClientRect().right) : 0,
+      options: pick ? [...pick.options].map((node) => node.value).join(",") : "",
+      marked: Boolean(pick && pick.closest("[data-write]")),
+    };
+  });
+  check("at 1024 the header shows the power select, on the screen",
+    seen.pick && seen.right > 0 && seen.right <= 1024, JSON.stringify(seen));
+  check("the select offers the same five settings", seen.options === "full,soft,balanced,hard,auto", seen.options);
+  check("the select is marked as a write", seen.marked, JSON.stringify(seen));
+  await page.selectOption("#powerPick", "balanced");
+  await page.waitForTimeout(900);
+  check("choosing one posts it", writes.some((row) => row.mode === "balanced"), JSON.stringify(writes));
+  check("the power select breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* A project name may be forty characters. At 1024 the header still fits: the project filter is
+   what gives way, never Search or the theme. */
+{
+  const { page, context } = await open({ hash: "#/board", size: { width: 1024, height: 800 } });
+  const seen = await page.evaluate(() => {
+    const name = "p".repeat(40);
+    document.getElementById("projectFilter").add(new Option(name, name));
+    const theme = document.getElementById("themeSwitch").getBoundingClientRect();
+    return { page: document.documentElement.scrollWidth, width: window.innerWidth, theme: Math.round(theme.right) };
+  });
+  check("a forty-character project leaves the 1024 header on the screen",
+    seen.page <= seen.width && seen.theme <= seen.width, JSON.stringify(seen));
+  await context.close();
+}
+
+/* The actions that moved into the section headings are write controls wherever they sit. */
+{
+  const { page, context } = await open({ hash: "#/machine", size: { width: 1024, height: 900 } });
+  await page.waitForTimeout(1500);
+  const marks = await page.evaluate(() => ["[data-accounts-refresh]", "[data-add-account]", "[data-add-model]",
+    "[data-add-machine]", "[data-connect-runner]"].map((selector) => {
+    const node = document.querySelector(selector);
+    return [selector, node ? Boolean(node.closest("[data-write]")) : null];
+  }));
+  check("every heading action on the Machine tab is marked as a write",
+    marks.every(([, marked]) => marked === true), JSON.stringify(marks));
+  await context.close();
+}
+
+/* A failed sweep says so in words in the header: colour alone is not a warning. */
+{
+  const { page, context } = await open({
+    hash: "#/board",
+    overrides: {
+      "/api/sweep": JSON.stringify({ enabled: true, result: "failed", secs_left: 90 }),
+    },
+  });
+  const said = await page.evaluate(() => {
+    const node = document.getElementById("sweepNote");
+    return { text: node.textContent, title: node.title };
+  });
+  check("a failed sweep reads Sweep failed in the header", said.text === "Sweep failed", JSON.stringify(said));
+  check("and its title says when the next one runs", /next one runs in 2m/.test(said.title), said.title);
   await context.close();
 }
 
@@ -955,7 +1047,7 @@ for (const [hash, name] of [["#/mail", "mail"], ["#/queue", "queue"], ["#/machin
     return card ? { out: card.classList.contains("out"), text: card.innerText.replace(/\s+/g, " ") } : null;
   });
   check("a subscription with no numbers says so in words",
-    /No window has reported a number yet/.test(body), body.replace(/\s+/g, " ").slice(0, 160));
+    /No numbers yet/.test(body), body.replace(/\s+/g, " ").slice(0, 160));
   check("a subscription with nothing left is red and says so",
     red && red.out && /Out of room/.test(red.text), JSON.stringify(red));
   const fable = await page.evaluate(() => {
@@ -1224,8 +1316,12 @@ for (const [hash, name] of [["#/mail", "mail"], ["#/queue", "queue"], ["#/machin
 
 {
   const { page, context } = await open({ hash: "#/board" });
-  const label = await page.evaluate(() => document.getElementById("freshness").textContent);
-  check("nothing old and nothing failing still reads live", /^Live, as of /.test(label), label);
+  const label = await page.evaluate(() => {
+    const node = document.getElementById("freshness");
+    return { text: node.textContent, title: node.title, hidden: node.hidden };
+  });
+  check("nothing old and nothing failing says nothing, with the time on its title",
+    label.text === "" && label.hidden && /as of /.test(label.title), JSON.stringify(label));
   await context.close();
 }
 

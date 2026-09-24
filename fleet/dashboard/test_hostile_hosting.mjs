@@ -183,7 +183,7 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
     && seen.rows.haifa.actions.join(",") === "Adopt,Destroy",
     `${seen.rows.haifa.why} | ${seen.rows.haifa.actions.join(",")}`);
   check("hosting: a machine that needs your login offers the finish command, with the sentence",
-    seen.rows.brussels.actions.includes("Finish command")
+    seen.rows.brussels.actions.includes("Finish")
     && /Run this from your laptop/.test(seen.rows.brussels.finishTitle)
     && /clones murmur and runs the installer/.test(seen.rows.brussels.finishTitle),
     seen.rows.brussels.finishTitle);
@@ -234,10 +234,13 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
     && /preview/.test(seen.rows["do-agents"].cells[0])
     && /early access/.test(seen.rows.railway.cells[0]),
     Object.keys(seen.rows).join(","));
+  // The install command is the Install button in the actions column since 2026-09-24, and it
+  // takes the spawn line's place: without the CLI that line spawns nothing.
   check("hosting: a provider whose CLI is missing offers the command that installs it",
-    /Copy install command/.test(seen.rows["do-agents"].cells[1])
-    && /Installed/.test(seen.rows.railway.cells[1]),
-    `${seen.rows["do-agents"].cells[1]} | ${seen.rows.railway.cells[1]}`);
+    /Not installed/.test(seen.rows["do-agents"].cells[1]) && /^Install/.test(seen.rows["do-agents"].cells[5])
+    && !/Spawn/.test(seen.rows["do-agents"].cells[5])
+    && /Installed/.test(seen.rows.railway.cells[1]) && /Spawn/.test(seen.rows.railway.cells[5]),
+    `${seen.rows["do-agents"].cells[1]} | ${seen.rows["do-agents"].cells[5]} | ${seen.rows.railway.cells[5]}`);
   check("hosting: the three login states are three different pills",
     seen.rows["do-agents"].login === "Not installed" && seen.rows.railway.login === "Logged in"
     && seen.rows.vercel.login === "Not logged in",
@@ -259,9 +262,8 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
   check("hosting: a test that passed and one that failed are two pills",
     seen.rows.railway.test === "Passed" && seen.rows.vercel.test === "Failed",
     `${seen.rows.railway.test} | ${seen.rows.vercel.test}`);
-  check("hosting: the gap in what the Accounts windows can see is said under the table",
-    seen.text.includes("Usage by cloud agents is not in the Accounts windows yet"),
-    seen.text.slice(-200));
+  check("hosting: the gap in what the Accounts windows can see is said beside the runners heading",
+    seen.text.includes("Usage by cloud agents is not in the Accounts windows yet"), seen.text.slice(0, 200));
   check("hosting: nothing threw drawing the runners", thrown.length === 0, thrown[0]);
   await context.close();
 }
@@ -290,7 +292,8 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
   check("hosting: a name too long for its cell is cut, and the cell carries all of it",
     seen.cut && /the-second-farm-for-the-checkout-rewrite/.test(seen.title),
     JSON.stringify(seen).slice(0, 200));
-  check("hosting: and the row it is in is still one line high", seen.height <= 38,
+  // One line at the table's row height, 40px since the owner's audit of 2026-09-23.
+  check("hosting: and the row it is in is still one line high", seen.height <= 42,
     String(seen.height));
   check("hosting: nothing threw on the quiet farm", thrown.length === 0, thrown[0]);
   await context.close();
@@ -303,6 +306,44 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
    lines at 390. Both are measured on main and both live in machine.css, which is another lane's
    file, so they are named here rather than quietly skipped, and the rule still covers every
    other table at both widths. */
+/* ---------------------------------------------- one actions column, one button size */
+
+/* Every table on the Machine tab keeps its actions in one last column of one width, every
+   button in it is the same size, and a destructive one is always the last in its row (owner,
+   2026-09-24: the buttons were all different widths and sizes). */
+{
+  const { page, context } = await open();
+  await page.waitForTimeout(800);
+  const seen = await page.evaluate(() => {
+    const widths = new Set();
+    const columns = new Set();
+    const wrongOrder = [];
+    const outside = [];
+    for (const cell of document.querySelectorAll("#view td.actions")) {
+      if (!cell.classList.contains("one")) columns.add(Math.round(cell.getBoundingClientRect().width));
+      const buttons = [...cell.querySelectorAll("button, a.ghost-button")];
+      buttons.forEach((node) => widths.add(Math.round(node.getBoundingClientRect().width)));
+      const danger = buttons.findIndex((node) => node.classList.contains("danger"));
+      if (danger !== -1 && danger !== buttons.length - 1) {
+        wrongOrder.push(buttons.map((node) => node.textContent).join("+"));
+      }
+    }
+    for (const table of document.querySelectorAll("#view table")) {
+      for (const node of table.querySelectorAll("tbody td:not(.actions) :is(.button, .ghost-button)")) outside.push(node.textContent);
+    }
+    return { widths: [...widths], columns: [...columns], wrongOrder, outside };
+  });
+  check("machine: every button in an actions column is the same width",
+    seen.widths.length === 1, JSON.stringify(seen.widths));
+  check("machine: every full actions column is the same width in every table",
+    seen.columns.length === 1, JSON.stringify(seen.columns));
+  check("machine: a destructive action is the last one in its row",
+    seen.wrongOrder.length === 0, seen.wrongOrder.join(" | "));
+  check("machine: no table keeps a button outside its actions column",
+    seen.outside.length === 0, seen.outside.join(" | "));
+  await context.close();
+}
+
 const KNOWN_WRAPPING = { 1440: ["m-models"], 390: ["Accounts"] };
 
 for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
@@ -976,10 +1017,10 @@ for (const [opener, picker, controls] of [
     JSON.stringify(bodyOf(sent, "/api/machines/check")));
   const during = await page.evaluate(() => {
     const node = document.querySelector("[data-machine-check='athens']");
-    return { off: node.disabled, label: node.textContent };
+    return { off: node.disabled, label: node.textContent, title: node.title };
   });
-  check("hosting: and the button holds while its job runs",
-    during.off && /running/.test(during.label), JSON.stringify(during));
+  check("hosting: and the button holds while its job runs, keeping its word and saying why",
+    during.off && during.label === "Check" && /is running/.test(during.title), JSON.stringify(during));
   await page.click("[data-machine-adopt='haifa']");
   await page.waitForTimeout(700);
   check("hosting: Adopt asks the adopt route",
@@ -1040,7 +1081,7 @@ for (const [opener, picker, controls] of [
   }
   check("hosting: and the row says so by itself, with Forget in place of Destroy",
     /Destroyed/.test(gone) && /Forget/.test(gone) && !/Destroy\b/.test(gone.replace("Destroyed", "")),
-    gone.slice(0, 200));
+    gone.replace(/\s+/g, " ").slice(0, 400));
   check("hosting: nothing threw around destroy", thrown.length === 0, thrown[0]);
   await context.close();
 }

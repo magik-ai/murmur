@@ -4,12 +4,13 @@
 
 .mo-providers { table-layout: fixed; }
 .mo-providers td { max-width: none; }
-.mo-providers th.mo-provider { width: 22%; }
-.mo-providers th.mo-col-access { width: 22%; }
+/* Access takes what is left, so the fixed actions column is never squeezed below its width. */
+.mo-providers th.mo-provider { width: 20%; }
 .mo-providers th.mo-col-status { width: 14%; }
 .mo-providers th.mo-col-models { width: 10%; }
 .mo-providers th.mo-col-last { width: 10%; }
-.mo-providers th.mo-col-actions { width: 22%; }
+/* The actions column is the same 276px as in every other table (owner, 2026-09-24). */
+.mo-providers th.mo-col-actions { width: 276px; }
 .mo-providers .pill { max-width: 100%; }
 
 /* The name is a button that opens the sidebar, and it is cut like any other cell. */

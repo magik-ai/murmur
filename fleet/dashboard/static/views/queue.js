@@ -165,8 +165,9 @@ function openRun(context, row, stage) {
 }
 
 function sortHead(label, by, context, extra) {
+  const sorted = local.sort === by ? (local.descending ? " desc" : " asc") : "";
   return h("th", { key: by, class: extra || null }, h("button", {
-    class: "sortby",
+    class: `sortby${sorted}`,
     "aria-label": `Sort by ${label}`,
     onclick: () => {
       if (local.sort === by) local.descending = !local.descending;
@@ -176,7 +177,7 @@ function sortHead(label, by, context, extra) {
       }
       context.paint();
     },
-  }, `${label}${local.sort === by ? (local.descending ? " v" : " ^") : ""}`));
+  }, label));
 }
 
 function bandLine(band, count, data) {
@@ -217,7 +218,7 @@ function runRow(context, row) {
     h("td", { class: "num" }, took == null ? ""
       : row.band === "running" ? `${fmt.duration(took)} so far` : fmt.duration(took)),
     h("td", null, verdictCell(row)),
-    h("td", null, cancelButton(context, row)));
+    h("td", { class: "actions one" }, cancelButton(context, row)));
 }
 
 function verdictCell(row) {
@@ -243,7 +244,7 @@ function table(context, data, rows) {
         sortHead("Started", "started", context, "num"),
         sortHead("Took", "took", context, "num"),
         h("th", { key: "verdict" }, "Verdict"),
-        h("th", { key: "cancel" }, ""))),
+        h("th", { key: "cancel", class: "actions one" }, ""))),
       h("tbody", null, bands.flatMap(([band]) => {
         const mine = sortRows(rows.filter((row) => row.band === band), local.sort, local.descending);
         return [bandLine(band, mine.length, data), ...mine.map((row) => runRow(context, row))];
@@ -374,7 +375,7 @@ function findBox(context, data) {
         context.paint();
       },
     }),
-    h("span", { class: "muted" }, local.find.length < 2
+    h("span", { class: "muted" }, !local.find ? "" : local.find.length < 2
       ? "two letters or more"
       : `${hits ? local.findAt + 1 : 0} of ${total}${total > FIND_LIMIT ? ", first 400 marked" : ""}`),
     h("button", { class: "ghost-button small", disabled: hits ? null : true, onclick: () => step(-1) }, "Previous"),
@@ -619,7 +620,6 @@ function verifyControl(context) {
     ? `Pick a project and the number of a ${changeWord(context)}, for example 412.`
     : "";
   return h("div", { class: "row q-verify", key: "verify" },
-    h("b", null, "Verify a change"),
     h("label", { class: "field" },
       h("span", { class: "sr-only" }, "Project"),
       h("select", {
@@ -641,7 +641,7 @@ function verifyControl(context) {
       inputmode: "numeric",
       class: "q-pr",
       "aria-label": `Number of the ${changeWord(context)}`,
-      placeholder: "number",
+      placeholder: `${changeWord(context) === "pull request" ? "PR" : "Change"} number`,
       disabled: usable ? null : true,
       value: local.enqueuePr,
       oninput: (event) => {
@@ -658,7 +658,6 @@ function verifyControl(context) {
       title: access.writable ? missing : access.reason || "This dashboard is read-only.",
       onclick: () => enqueue(context),
     }, busy ? "Verifying" : "Verify"),
-    missing ? h("span", { class: "muted", key: "missing" }, missing) : null,
     jobLine(context),
     local.jobError ? h("span", { class: "q-bad", key: "jobError" }, local.jobError) : null);
 }
@@ -694,10 +693,9 @@ function runnerControl(context) {
   const on = runner.state === "active";
   const meaning = on ? "run" : runner.state === "failed" ? "fail" : "pause";
   return h("span", { class: "row q-runner", key: "runner" },
-    h("span", null, "Runner"),
-    pill(meaning, on ? "On" : fmt.titleCase(runner.state || "off"), runner.detail || ""),
+    pill(meaning, on ? "Runner on" : `Runner ${runner.state || "off"}`, runner.detail || ""),
     h("button", {
-      class: "button small",
+      class: "button",
       "data-runner": on ? "stop" : "start",
       disabled: access.writable ? null : true,
       title: access.writable ? "" : access.reason || "This dashboard is read-only.",
@@ -717,8 +715,8 @@ function filters(context, rows, allowed) {
   const states = [...new Set(allowed.map((row) => row.state).filter(Boolean))].sort();
   const projects = [...new Set(rows.map((row) => row.project).filter(Boolean))].sort();
   return h("div", { class: "row q-filters", key: "filters" },
-    h("label", { class: "field" },
-      h("span", { class: "sr-only" }, "State"),
+    h("label", { class: "field-label" },
+      h("span", null, "State"),
       h("select", {
         "aria-label": "Filter by state",
         value: local.stateFilter,
@@ -726,12 +724,12 @@ function filters(context, rows, allowed) {
           local.stateFilter = event.target.value;
           context.paint();
         },
-      }, [h("option", { key: "all", value: NO_CHOICE, selected: local.stateFilter === NO_CHOICE }, "Any state"),
+      }, [h("option", { key: "all", value: NO_CHOICE, selected: local.stateFilter === NO_CHOICE }, "Any"),
         ...states.map((state) => h("option", {
           key: state, value: state, selected: local.stateFilter === state,
         }, `${fmt.titleCase(state)} (${allowed.filter((row) => row.state === state).length})`))])),
-    h("label", { class: "field" },
-      h("span", { class: "sr-only" }, "Project"),
+    h("label", { class: "field-label" },
+      h("span", null, "Project"),
       h("select", {
         "aria-label": "Filter by project",
         value: local.projectFilter,
@@ -741,7 +739,7 @@ function filters(context, rows, allowed) {
         },
       }, [h("option", {
           key: "all", value: NO_CHOICE, selected: local.projectFilter === NO_CHOICE,
-        }, "Every project"),
+        }, "All"),
         ...projects.map((name) => h("option", {
           key: name, value: name, selected: local.projectFilter === name,
         }, `${name} (${rows.filter((row) => row.project === name).length})`))])),
@@ -760,11 +758,12 @@ function filters(context, rows, allowed) {
       : null);
 }
 
-/* The mark sits on the half of this card that writes, not on the card. Two filters and a help
-   button only narrow what is already on screen, and a page that switched off everything inside
-   a card marked as a write would take a reader's only way back to the whole table. */
+/* One row, the same row the Board's filters sit in: the filters on the left, what writes on
+   the right. The mark sits on the half that writes, not on the row. Two filters and a help
+   button only narrow what is already on screen, and a page that switched off everything in a
+   row marked as a write would take a reader's only way back to the whole table. */
 function controls(context, rows, allowed) {
-  return card({ class: "card-pad q-controls", key: "controls" },
+  return h("div", { class: "pane-controls q-controls", key: "controls" },
     filters(context, rows, allowed),
     h("div", { class: "q-controls-right", "data-write": "" },
       verifyControl(context), runnerControl(context)),
@@ -791,7 +790,6 @@ export default {
     const shown = visible(allowed, { state: chosen(local.stateFilter) });
     return [
       controls(context, rows, allowed),
-      h("div", { class: "gap-sm", key: "gap" }),
       panel(resource, {
         loading: () => h("div", { class: "tablewrap", key: "sk" },
           h("div", { class: "card-pad" }, skeletonStack(6))),

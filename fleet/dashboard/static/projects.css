@@ -77,12 +77,13 @@ input.p-search, .p-paste-row input { max-width: none; }
 /* ------------------------------------------------------------ the table */
 
 .p-table { table-layout: fixed; }
+/* The actions column is the same 276px as in every other table (owner, 2026-09-24); the
+   Repository column takes what is left. */
 .p-col-project { width: 17%; }
-.p-col-repo { width: 27%; }
 .p-col-access { width: 12%; }
 .p-col-branch { width: 12%; }
 .p-col-lanes { width: 9%; }
-.p-col-actions { width: 23%; }
+.p-col-actions { width: 276px; }
 .p-table td { max-width: none; }
 .p-inline { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
 .p-inline .pill, .p-inline .p-visibility, .p-inline button, .p-inline .p-open { flex: none; }

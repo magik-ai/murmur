@@ -540,7 +540,7 @@ for (const [gh, first, second] of STRIP) {
     return { project: tr.cells[0].title, repo: tr.cells[1].innerText.replace(/\s+/g, " ").trim() };
   });
   check("table: the Project tooltip carries the ports", /Ports: web 5200, api 8100, e2e 9100/.test(cells.project), cells.project);
-  check("table: the Repository cell holds the visibility pill", /your-org\/demo Private/.test(cells.repo), cells.repo);
+  check("table: the Repository cell holds the visibility tag", /your-org\/demo private/.test(cells.repo), cells.repo);
   await context.close();
 }
 
@@ -607,7 +607,7 @@ for (const state of ["ready", "quiet"]) {
     });
     const label = `${state} at ${size.width}`;
     const pills = await page.evaluate(() => [...document.querySelectorAll("#view .p-table tbody tr")].map((tr) => {
-      const pill = tr.querySelector(".p-visibility .pill");
+      const pill = tr.querySelector(".p-visibility .tag");
       if (!pill) return "none";
       const box = pill.getBoundingClientRect();
       return getComputedStyle(pill.closest(".p-visibility")).display !== "none" && box.width > 20 ? "shown" : "hidden";
