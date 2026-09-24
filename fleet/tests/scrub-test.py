@@ -50,21 +50,21 @@ class Scrub(unittest.TestCase):
         long_value, short_value = "abcdefgh12345678", "abcdefgh"
         self.assertEqual(scrub.scrub(long_value, [short_value, long_value]), scrub.REDACTED)
 
-    def test_stored_secrets_reads_the_hosting_tree(self):
+    def test_stored_secrets_reads_every_stored_key(self):
         with tempfile.TemporaryDirectory() as state:
-            folder = os.path.join(state, "secrets", "hosts", "railway")
+            folder = os.path.join(state, "secrets")
             os.makedirs(folder)
-            with open(os.path.join(folder, "GITHUB_TOKEN"), "w") as handle:
-                handle.write("github-read-only-value\n")
-            with open(os.path.join(folder, "EMPTY"), "w") as handle:
+            with open(os.path.join(folder, "demo.key"), "w") as handle:
+                handle.write("demo-model-key-value\n")
+            with open(os.path.join(folder, "empty.key"), "w") as handle:
                 handle.write("\n")
-            self.assertEqual(scrub.stored_secrets(state), ["github-read-only-value"])
+            self.assertEqual(scrub.stored_secrets(state), ["demo-model-key-value"])
 
     def test_filter_mode_scrubs_a_stream(self):
         with tempfile.TemporaryDirectory() as state:
-            folder = os.path.join(state, "secrets", "hosts", "vercel")
+            folder = os.path.join(state, "secrets")
             os.makedirs(folder)
-            with open(os.path.join(folder, "CLAUDE_CODE_OAUTH_TOKEN"), "w") as handle:
+            with open(os.path.join(folder, "demo.key"), "w") as handle:
                 handle.write("stream-secret-value-99")
             result = subprocess.run(
                 [sys.executable, os.path.join(HERE, "..", "lib", "scrub.py")],

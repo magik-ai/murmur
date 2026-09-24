@@ -113,7 +113,7 @@ async function measured(page, screen, state) {
         text.slice(0, 120)],
       ["draws this farm first and the machines table after it",
         /This farm/.test(text) && /Size and price/.test(text), text.slice(0, 200)],
-      ["names no runner, since runners were removed on 2026-09-24",
+      ["names no other kind of host than a machine",
         !/runner|sandbox/i.test(text), text.slice(-160)],
     ];
   }

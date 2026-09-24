@@ -4611,20 +4611,6 @@ class HostingWriteTest(HostingCase):
         self.assertEqual(record["key"], "host:do-droplet")
         self.assertEqual(payload["provider"], "do-droplet")
 
-    def test_the_runner_routes_are_gone(self):
-        """Runners were removed on 2026-09-24: no route tests one, and no provider the server
-        guards is one."""
-        self.assertFalse(hasattr(dashboard, "hosts_test"))
-        self.assertNotIn("runner", dashboard.HOSTING_PROVIDERS.values())
-        with self.farm() as box:
-            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
-                    mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
-                status, _raw, _ = fetch(
-                    base, "/api/hosts/test", token="s3cret", method="POST",
-                    body={"provider": "railway", "project": "alpha", "confirm": True})
-            self.assertEqual(status, 404)
-            self.assertEqual(box.calls.read_text(), "")
-
     def test_a_second_machine_may_be_added_while_the_first_one_boots(self):
         """The interlock is the machine, not the verb: one droplet booting must not stop the
         next one from being ordered, and must stop a second press of its own Check."""
@@ -4721,8 +4707,8 @@ class HostingRefusalTest(HostingCase):
                       [{}, {"provider": ""}, {"provider": "aws"}, {"provider": "--help"},
                        {"provider": "do droplet"}])
 
-    def test_a_removed_runner_is_not_a_provider_any_more(self):
-        for provider in ("railway", "vercel", "do-agents"):
+    def test_a_provider_this_farm_does_not_ship_can_neither_plan_nor_be_checked(self):
+        for provider in ("aws", "some-cloud"):
             self.refusals(dashboard.machines_plan,
                           [{"provider": provider, "name": "nursery", "size": "s-4vcpu-8gb",
                             "region": "fra1"}])
@@ -4894,7 +4880,7 @@ class HostingRefusalTest(HostingCase):
         with self.farm() as box:
             for route in routes:
                 for body in ({}, None, {"name": None}, {"provider": None},
-                             {"name": ["nursery"]}, {"provider": {"id": "railway"}},
+                             {"name": ["nursery"]}, {"provider": {"id": "do-droplet"}},
                              {"name": 7, "provider": 7, "confirm": 7}):
                     status, payload = route(body)
                     self.assertEqual(status, 400, (route, body, payload))
@@ -4909,17 +4895,17 @@ class HostingScrubTest(HostingCase):
 
     def setUp(self):
         super().setUp()
-        self.secret = "rw_live_" + "q" * 32
-        secrets_dir = self.state / "secrets" / "hosts" / "railway"
+        self.secret = "demo_live_" + "q" * 32
+        secrets_dir = self.state / "secrets"
         secrets_dir.mkdir(parents=True)
-        (secrets_dir / "GITHUB_TOKEN").write_text(self.secret + "\n")
+        (secrets_dir / "demo.key").write_text(self.secret + "\n")
         self.shaped = "sk-ant-oat01-" + "w" * 40
 
     def leaky_tool(self):
         path = self.state / "leaky"
         path.write_text("#!/bin/sh\n"
                         'echo "connecting with %s"\n'
-                        'echo "railway: %s is not valid" >&2\n'
+                        'echo "the provider: %s is not valid" >&2\n'
                         "exit 1\n" % (self.shaped, self.secret))
         path.chmod(0o755)
         return str(path)

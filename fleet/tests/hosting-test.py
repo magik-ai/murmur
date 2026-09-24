@@ -50,11 +50,10 @@ class Presets(unittest.TestCase):
             self.assertLessEqual(len(row["summary"]), 90, row["id"])
 
     def test_murmur_ships_your_own_machine_and_a_droplet_and_nothing_else(self):
-        # The owner's decision of 2026-09-24: only what has run for real. A preset added back
-        # is a contribution, and it changes this list on purpose (CONTRIBUTING.md).
+        # Adding a preset is a contribution (CONTRIBUTING.md), and it changes this list on
+        # purpose.
         self.assertEqual([row["id"] for row in host_presets.presets()], ["ssh", "do-droplet"])
         self.assertEqual([row["id"] for row in machine_presets()], ["ssh", "do-droplet"])
-        self.assertFalse(hasattr(host_presets, "RUNNER_SECRETS"))
 
     def test_the_module_offers_the_three_calls_the_brief_names_and_nothing_else(self):
         public = sorted(name for name in vars(host_presets)
@@ -74,11 +73,6 @@ class Presets(unittest.TestCase):
         for row in host_presets.presets():
             self.assertIsInstance(row["whoami"], list, row["id"])
             self.assertEqual(row["whoami"][0], row["cli"], row["id"])
-
-    def test_no_preset_carries_the_runner_only_fields(self):
-        for row in host_presets.presets():
-            for field in ("secrets", "output"):
-                self.assertNotIn(field, row, row["id"])
 
     def test_droplet_sizes_and_prices_are_the_research_table(self):
         sizes = host_presets.preset("do-droplet")["sizes"]
@@ -277,10 +271,10 @@ class CloudInit(Farm):
         self.assertEqual(len(made), 1, made)
 
     def test_no_secret_is_rendered_into_the_first_boot(self):
-        # A farm that stored a runner token before runners were removed still has the file.
-        secrets = os.path.join(self.state, "secrets", "hosts", "railway")
+        # A key this farm stores (`fleet models auth` writes it here) stays on this farm.
+        secrets = os.path.join(self.state, "secrets")
         os.makedirs(secrets)
-        with open(os.path.join(secrets, "GITHUB_TOKEN"), "w", encoding="utf-8") as handle:
+        with open(os.path.join(secrets, "demo.key"), "w", encoding="utf-8") as handle:
             handle.write("ghp_" + "a" * 36)
         text = self.rendered()
         self.assertNotIn("ghp_", text)
@@ -841,12 +835,8 @@ class Hosts(HostsFarm):
             for field in ("id", "label", "job", "stage", "cli_installed", "login_state",
                           "account", "detail", "checked_at", "login",
                           "install", "terms", "pricing", "sizes", "regions",
-                          # the contract amendment of the PR 40 fix round
                           "cli", "color", "engines", "docs"):
                 self.assertIn(field, row, row["id"])
-            # The runner-only fields went with the runners (2026-09-24).
-            for field in ("secrets", "tested"):
-                self.assertNotIn(field, row, row["id"])
             for entry in row["sizes"]:
                 self.assertIn("default", entry, row["id"])
             self.assertIn(row["login_state"], ("logged_in", "logged_out", "not_installed",
@@ -894,38 +884,24 @@ class Hosts(HostsFarm):
 
 
 
-class LeftoverRunnerSecrets(HostsFarm):
-    """A farm that stored a runner token before runners were removed (2026-09-24) keeps the
-    file, because nothing here deletes a person's things. It is never listed, and it is still
+class StoredSecrets(HostsFarm):
+    """A key this farm stores (`fleet models auth` writes $FLEET_STATE/secrets/<id>.key) is
     scrubbed out of whatever a provider CLI prints."""
 
-    VALUE = "sandbox-secret-value-987654"
+    VALUE = "stored-secret-value-987654"
 
     def setUp(self):
         super().setUp()
-        folder = os.path.join(self.state, "secrets", "hosts", "railway")
-        os.makedirs(folder, mode=0o700)
-        with open(os.path.join(folder, "CLAUDE_CODE_OAUTH_TOKEN"), "w",
-                  encoding="utf-8") as handle:
+        folder = os.path.join(self.state, "secrets")
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        with open(os.path.join(folder, "demo.key"), "w", encoding="utf-8") as handle:
             handle.write(self.VALUE)
-
-    def test_the_old_provider_is_not_listed_and_its_file_is_kept(self):
-        rows = self.providers()
-        self.assertEqual(sorted(rows), ["do-droplet", "ssh"])
-        self.assertTrue(os.path.exists(os.path.join(self.state, "secrets", "hosts", "railway",
-                                                    "CLAUDE_CODE_OAUTH_TOKEN")))
 
     def test_a_provider_that_prints_a_stored_secret_is_scrubbed_before_anyone_reads_it(self):
         done = self.hosts("check", "do-droplet", FAKE_DOCTL_LOGGED_IN="",
                           FAKE_DOCTL_LEAK=self.VALUE)
         self.assertNotIn(self.VALUE, done.stdout + done.stderr)
         self.assertIn("[redacted]", done.stdout)
-
-    def test_the_secret_command_is_gone(self):
-        done = self.hosts("secret", "railway", "GITHUB_TOKEN", stdin="x" * 20)
-        self.assertNotEqual(done.returncode, 0)
-        self.assertNotIn("stored", done.stdout)
-        self.assertIsNone(host_presets.preset("railway"))
 
 
 class Installer(unittest.TestCase):

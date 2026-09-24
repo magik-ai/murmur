@@ -1,8 +1,8 @@
 """Take secrets out of text before anyone can read it.
 
 One module, because every place that keeps or shows text a tool printed needs the same rule:
-a remote agent's stream on its way into a lane log, a provider CLI's stderr, a dashboard job
-record. The rule is exact on purpose. It replaces every secret this farm has stored, and the
+a provider CLI's stderr, the list of models a provider answered with, a dashboard job record.
+The rule is exact on purpose. It replaces every secret this farm has stored, and the
 handful of token shapes that are unmistakable. It does not guess at "long random-looking
 strings", because a commit SHA is one, and a log with every SHA blanked out is useless.
 """
@@ -41,9 +41,10 @@ def scrub(text, secrets=()):
 
 
 def stored_secrets(state_dir):
-    """Every secret value this farm keeps for hosting, read fresh, empty files skipped."""
+    """Every secret value this farm keeps under $FLEET_STATE/secrets (the keys `fleet models
+    auth` stores there), read fresh, empty files skipped."""
     values = []
-    root = os.path.join(state_dir, "secrets", "hosts")
+    root = os.path.join(state_dir, "secrets")
     for folder, _dirs, files in os.walk(root):
         for name in files:
             try:

@@ -2583,9 +2583,8 @@ SSH_PUBLIC = re.compile(r"(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)
 # dashboard that carried its own copy would drift from it. This map is only the guard that keeps
 # an unknown word out of an argv, and a provider the snapshot reports is accepted as well, so a
 # preset added to the library needs no change here.
-# The same ids as `fleet/lib/host_presets.py` since runners were removed (2026-09-24).
-# HostingProvidersTest compares the two, so a renamed id fails a test instead of refusing a real
-# provider until the first listing.
+# The same ids as `fleet/lib/host_presets.py`. HostingProvidersTest compares the two, so a
+# renamed id fails a test instead of refusing a real provider until the first listing.
 HOSTING_PROVIDERS = {"ssh": "machine", "do-droplet": "machine"}
 
 HOSTING_KEY_REFUSAL = ("A token never goes through this page. Run the login command in a "

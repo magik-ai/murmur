@@ -143,8 +143,6 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
         .map((node) => node.textContent).join("|"),
       text: head.innerText,
       note: (head.querySelector("h2") || {}).title || "",
-      runners: document.querySelectorAll(
-        "#view .h-runners, #view [data-connect-runner], #view [data-runner-gap]").length,
     };
   });
   check("hosting: the machines table has the seven columns of the design record",
@@ -201,13 +199,12 @@ const TOKEN = "sk-ant-oat01-AAAABBBBCCCCDDDDEEEEFFFFGGGG";
   check("hosting: a destroyed row is not offered a check or a destroy",
     !seen.rows.genoa.actions.includes("Check") && !seen.rows.genoa.actions.includes("Destroy"),
     seen.rows.genoa.actions.join(","));
-  /* Runners were removed on 2026-09-24 by the owner's decision: murmur runs on your own
-     machine or a DigitalOcean Droplet, and the tab says nothing else. */
-  check("hosting: there is no runners table, no Connect a runner button and no Runners heading",
-    seen.runners === 0 && !/runner|sandbox/i.test(seen.text), seen.text.slice(0, 300));
-  check("hosting: the head names the two places a farm runs",
+  /* A farm runs on your own machine or on a DigitalOcean Droplet, and the section names no
+     other kind of host. */
+  check("hosting: the head names the two places a farm runs, and nothing else does",
     /your own machine over SSH, or a DigitalOcean Droplet/.test(seen.note)
-    && !/runner|sandbox/i.test(seen.note), seen.note);
+    && !/runner|sandbox/i.test(seen.note) && !/runner|sandbox/i.test(seen.text),
+    `${seen.note} | ${seen.text.slice(0, 200)}`);
   check("hosting: nothing threw drawing the section", thrown.length === 0, thrown[0]);
   await context.close();
 }
