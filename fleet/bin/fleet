@@ -258,6 +258,43 @@ print("\n".join(data) if data else "(no projects; use: fleet add-project)")
 PY
 }
 
+# Refuse a spawn whose names are not plain names. The arguments are pairs of a flag and its
+# value; an empty value is skipped, because each flag has a default. These values become paths,
+# a branch, a unit name and generated scripts, so a quote or a slash in one must never get that
+# far. Lane, project, code name and effort follow SAFE_NAME in lib/group.py, the rule `fleet
+# group` already applies to lane names. A model follows the model rule in lib/model_presets.py,
+# which also allows ':', '/', '[' and ']'. An account may also be the login `fleet accounts`
+# shows for it.
+_check_spawn_names() {
+  FLEET_HOME="$FLEET_HOME" "$PY" - "$@" <<'PY'
+import os, re, sys
+sys.path.insert(0, os.path.join(os.environ["FLEET_HOME"], "lib"))
+from group import SAFE_NAME
+from model_presets import MODEL_RE, MODEL_RULE
+
+# The part of an email address before the @ (it may hold a '+'), then " (folder)" when two
+# account folders are signed in to one login. lib/claude_accounts.py display() builds it.
+LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]*(?: \([A-Za-z0-9][A-Za-z0-9._-]*\))?")
+args = sys.argv[1:]
+for flag, value in zip(args[::2], args[1::2]):
+    if not value:
+        continue
+    if flag == "model":
+        if not MODEL_RE.fullmatch(value):
+            print(f"--model {value!r} is not a model name: {MODEL_RULE}")
+            raise SystemExit(1)
+    elif flag == "account":
+        if not (SAFE_NAME.fullmatch(value) or LOGIN.fullmatch(value)):
+            print(f"--account {value!r} is not an account name: use its folder name or the "
+                  "login `fleet accounts` shows")
+            raise SystemExit(1)
+    elif not SAFE_NAME.fullmatch(value):
+        print(f"--{flag} {value!r} is not a plain name: use letters, digits, '.', '_' or '-', "
+              "starting with a letter or digit")
+        raise SystemExit(1)
+PY
+}
+
 _rollback_spawn() { # called only by cmd_spawn's EXIT trap
   local rc="$1" path="$2" branch="$3" wt="$4" hookdir="$5" slug="$6"
   local hq_agent="$7" hq_claimed="$8" brief_owned="$9" brief_path="${10}"
@@ -300,6 +337,8 @@ cmd_spawn() {
     --account) account="$2"; shift 2;;     # claude subscription account (name or `auto`)
     --force) force=1; shift;; *) echo "unknown $1"; return 1;; esac; done
   [ -n "$project" ] && [ -n "$lane" ] || { echo "usage: fleet spawn --project X --lane L [--engine claude|codex] [--model M] [--effort low|medium|high|xhigh] [--restart until-pr|until-merged|until-file:<p>] [--done-when <contract>] [--issues a,b,c] [--after <lane>[:pr-merged|pr-open]] (--issue N | --task '..' | --brief-file f)"; return 1; }
+  _check_spawn_names project "$project" lane "$lane" by "$by" model "$model" \
+    effort "$effort" account "$account" || return 1
   # A policy file that does not parse must not read as "no policy". Every gate below would then
   # take its own default in silence: no head office, the fallback commit identity, and limits
   # that are not the ones the operator wrote. Refuse the spawn, in one line, before anything is
@@ -371,14 +410,21 @@ cmd_spawn() {
       case "$restart" in until-pr) donewhen="pr-open";; until-merged) donewhen="pr-merged";; until-file:*) donewhen="file:${restart#until-file:}";; esac
     fi
     mkdir -p "$FLEET_STATE/pending"
-    brief_path="$gbrief" "$PY" - <<PY
+    # The values travel as environment variables into a quoted heredoc, like the state record
+    # below, so none of them is ever read as Python source.
+    pending_lane="$lane" pending_project="$project" pending_after="$after" \
+    pending_engine="$engine" pending_model="$model" pending_effort="$effort" \
+    pending_account="$account" pending_by="$by" pending_icon="$icon" pending_color="$color" \
+    pending_restart="$restart" pending_done_when="$donewhen" pending_issues="$issues" \
+    pending_brief_path="$gbrief" \
+    "$PY" - <<'PY'
 import json, os
-spec = {"lane": "$lane", "project": "$project", "after": "$after",
-        "engine": "$engine", "model": "$model", "effort": "$effort", "account": "$account",
-        "by": "$by", "icon": "$icon", "color": "$color",
-        "restart": "$restart", "done_when": "$donewhen", "issues": "$issues",
-        "brief_path": os.environ.get("brief_path", "")}
-json.dump(spec, open(os.path.join(os.environ["FLEET_STATE"], "pending", "$lane.json"), "w"))
+
+keys = ("lane", "project", "after", "engine", "model", "effort", "account", "by", "icon",
+        "color", "restart", "done_when", "issues", "brief_path")
+spec = {key: os.environ.get("pending_" + key, "") for key in keys}
+with open(os.path.join(os.environ["FLEET_STATE"], "pending", spec["lane"] + ".json"), "w") as out:
+    json.dump(spec, out)
 PY
     echo "gated  $lane — deferred until $after delivers (daemon fires it; \`fleet daemon status\` to watch)"
     return 0

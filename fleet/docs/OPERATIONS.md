@@ -240,17 +240,19 @@ fleet spawn --project <PROJECT> --lane <LANE> --model sonnet --by <CODENAME> \
 
 ### What a spawn does
 
-1. It refuses to start if `policy.toml` does not parse.
-2. It checks the engine and the model, and picks the Claude account.
-3. With `--after`, it records the lane and stops there. The supervisor daemon starts it later
+1. It checks the names. The project, the lane, the code name and the effort may hold only
+   letters, digits, `.`, `_` and `-`, and must start with a letter or digit.
+2. It refuses to start if `policy.toml` does not parse.
+3. It checks the engine and the model, and picks the Claude account.
+4. With `--after`, it records the lane and stops there. The supervisor daemon starts it later
    (see [section 6](#6-the-supervisor-daemon)).
-4. It starts the dashboard if it is not running.
-5. It checks capacity and the power setting. `--force` skips both checks.
-6. It fetches the base branch and creates the worktree `~/.fleet/worktrees/<PROJECT>/<slug>` on a
+5. It starts the dashboard if it is not running.
+6. It checks capacity and the power setting. `--force` skips both checks.
+7. It fetches the base branch and creates the worktree `~/.fleet/worktrees/<PROJECT>/<slug>` on a
    new branch `fleet/<LANE>-<HHMMSS>`, from `origin/<base>`.
-7. It sets the worktree's commit author and installs its pre-push hooks. With head office on, it
+8. It sets the worktree's commit author and installs its pre-push hooks. With head office on, it
    also claims the branch.
-8. It saves the brief, adds the lane instructions from `lib/brief_template.md`, and starts the
+9. It saves the brief, adds the lane instructions from `lib/brief_template.md`, and starts the
    engine as the systemd user unit `fleet-<slug>` in `fleet.slice`.
 
 If a step fails once the worktree exists, the spawn removes everything it created.

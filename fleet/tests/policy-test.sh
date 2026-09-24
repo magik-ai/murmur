@@ -173,6 +173,38 @@ case "$out" in "REFUSING to spawn: invalid policy file"*) ok "with one line nami
   *) no "the refusal must name the file, once" "$out";; esac
 is "and says it once, not once per key" "$(printf '%s' "$out" | wc -l | tr -d ' ')" "0"
 
+echo "=== fleet spawn --after keeps every value as data ==="
+
+# A gated spawn writes a pending spec for the daemon and stops. That spec used to be Python source
+# with the values pasted in, so a double quote in a lane name or in --issues ran the rest of the
+# value as code. The payload below would create INJECTED in the working directory.
+GATE="$ROOT/gate"; mkdir -p "$GATE/config" "$GATE/state" "$GATE/work"
+GATE_BIN="$(cd "$(dirname "$FLEET_BIN")" && pwd)/$(basename "$FLEET_BIN")"
+gate_spawn() {
+  (cd "$GATE/work" && FLEET_CONFIG="$GATE/config" FLEET_STATE="$GATE/state" \
+    "$GATE_BIN" spawn --project demo --engine codex --after first --task t "$@" 2>&1)
+}
+payload='" + __import__("os").popen("touch INJECTED").read() + "'
+out=$(gate_spawn --lane "a$payload")
+is "a lane name with a quote in it is refused" "$?" "1"
+case "$out" in *"is not a plain name"*) ok "and the refusal says what a name may hold";;
+  *) no "the refusal must say what a name may hold" "$out";; esac
+is "and nothing is queued for the daemon" "$(ls "$GATE/state/pending" 2>/dev/null | wc -l | tr -d ' ')" "0"
+for bad in "--project ../demo" "--by two words" "--effort high;id" "--account ." "--model x;id"; do
+  out=$(gate_spawn --lane refused ${bad%% *} "${bad#* }")
+  rc=$?
+  is "spawn $bad is refused" "$rc" "1"
+done
+out=$(gate_spawn --lane gated --by ada --issues "x$payload" --done-when "file:say \"hi\".md")
+is "a quote in a value that is not a name still queues the lane" "$?" "0"
+[ -e "$GATE/work/INJECTED" ] && no "no value is run as Python" "INJECTED was created" \
+  || ok "no value is run as Python"
+spec_value() { $PY -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' \
+  "$GATE/state/pending/gated.json" "$1" 2>/dev/null || echo "(no pending spec)"; }
+is "the pending spec keeps --issues exactly as given" "$(spec_value issues)" "x$payload"
+is "and --done-when" "$(spec_value done_when)" 'file:say "hi".md'
+is "and the names" "$(spec_value lane)/$(spec_value project)/$(spec_value by)" "gated/demo/ada"
+
 echo
 # ---- the env file: FLEET_* keys reach the CLI, explicit exports win, non-FLEET keys are ignored
 printf 'FLEET_LHM_URL=http://sensor.local:8085/data.json\nFLEET_FARM_ALIAS="farm"\nFLEET_DASH_BIND=0.0.0.0\nPATH=/nowhere\n# comment\nnot a pair\n' > "$FLEET_CONFIG/env"
