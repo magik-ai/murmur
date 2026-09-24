@@ -9,8 +9,11 @@
     answer      store one answer in .murmur/config.toml
     apply       write the files from the answers, print a JSON report
 
-Rerunning is safe. An answered question does not come back, and a file that
-exists is never overwritten: a changed one gets a <name>.murmur-new beside it.
+Rerunning is safe. An answered question does not come back. Apart from
+.murmur/config.toml, which holds the answers, no file that exists is
+overwritten: the contract and the tracker rules get a <name>.murmur-new beside
+them when they differ, the other files are left as they are, and an existing
+CLAUDE.md or AGENTS.md gets a four-line pointer to the contract, once.
 """
 
 from __future__ import annotations
@@ -88,12 +91,17 @@ def questions_for(root: Path) -> list[dict]:
 
 def load_config(root: Path) -> dict:
     path = root / CONFIG
-    if not path.is_file():
+    if not path.exists():
         return {}
     try:
         return tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        # Stop instead of starting over: `answer` and `apply` write the config back, so an
+        # unreadable file read as empty would be replaced, and what the person wrote lost.
+        raise SystemExit(
+            f"{CONFIG} could not be read ({error}). Nothing was changed. Fix the file by "
+            "hand, or move it away to answer the questions again."
+        ) from None
 
 
 def toml_value(value) -> str:
@@ -201,7 +209,8 @@ def rebase_text(text: str, base: str) -> str:
 
 
 NAME_LINES = {
-    "fixed-name": "Your name is fixed for this repository and set in the config.",
+    "fixed-name": "Agents here use one fixed name, which the owner gives you. If you do not"
+    " know it, ask.",
     "owner-names-per-session": "Your name comes from the owner, per session, never"
     " from memory.",
 }
@@ -265,7 +274,8 @@ Never touch a branch another agent has claimed: no push, no rebase, no merge.
     tail = (
         "\n\n## The rest\n\n"
         "The long form of this method, with the reasoning behind each rule, is the "
-        "handbook that ships with the plugin. This file is the part that binds.\n"
+        "murmur handbook: https://github.com/magik-ai/murmur/tree/main/docs. This file "
+        "is the part that binds.\n"
     )
     return rebase_text(head + "\n\n".join(p for p in parts if p) + tail, base)
 

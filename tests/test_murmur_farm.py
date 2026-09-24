@@ -838,7 +838,8 @@ class SshConfig(Laptop):
             self.assertIn(f"~/.ssh/config line 1: {block.split(chr(10))[0]}", refused["said"],
                           block)
             self.assertEqual(self.read_config(), block)
-        # The whole flow with the reviewer's config: nothing is bought, the file is untouched.
+        # The whole flow with the first of these configs: nothing is bought, the file is
+        # untouched.
         self.config(blocks[0])
         for key, value in (("size", ""), ("region", ""), ("access", "tunnel"), ("codex", "no"),
                            ("accounts", ""), ("hq_repo", "")):
@@ -889,8 +890,8 @@ class SshConfig(Laptop):
         return path
 
     def test_a_name_the_system_config_names_is_refused_before_any_quote(self):
-        # The reviewer's case: an empty user config, and `Host farm` in the system config. The
-        # real ssh goes to the old machine for this name, so the new farm may not take it.
+        # An empty user config, and `Host farm` in the system config. The real ssh goes to the
+        # old machine for this name, so the new farm may not take it.
         self.config("")
         system = self.system_config("Host farm\n  HostName old-farm.example\n"
                                     "  User old-owner\n")
@@ -942,9 +943,9 @@ class SshConfig(Laptop):
         self.assertEqual(self.creates(), [])
 
     def test_the_rehearsal_reads_a_relative_include_of_the_system_config_under_its_folder(self):
-        # The reviewer's case: an empty user config, and the system config's relative Include
-        # of a file that sends every name through a bastion. The real ssh finds that file under
-        # the system config's folder, not under ~/.ssh, so the rehearsal must too.
+        # An empty user config, and a relative Include in the system config of a file that sends
+        # every name through a bastion. The real ssh finds that file under the system config's
+        # folder, not under ~/.ssh, so the rehearsal must too.
         self.config("")
         # The same relative path under ~/.ssh says nothing: a rehearsal that looked there would
         # pass.

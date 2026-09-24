@@ -4,8 +4,8 @@
 # A plugin cannot ship a CLAUDE.md, so the short version of the law is injected
 # here instead, at startup, resume, clear and compact.
 #
-# A repository can replace this text wholesale: write your own short version to
-# ${CLAUDE_PROJECT_DIR}/.claude/team-laws.md and it is used verbatim.
+# A repository can replace this text completely: write your own short version to
+# ${CLAUDE_PROJECT_DIR}/.claude/team-laws.md and it is used word for word.
 set -euo pipefail
 
 custom="${CLAUDE_PROJECT_DIR:-.}/.claude/team-laws.md"
@@ -16,14 +16,15 @@ else
   context=$(cat <<'LAWS'
 # How this team works (short version)
 
-The full text is the handbook in `docs/`. These are the lines that do not bend.
+The full text is the murmur handbook:
+https://github.com/magik-ai/murmur/tree/main/docs. These rules have no exceptions.
 
 **Work shape.** One batch, one worktree, one branch, one pull request. A batch
 is one coherent change, committed in reviewable slices.
 
 **Nothing lands on the main branch directly.** Every change goes through a pull
-request and the merge queue. A merge is a deployment, so merge only complete,
-releasable states.
+request, and through the merge queue where the repository has one. A merge is a
+deployment, so merge only complete, releasable states.
 
 **Claim before you touch.** Before creating or pushing a work branch, claim it
 where the team records claims. A refused claim means the branch is someone
@@ -46,7 +47,7 @@ the owner's explicit approval for that exact outcome.
 
 **The twice rule.** Make the same mistake twice and the correction is written
 into the team's law or lessons file, in the same change that fixes the second
-occurrence. A lesson that stays in chat is a lesson lost.
+occurrence. A lesson that stays in chat is lost.
 
 **Write to a person.** Meaning first, one idea per sentence, no names from the
 code in the prose. Names, paths and links go in a block at the end.

@@ -1,14 +1,17 @@
 # Generated files, one glob per line.
 #
-# Copy this file to .claude/generated-files.txt in your repository and edit it.
-# The plugin's PreToolUse guard reads it and blocks any edit to a matching
-# path, so a generated artifact can only change by being regenerated.
+# This file lives at .claude/generated-files.txt in your repository
+# (/murmur:init copies it there from the plugin's example). The plugin's
+# PreToolUse guard reads it and blocks any edit to a matching path, so a
+# generated file can only change by being regenerated. The entries below are
+# examples: replace them with your own generated files, or delete them all to
+# switch the guard off.
 #
 # Format: <glob> <command that regenerates it>
 # Everything up to the first space is the glob. The rest of the line is shown
 # to the agent when the edit is blocked, so say exactly what to run.
 # A glob that does not start with / or * matches any path ending that way,
-# which means repository-relative entries work whatever the checkout is named.
+# so repository-relative entries work whatever the checkout is named.
 # Blank lines and lines starting with # are ignored.
 
 docs/contracts/openapi.json  npm run generate:api

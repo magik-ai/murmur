@@ -3,19 +3,19 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash
 #
-# or, while the repository is private and you were invited to it:
+# or, from a clone of the repository:
 #
 #   gh repo clone magik-ai/murmur && bash murmur/farm/install.sh
 #
 # It is idempotent: run it again after a change and it only does what is missing. Everything
 # runs as your ordinary user; sudo is asked for only to install packages. It does five things:
 #
-#   1. system packages: git, tmux, python3 (3.11+), curl, GitHub's CLI
-#   2. user services survive logout (loginctl enable-linger), uv, the Claude Code CLI
+#   1. system packages: git, tmux, python3 (3.11 or newer is required), curl, GitHub's CLI
+#   2. user services that survive logout (loginctl enable-linger), uv, the Claude Code CLI
 #   3. clones murmur (it carries the fleet and the head office CLI), installs both under ~/.local/bin
-#   4. asks a few questions and writes the config: head office repository, owner, dashboard reach,
-#      and runs the dashboard as a systemd user unit (fleet-dashboard.service) so it survives a reboot
-#   5. prints the two logins only you can do (GitHub, Claude) and the first spawn
+#   4. asks a few questions (head office repository, your code name, ssh alias, dashboard reach),
+#      writes the config, and runs the dashboard as a user service (fleet-dashboard.service)
+#   5. prints the Claude login only you can do, and the commands for the first agent
 #
 # Flags:
 #   --yes            never ask: every question takes its default (the head office repository, or
@@ -105,7 +105,7 @@ say "1/5  System"
 [ "$(id -u)" != 0 ] || die "run this as an ordinary user, not root: the agents run as you"
 if ! have apt-get; then die "this installer knows Ubuntu and Debian (apt). On another Linux, follow docs/12-the-machine.md by hand"; fi
 if ! have systemctl; then die "no systemd here. The farm needs it for services that outlive your ssh session"; fi
-if grep -qi microsoft /proc/version 2>/dev/null; then note "WSL2 detected: fine, this is how the reference farm runs"; fi
+if grep -qi microsoft /proc/version 2>/dev/null; then note "WSL2 detected: fine, a farm can run under WSL2"; fi
 
 missing=()
 for pkg in git tmux python3 curl ca-certificates; do dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg"); done
@@ -182,7 +182,7 @@ clone_or_pull() { # clone_or_pull repo dir
     git -C "$2" pull -q --ff-only 2>/dev/null || note "WARNING: could not fast-forward $2, left as is"
     note "$1: updated"
   else
-    gh repo clone "$1" "$2" -- -q || die "cannot clone $1. Were you invited to it? Check: gh repo view $1"
+    gh repo clone "$1" "$2" -- -q || die "cannot clone $1. Check the name and your GitHub access: gh repo view $1"
     note "$1: cloned to $2"
   fi
 }
@@ -270,8 +270,8 @@ if [ "$single" != "yes" ] && [ "$single" != "y" ] && [ "$OFFER_TAILSCALE" = 1 ];
       note "run once, and follow the link it prints:  sudo tailscale up"
       # The Tailscale address only, resolved by the dashboard at start; never 0.0.0.0, which on
       # a box with a public address would publish the page to the internet behind its token. An
-      # older install may have left 0.0.0.0 (or any other bind) here, and the unit loads this
-      # file, so every bind line goes and exactly one tailscale line takes its place.
+      # earlier run or a hand edit may have left 0.0.0.0 (or any other bind) here, and the unit
+      # loads this file, so every bind line goes and exactly one tailscale line takes its place.
       bind_line='^[[:space:]]*(export[[:space:]]+)?FLEET_DASH_BIND[[:space:]]*='
       old_bind=$(grep -E "$bind_line" "$fleet_env" 2>/dev/null | grep -vx 'FLEET_DASH_BIND=tailscale' | head -1 || true)
       kept=$(grep -vE "$bind_line" "$fleet_env" 2>/dev/null || true)
@@ -297,10 +297,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------
-say "5/5  Done. Two logins only you can do, then the first agent"
+say "5/5  Done. The Claude login only you can do, then the first agent"
 cat <<EOF
 
-  1. Log the agent CLI into your Claude subscription (never an API key; the fleet refuses keys):
+  1. Log the agent CLI into your Claude subscription (not an API key: fleet unsets ANTHROPIC_API_KEY):
        claude          then type  /login  and follow the link
      On a remote box:  ssh -t $farm_alias claude
 

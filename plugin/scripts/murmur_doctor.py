@@ -10,14 +10,15 @@
 
 The last line is the status, one of:
 
-    setup-required   something needed is not there yet, run the init skill
+    setup-required   something needed is missing; the rows marked missing say what
     current          everything checked is in place
-    warnings         it works, but something will bite later
+    warnings         it works, but something will cause trouble later
     repaired         a safe repair was made, and nothing else is wrong
 
 A repair is safe when it touches no content a person wrote: making a shipped
-hook executable, or creating a missing config file from the defaults. Nothing
-else is ever changed here.
+hook executable, or creating a config file that does not exist from the
+defaults. A config file that exists is never rewritten, even when it cannot be
+read. Nothing else is ever changed here.
 """
 
 from __future__ import annotations
@@ -89,16 +90,6 @@ def repo_root() -> Path | None:
     return Path(result.stdout.strip())
 
 
-def load_config(root: Path) -> dict:
-    path = root / CONFIG
-    if not path.is_file():
-        return {}
-    try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
-
-
 def default_config(root: Path) -> dict:
     result = run(["git", "remote", "get-url", "origin"], cwd=root)
     repo = root.name
@@ -152,7 +143,9 @@ def check_remote(root: Path, report: Report, base: str) -> None:
     if listing.returncode != 0:
         report.add("git remote", WARN, f"{remote} refused the connection, check access")
         return
-    heads = {line.rsplit("/", 1)[-1] for line in listing.stdout.splitlines() if line}
+    # Each line is "<sha>\trefs/heads/<name>", and a name may hold a slash (release/2.x).
+    heads = {line.split("\t", 1)[-1].removeprefix("refs/heads/")
+             for line in listing.stdout.splitlines() if line}
     report.add("git remote", OK, f"{remote} answered, {len(heads)} branches")
     if base in heads:
         report.add("base branch", OK, f"{base} exists on {remote}")
@@ -161,14 +154,21 @@ def check_remote(root: Path, report: Report, base: str) -> None:
 
 
 def check_config(root: Path, report: Report, fix: bool) -> dict:
-    config = load_config(root)
-    if not config:
+    path = root / CONFIG
+    if not path.exists():
         if fix:
             config = default_config(root)
             write_config(root, config)
             report.add("config", FIXED, f"{CONFIG} created from the defaults")
             return config
         report.add("config", MISSING, f"{CONFIG} is not there, run the init skill")
+        return {}
+    try:
+        config = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+        # The file is the person's, so --fix leaves it alone: the defaults would replace
+        # whatever they wrote in it.
+        report.add("config", MISSING, f"{CONFIG} could not be read ({error}), fix it by hand")
         return {}
     absent = [key for key in KEYS if not config.get(key)]
     if absent:

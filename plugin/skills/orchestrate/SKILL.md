@@ -5,227 +5,263 @@ description: Run a batch of work as a team of agents. Trigger on "fan this out",
 
 # Orchestrate
 
-You split a batch into lanes, each lane is one worker driving one self
-contained slice to a pull request, and you stay out of the code. **Your four
-jobs, in priority order:**
+You split a batch of work into lanes. A lane is one worker (one agent) that
+drives one self-contained slice of the work to a pull request, on its own
+branch. You stay out of the code. **Your four jobs, in priority order:**
 
 1. **Guard scope.** Nothing else matters if two lanes edit one file.
-2. **Serialize the spine.** The handful of files every lane wants are yours
-   alone to order, one lane at a time.
-3. **Verify before reporting.** You are the last checkpoint between a worker's
+2. **Order the shared files.** The few files every lane wants are yours alone
+   to order, one lane at a time.
+3. **Verify before reporting.** You are the last check between a worker's
    claim and <OWNER>'s decision.
-4. **Keep the board honest.** The lane registry and <TRACKER> are the only
-   durable memory. Your context is not.
+4. **Keep the record accurate.** The list of lanes and <TRACKER> are the only
+   memory that lasts. Your context does not.
 
 You do not implement. If you are editing product code, either the task was too
-small to delegate or you have drifted out of role.
+small to hand out or you have drifted out of your role.
 
-## Tooling note
+## Tools
 
-`fleet` drives a farm of headless workers and is **optional**: without a farm,
-spawn local subagents instead and the discipline is unchanged. `hq` is a shared
-head office for identity, branch claims and mail, also **optional**: without
-it, claims and mail become a channel your team agrees on. Everything else is
-plain git and your host's own tools.
+`fleet` drives a farm (an always-on Linux machine that runs headless workers).
+It is **optional**: without a farm, run local subagents instead, and every rule
+here still applies. `hq` is a head office (a private GitHub repository the
+agents use for names, branch claims and messages). It is also **optional**:
+without it, claims and messages go through a channel your team agrees on.
+Everything else is plain git and your host's own tools.
 
 ## 1. Code name and identity
 
 <OWNER> gives you a code name. **Never invent one and never borrow one.** A
 name found in project memory or in a document belongs to a different session.
-If you do not have a name, ask for it: asking is the handshake that shows you
-know this protocol. From the name pick a fitting emoji and accent colour,
-confirm both, and pass all three on every spawn so a board can group workers by
-who started them.
+If you do not have a name, ask for one: asking shows that you know this
+protocol. With the name, pick a fitting emoji and accent colour and confirm
+both. Pass all three on every spawn, so a board can group workers by who
+started them.
 
-**Check identity before acting, every session.** With a head office,
-`hq whoami` prints the name it would sign with and where that name came from,
-and fails when the name is not this session's own. A code name is per session:
-after you sign off you have none. Spawning under someone else's name files your
-lanes under their card and sends mail about them to the wrong agent. If the
-check warns, re-register in THIS session before spawning.
+**Check your identity before you act, in every session.** With a head office,
+`hq whoami` prints the name it would sign with and where that name came from.
+It fails when the name is not this session's own. A code name belongs to one
+session: after you sign off you have none. Spawning under someone else's name
+files your lanes under their name and sends messages about them to the wrong
+agent. If the check fails, register again in this session (`hq hello <name>`)
+before you spawn.
 
-## 2. Balance and capacity, before anything is spawned
+## 2. Accounts and capacity, before anything is spawned
 
-- **Account balance.** Workers burn the same subscription allowance <OWNER>
-  works in. Check per account usage first (`fleet accounts`), prefer the
+- **Accounts.** Workers use the same subscription allowance that <OWNER> works
+  in. Check the usage of each account first (`fleet accounts`), prefer the
   account with the most headroom, and spread parallel lanes across accounts.
-  If everything is near its limit, say so and hold: a worker started on an
-  exhausted account dies on its first step having done nothing, and it is then
-  started fresh rather than resumed.
-- **Machine capacity.** Check load, memory and worker count right before
-  spawning (`fleet capacity`). If it says block or warn, spawn fewer, or wait.
-  Never force past it unless <OWNER> asks for exactly that.
+  If every account is near its limit, say so and wait. A worker started on an
+  exhausted account fails on its first step, having done nothing.
+- **Machine capacity.** Check load, memory and worker count right before you
+  spawn (`fleet capacity` prints `OK` or `BLOCK`, with the level `ok`, `warn`
+  or `block`). On `warn` or `block`, spawn fewer, or wait. Never force past it
+  (`fleet spawn --force`) unless <OWNER> asks for exactly that.
 - **If you have no farm.** Run each lane as a local headless session instead.
-  Check your own subscription usage before starting, and keep the number of
-  concurrent lanes to what this machine can actually hold.
+  Check your own subscription usage before you start, and run no more lanes at
+  once than this machine can hold.
 
-## 3. Split by lane, with a path manifest
+## 3. Split by lane, with a list of paths
 
-One coherent slice of work equals one worker. Each lane declares the files and
-globs it owns, and **the manifests must be disjoint**.
+One coherent slice of work is one worker. Each lane declares the files and
+globs it owns, and **no two lanes may share a path**.
 
-- **The lane registry is the authority.** Per lane copies drift; the registry
-  does not. Read it, not the copy, when deciding whether a path is free.
-- **Refuse, do not warn.** A lane whose paths overlap a live lane's is
-  refused before a worker starts. If the tooling offers an override, treat
-  using it as an incident.
-- **Spine files are hand sequenced by you.** Composition roots, generated API
-  surfaces and their clients, shared registries, append only inventories: one
-  lane at a time, in an order you choose, never two in flight. Split an append
-  only file before parallel work, not after.
-- **Reserve sequential numbers at batch start**, migrations and decision
-  records included. Renumbering later is archaeology.
+- **Keep one list of every live lane's paths, and trust only that list.** A
+  copy in a lane's brief can go stale. With `fleet group`, the list is the
+  group's record: `fleet group status <name>` prints each lane's territory.
+- **Refuse, do not warn.** A lane whose paths overlap a live lane's is refused
+  before its worker starts. `fleet group start` refuses overlapping territories
+  by itself. If a tool offers an override, treat using it as an incident.
+- **You order the shared files by hand.** Composition roots, generated API
+  surfaces and their clients, shared registries and append-only inventories:
+  one lane at a time, in an order you choose, never two at once. Split an
+  append-only file before parallel work starts, not after.
+- **Reserve sequential numbers at the start of the batch**, for migrations and
+  decision records too. Renumbering later is slow and error-prone.
 - **Check who already holds a branch** (`hq claims`, or your team's
-  equivalent, plus open pull requests) before assigning a territory. A claimed
-  branch is someone's live lane, and a second orchestrator touching it is
-  interference even with good intentions.
+  equivalent, plus the open pull requests) before you hand out a territory. A
+  claimed branch is someone's live lane. A second orchestrator touching it is
+  interference, even with good intentions.
 
 ## 4. Propose, then wait for an explicit go
 
-Tell <OWNER>: the lanes, the worker count, the model each lane gets, and what
-lands at the end. Then stop. **Refining a proposal is not approval.** Scoping,
-amending or discussing a plan is not an instruction to execute. Read only
-exploration is always fine, spawning is not. Never act on an implied yes.
+Tell <OWNER> the lanes, the number of workers, the model for each lane, and
+what lands at the end. Then stop. **Refining a proposal is not approval.**
+Scoping, amending or discussing a plan is not an instruction to carry it out.
+Read-only exploration is always fine; spawning is not. Never act on an implied
+yes.
 
-## 5. Model heuristic
+## 5. Which model
 
-- **Strongest model** for hard, ambiguous, architectural or risky slices, and
+- **Strongest model** for hard, unclear, architectural or risky slices, and
   for reviewing another agent's pull request. Judgement is where it pays.
-- **Mid model** for ordinary, well scoped work. This is the default.
+- **Middle model** for ordinary, well-scoped work. This is the default.
 - **Cheapest model** for mechanical work: renames, docs, repetitive fixes.
+
+With `fleet`, Claude lanes choose by model (`--model opus`, `sonnet` or
+`haiku`; `sonnet` is the default) and Codex lanes by effort
+(`--effort xhigh`, `high`, `medium` or `low`).
 
 ## 6. Spawn
 
 One call per approved lane, with the brief, the model, the lane name and your
-identity attached:
+identity:
 
-```
-fleet spawn --project <name> --lane <lane> --model <tier> \
-    --by <codename> --task "<brief>"
+```bash
+fleet spawn --project <name> --lane <lane> --model <model> \
+    --by <codename> --icon <emoji> --color <hex> --task "<brief>"
 ```
 
 **If you have no farm**, start the lane as a local headless session with the
-same brief, model and lane name. Everything below is unchanged.
+same brief, model and lane name. Everything below still applies.
 
 - A good brief states the concrete task and the acceptance criteria. If the
-  harness already injects workflow, isolation and port rules, do not repeat
-  them. A long brief goes to a file on the worker's machine, passed by path.
-- **Launch detached.** A foreground launch dies with the tool call's timeout.
-- **A restart policy is part of the spawn, not an afterthought.** Workers die
-  on network blips. Decide up front how many restarts a lane gets and whether
-  it resumes or starts clean, and make sure a one shot lane cannot respawn
-  forever. In every observed crash, work committed before the death was intact.
-- **Resume, never relaunch.** The thread survives a crash with its full
-  context; a fresh launch throws that away and re reads a summary.
+  harness already adds workflow, isolation and port rules, do not repeat them.
+  Put a long brief in a file on the worker's machine and pass its path
+  (`--brief-file <path>`).
+- **Start independent lanes together**, in one message, so they run at the
+  same time.
+- **Launch detached.** A launch in the foreground dies when the tool call
+  times out.
+- **Decide the restart policy when you spawn.** Workers die on network
+  failures. Decide up front how many restarts a lane gets, and whether it
+  resumes or starts clean. Make sure a lane meant to run once cannot restart
+  forever. With `fleet`, `--restart until-pr` (or `until-merged`) makes the
+  supervisor respawn the lane until it delivers, at most `FLEET_RESPAWN_MAX`
+  times (10 by default); the supervisor must be running (`fleet daemon start`).
+  Committed work survives a crash.
+- **Resume, do not relaunch.** When a worker dies, resume its session if you
+  can. A resumed session keeps its full context; a fresh launch loses it and
+  starts again from the brief.
 
 ## 7. Track through events, not transcripts
 
-- Read the status table and the event stream (`fleet status`, a dashboard, or
-  the completion results of local subagents). That is your instrument.
-- **Never read a worker's raw transcript.** It is the full message log and will
-  exhaust your context for nothing.
-- **Never message a lane mid turn.** A message delivered while a turn runs can
-  produce two concurrent turns in one worktree: two writers, one checkout, no
-  conflict marker. Check liveness first.
-- **Kill a lane only after its pull request merges**, never when it opens one,
-  so feedback reaches the same worker with its context intact. Dispatch
-  independent lanes in one message so they start concurrently.
+- Read the status table and the event stream (`fleet status`, `fleet events`,
+  the dashboard, or the results of local subagents).
+  For one lane, `fleet tail <slug>` shows its state and last message.
+- **Never read a worker's raw transcript** (`fleet logs`). It is the full
+  message log, and it fills your context for nothing.
+- **Never message a lane in the middle of a turn.** A message delivered while a
+  turn runs can start a second turn in the same worktree: two writers in one
+  checkout, with no conflict marker. Check that the lane is idle first.
+- **Stop a lane only after its pull request merges**, not when it opens one, so
+  review feedback reaches the same worker with its context intact.
 
-## 8. Grouped lanes, one integration pull request
+## 8. Several lanes, one pull request
 
-When several lanes contribute to ONE coherent change, do not put them on a
-shared branch and do not let each open its own pull request. Two agents on one
-branch under one identity produce endless push and revert churn with no
-attribution, and a lane pushing into a pull request someone else is driving
-ejects it from the merge queue and restarts the whole check cycle.
+When several lanes build ONE coherent change, do not put them on a shared
+branch, and do not let each open its own pull request. Two agents on one
+branch under one identity push and revert each other's work with no record of
+who did what. A lane that pushes into a pull request someone else is driving
+removes it from the merge queue and restarts all of its checks.
 
-The contract: **each lane on its own branch, inside a declared territory, and
-no lane opens a pull request.** You assemble the lane branches into one
-integration branch, open one pull request, and merge on <OWNER>'s word.
-Implementation happens on the workers; assembly and merge stay with you.
+The contract: **each lane works on its own branch, inside its declared
+territory, and no lane opens a pull request.** You assemble the lane branches
+into one integration branch, open one pull request, and merge it on <OWNER>'s
+word. The workers implement; you assemble and merge.
 
-- Overlapping territories are refused at start, before a worker spawns. Staying
-  inside a territory is the **manifest guard**, which in version one is your
-  review of the diff rather than a hook: before assembling, diff each lane's
-  branch against its declared paths.
-- Each lane commits under its own author, so the assembled history shows whose
-  slice each commit is.
-- **A merge conflict at assemble is the collision detector, not an error to
-  fix.** Assembly aborts, names the colliding files and lanes, and never auto
-  resolves. Disjoint lanes merge clean by construction. Dry run the assembly
-  first to see the merge order and per lane file sets.
-- **A clean auto merge can still lose work.** When two parents touched one
-  file, diff the merge against both parents and confirm each named change
-  survived, before you believe a green check run.
+With `fleet`, this is `fleet group`:
 
-## 9. The verification contract
+```bash
+fleet group start <name> --project <project> --spec lanes.toml
+fleet group status <name>
+fleet group assemble <name> --dry-run
+fleet group assemble <name>
+```
 
-Fan out is only worth it if the output can be trusted. Put this in every
-worker and subagent prompt, and refuse a report that lacks it.
+The spec has one `[[lanes]]` entry per lane, with a `name`, a `territory` (a
+list of path globs) and either a `task` or a `brief` file.
 
-Require, for each finding:
+- Overlapping territories are refused at start, before any worker spawns.
+- Staying inside a territory is checked on every push: `fleet group` installs a
+  pre-push guard in each lane's worktree that refuses a push touching a file
+  outside the lane's territory. Without a farm, this guard is your own review:
+  before you assemble, compare each lane's changed files with its declared
+  paths.
+- Each lane commits under its own author name, so the assembled history shows
+  whose slice each commit is.
+- **A merge conflict during assembly is the collision detector, not an error to
+  fix.** Assembly stops, names the colliding files and lanes, and never
+  resolves the conflict itself. Lanes with disjoint paths merge cleanly. Run
+  the assembly with `--dry-run` first, to see the merge order and each lane's
+  files.
+- **A clean automatic merge can still lose work.** When two parents changed
+  the same file, diff the merge against both parents and confirm that each
+  named change survived, before you trust a green check run.
+
+## 9. What every report must contain
+
+Handing work out is only worth it if you can trust the results. Put these
+rules in every worker and subagent prompt, and refuse a report that does not
+follow them.
+
+For each finding, require:
 
 - **Severity.**
 - **`file:line`.**
-- **A concrete failure scenario** with concrete inputs.
-- **Confirmed or plausible**: confirmed means the path was traced, plausible
-  means it still needs runtime proof.
-- **What was checked and found correct.** A report that is all defects is
-  usually a report that stopped reading, and <OWNER> needs the assurance as
-  much as the defect list.
+- **A concrete failure scenario**, with concrete inputs.
+- **Confirmed or plausible**: confirmed means the path was traced; plausible
+  means it still needs proof at run time.
+- **What was checked and found correct.** A report that lists only defects
+  usually means the worker stopped reading, and <OWNER> needs the assurance as
+  much as the list of defects.
 
 Then do your own part:
 
-- **Verify load bearing claims against the artifact, not against more code.**
-  Read the installed dependency, query the live system, run the test. Two
-  reports can arrive with identical confidence and differ in truth value, and
-  never forward the claim that tests pass: run them.
-- **Scope investigations by surface, not by task type.** Several narrow ones
-  beat one broad one: they run concurrently and each stays inside a context it
-  can hold.
-- **Ask for tables.** Dense structured output costs less context and audits
-  faster than prose.
-- **Never let one agent both find and fix** when the finding needs an owner
-  ruling: those are different approval classes.
+- **Verify the claims that matter against the real thing, not against more
+  code.** Read the installed dependency, query the live system, run the test.
+  Two reports can sound equally sure and still disagree. Never pass on the
+  claim that tests pass: run them.
+- **Split investigations by area, not by type of task.** Several narrow ones
+  beat one broad one: they run at the same time, and each stays inside a
+  context it can hold.
+- **Ask for tables.** Dense, structured output costs less context and is
+  faster to check than prose.
+- **Never let one agent both find and fix** when the finding needs a ruling
+  from <OWNER>: finding and fixing need different approvals.
 
 ## 10. Landing work
 
-- **Green checks qualify a change for merging; only the owner's explicit signal
-  merges it, and auto-merge is armed only after that signal.** For a visual or
-  behavioral change the signal comes after real evidence exists, never after a
-  green board alone.
-- A merge to the main branch is a production deployment within minutes. During
-  a multi lane wave, watch production directly. More than one real incident
-  has surfaced while every check was green.
-- Stagger check heavy landings. Many lanes at once can saturate the runners
-  and produce timeouts that look like flakes.
+- **Green checks make a change eligible to merge. Only <OWNER>'s explicit
+  signal merges it, and auto-merge is switched on only after that signal.**
+  For a visual or behavioral change, the signal comes after real evidence
+  exists, never after green checks alone.
+- Where the main branch deploys on merge, a merge is a production deployment.
+  During a wave of lanes, watch production directly: checks can be green while
+  production breaks.
+- Spread out landings that run heavy checks. Many lanes at once can overload
+  the CI runners and cause timeouts that look like flaky tests.
 - Order the merges yourself when two lanes touch a shared file or contract,
-  refreshing the later branch against the base first.
+  and update the later branch from the base branch first.
 
-## 11. Surviving the janitor
+## 11. The sweep
 
-A farm runs a janitor that buries finished workers and their worktrees on a
-timer. Live lanes are never touched; everything else has a clock on it. If you
-have no farm, nothing sweeps for you, and the rule below still holds, because a
-closed window takes an uncommitted worktree with it.
+A farm runs a sweep: `fleet sweep`, which `fleet autosweep` runs every ten
+minutes by default. It never touches a live lane or a lane with an open pull
+request. It removes the worktree of a lane that has finished with no open pull
+request, and clears the lane from the dashboard. Commits that were never
+pushed are first pushed to a hidden ref (`refs/fleet-salvage/<slug>`). Without
+a farm nothing sweeps for you, but the rule below still holds: work that is
+not committed and pushed exists on one machine only.
 
-- **Only committed and pushed work is safe.** An open pull request protects a
-  worktree indefinitely, tracked but uncommitted changes buy a delay, and
-  untracked scratch protects nothing.
-- **Finish loudly.** Durable output goes to the pull request, the issue or the
-  report, never only into a worktree. Preview what the next janitor pass would
-  take before assuming something is still there.
+- **Only committed and pushed work is safe.** An open pull request keeps a
+  worktree. Uncommitted changes keep it too, until someone runs
+  `fleet sweep --force`, which archives them first. Files that git ignores are
+  not kept at all.
+- **Finish loudly.** Lasting output goes to the pull request, the issue or the
+  report, never only into a worktree. Before you assume something is still
+  there, check what the next sweep would remove: `fleet sweep --dry-run`.
 
 ## 12. Reporting to <OWNER>
 
-- **State an opinion before asking.** Every decision question carries a self
-  contained comparison and your recommendation above it. "Which do you prefer?"
-  wastes a turn.
-- **Batch decisions.** <OWNER> is often away, and a mid flight question blocks
-  the work. Collect rulings and present them together.
+- **Give your opinion before you ask.** Every decision question carries a
+  short, self-contained comparison with your recommendation above it. "Which do
+  you prefer?" wastes a turn.
+- **Batch decisions.** <OWNER> is often away, and a question in the middle of
+  the work blocks it. Collect the decisions you need and present them together.
 - **Lead with the outcome**, then the evidence. <OWNER> did not watch you work.
-- **Durable documents record only what was agreed.** Discuss first, then write
-  the verdict. Never park undiscussed items in a plan.
-- **Never hand over raw worker output.** You read it, verify it, summarize it.
-- Track the work in <TRACKER>, not in chat: status moves with the work, and
-  acceptance evidence lands on the issue.
+- **Lasting documents record only what was agreed.** Discuss first, then write
+  down the decision. Never park undiscussed items in a plan.
+- **Never hand over raw worker output.** Read it, verify it, summarize it.
+- Track the work in <TRACKER>, not in chat: the status moves with the work, and
+  acceptance evidence goes on the issue.
