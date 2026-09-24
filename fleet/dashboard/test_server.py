@@ -4092,9 +4092,13 @@ class DashboardAccessTest(unittest.TestCase):
         # died on gaierror at startup and the dashboard read as broken rather than misconfigured.
         # Decide "can this box do IPv6 at all" with a raw socket, NOT by catching the failure
         # under test: skipping on the server's own error would make this check unable to fail.
-        probe = socket.socket(socket.AF_INET6, socket.SOCK_STREAM) if socket.has_ipv6 else None
-        if probe is None:
-            self.skipTest("no IPv6 on this box")
+        if not socket.has_ipv6:
+            self.skipTest("this Python was built without IPv6")
+        try:
+            # A kernel with IPv6 switched off refuses the socket itself (EAFNOSUPPORT).
+            probe = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        except OSError as exc:
+            self.skipTest(f"no IPv6 on this box: {exc}")
         try:
             probe.bind(("::1", 0))
         except OSError as exc:
@@ -4393,14 +4397,20 @@ class HostingSnapshotTest(HostingCase):
     def test_a_failed_pass_keeps_the_last_good_answer_and_says_when_it_was_true(self):
         with self.farm() as box:
             dashboard.hosting_refresh()
-            good = dashboard.hosting_machines()["at"]
+            # Each listing is a snapshot of its own, stamped when its own run ended. The two runs
+            # can straddle a second, so each answer is held to its own last good time.
+            good = {"machines": dashboard.hosting_machines()["at"],
+                    "hosts": dashboard.hosting_hosts()["at"]}
             box.calls.write_text("")
             with mock.patch.dict(os.environ,
                                  {"FLEET_FAKE_FAIL": "doctl: 401 unable to authenticate"}):
                 dashboard.hosting_refresh()
-        for answer in (dashboard.hosting_machines(), dashboard.hosting_hosts()):
+        for name, answer in (("machines", dashboard.hosting_machines()),
+                             ("hosts", dashboard.hosting_hosts())):
             self.assertFalse(answer["pending"])
-            self.assertEqual(answer["stale_since"], good)
+            self.assertIsNotNone(dashboard.parse_iso(good[name]), name)
+            self.assertEqual(answer["stale_since"], good[name], name)
+            self.assertEqual(answer["at"], good[name], f"{name}: a failed pass moved the clock")
             self.assertIn("unable to authenticate", answer["error"])
             self.assertEqual(answer["error"].count("\n"), 0)
             self.assertNotIn("Traceback", json.dumps(answer))

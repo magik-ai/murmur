@@ -895,7 +895,10 @@ PY
 }
 
 _audit() {  # kill-path attribution log: date action slug user
-  echo "$(date -Is) action=$1 slug=$2 user=$USER ppid=$PPID" >> "$FLEET_HOME/audit.log" 2>/dev/null || true
+  # USER is unset under some service managers and in containers, and a bare $USER under `set -u`
+  # ended `fleet kill` before it had stopped anything. id -un names the process's own user.
+  local who="${USER:-$(id -un 2>/dev/null || echo unknown)}"
+  echo "$(date -Is) action=$1 slug=$2 user=$who ppid=$PPID" >> "$FLEET_HOME/audit.log" 2>/dev/null || true
 }
 
 _live_lane_slugs() {

@@ -296,9 +296,21 @@ class CloudInit(Farm):
         self.assertTrue(plan["warnings"], "a plan without a public key warns that create needs one")
 
     def test_without_doctl_the_plan_falls_back_to_the_dated_list_price(self):
+        # A PATH holding python and ssh-keygen and nothing else, so there is no doctl on it
+        # wherever this machine keeps its tools. The ssh-keygen is the fake, run through a
+        # wrapper because the fake finds its helper module next to its own file.
+        bare = os.path.join(self.home, "bin-without-doctl")
+        os.makedirs(bare)
+        os.symlink(sys.executable, os.path.join(bare, "python3"))
+        keygen = os.path.join(bare, "ssh-keygen")
+        with open(keygen, "w", encoding="utf-8") as handle:
+            handle.write('#!/bin/sh\nexec "%s" "%s" "$@"\n'
+                         % (sys.executable, os.path.join(FAKES, "ssh-keygen")))
+        os.chmod(keygen, 0o755)
+        self.assertIsNone(shutil.which("doctl", path=bare))
         plan = json.loads(self.ok("plan", "--provider", "do-droplet", "--name", "farm-1",
                                   "--size", "s-4vcpu-8gb", "--region", "fra1", "--json",
-                                  PATH=os.path.dirname(sys.executable)).stdout)
+                                  PATH=bare).stdout)
         self.assertEqual(plan["monthly_usd"], 48)
         self.assertEqual(plan["price_source"], "list")
         self.assertIn("list price on 2026-09-23", plan["price_note"])

@@ -21,9 +21,13 @@ JSON
 rec fresh-lane "$NOW"
 # 2. old lane, no unit: must be flagged
 rec old-dead "$((NOW - 90000))"
-# 3. old lane WITH a live unit: must NOT be flagged - this is the one that matters
-systemd-run --user --unit=fleet-old-alive --quiet -- sleep 120 2>/dev/null
-sleep 1
+# 3. old lane WITH a live unit: must NOT be flagged - this is the one that matters. A live unit
+#    needs a systemd user manager; a machine without one has no unit this case could hold up.
+LIVE_UNIT=0
+if systemd-run --user --unit=fleet-old-alive --quiet -- sleep 120 2>/dev/null; then
+  LIVE_UNIT=1
+  sleep 1
+fi
 rec old-alive "$((NOW - 90000))"
 
 OUT=$(${FLEET:-$(dirname $0)/../bin/fleet} status 2>/dev/null)
@@ -34,13 +38,15 @@ echo "$OUT" | grep -q "fresh-lane .*running  " && ok "a lane started moments ago
 echo "$OUT" | grep -q "old-dead .*running?" && ok "an old lane with no unit is marked dead?" \
   || no "the dead lane was NOT marked" "$(echo "$OUT" | grep old-dead | head -c 90)"
 
-if echo "$OUT" | grep -q "old-alive .*running?"; then
+if [ "$LIVE_UNIT" = 0 ]; then
+  echo "  SKIP  an old lane whose unit is still active is NOT accused -- no systemd user manager here to start one"
+elif echo "$OUT" | grep -q "old-alive .*running?"; then
   no "a lane with a LIVE systemd unit was called dead" "$(echo "$OUT" | grep old-alive | head -c 90)"
 else
   ok "an old lane whose unit is still active is NOT accused"
 fi
 
-systemctl --user stop fleet-old-alive 2>/dev/null
+[ "$LIVE_UNIT" = 0 ] || systemctl --user stop fleet-old-alive 2>/dev/null
 echo; echo "RESULT pass=$P fail=$F"
 rm -rf "$B"
 [ "$F" = 0 ]

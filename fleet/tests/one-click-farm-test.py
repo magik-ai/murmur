@@ -792,6 +792,13 @@ class Scratch(unittest.TestCase):
             return handle.read()
 
 
+# farm/install.sh stops at its first step when it runs as root ("run this as an ordinary user,
+# not root: the agents run as you"), before anything the cases below look at.
+AS_ROOT = os.geteuid() == 0
+REFUSES_ROOT = ("farm/install.sh refuses to run as root and stops at step 1, before what this "
+                "case checks; run the suite as an ordinary user to cover it")
+
+
 class Installer(Scratch):
     """farm/install.sh: --yes never asks, --hq-repo, the Tailscale bind, the dashboard unit."""
 
@@ -823,7 +830,7 @@ class Installer(Scratch):
         finally:
             os.close(leader)
 
-    @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
     def test_yes_never_asks_even_at_a_terminal(self):
         done = self.on_a_terminal("--yes")
         said = done.stdout + done.stderr
@@ -835,7 +842,7 @@ class Installer(Scratch):
         self.assertIn(["hq", "init", "--repo", "fakeuser/agent-hq-office", "--owner", "fakeuser"],
                       self.calls("hq"))
 
-    @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
     def test_remote_yes_skips_the_single_machine_question_and_takes_the_hq_repo(self):
         done = self.on_a_terminal("--remote", "--yes", "--hq-repo", "owner/old-office")
         said = done.stdout + done.stderr
@@ -846,12 +853,13 @@ class Installer(Scratch):
                       self.calls("hq"))
         self.assertIn(["gh", "repo", "view", "owner/old-office"], self.calls("gh"))
 
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
     def test_a_malformed_hq_repo_is_refused(self):
         done = self.on_a_terminal("--remote", "--yes", "--hq-repo", "not a repo")
         self.assertEqual(done.returncode, 1)
         self.assertIn("--hq-repo is owner/name", done.stdout + done.stderr)
 
-    @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
     def test_tailscale_writes_the_tailscale_bind_and_never_0000(self):
         # Not a single machine, then three defaults, then yes to Tailscale.
         done = self.on_a_terminal(answers="no\n\n\n\nyes\n",
@@ -876,7 +884,7 @@ class Installer(Scratch):
                                                         os.environ.get("PATH", "")]),
                                   FAKE_STATE_DIR=self.fake_state)
 
-    @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
     def test_tailscale_replaces_an_old_wide_bind(self):
         # An older install wrote 0.0.0.0, and the unit loads this file: left alone, the page
         # would listen on every interface of a box with a public address.
@@ -891,7 +899,7 @@ class Installer(Scratch):
         self.assertIn("FLEET_DASH_TOKEN=CANARY\n", env)
         self.assertEqual(self.read("dashboard-run.txt"), "enable\n")
 
-    @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
     def test_tailscale_replaces_every_other_bind_line(self):
         self.with_env("FLEET_DASH_BIND=127.0.0.1\nexport FLEET_DASH_BIND=::\n"
                       "FLEET_DASH_BIND=tailscale\n")
@@ -901,7 +909,7 @@ class Installer(Scratch):
         self.assertEqual([line for line in env.splitlines() if "FLEET_DASH_BIND" in line],
                          ["FLEET_DASH_BIND=tailscale"], env)
 
-    @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
     def test_the_tunnel_leaves_a_loopback_bind_alone(self):
         self.with_env("FLEET_DASH_BIND=127.0.0.1\n")
         done = self.choosing(tailscale=False)
@@ -910,7 +918,7 @@ class Installer(Scratch):
         self.assertEqual([line for line in env.splitlines() if "FLEET_DASH_BIND" in line],
                          ["FLEET_DASH_BIND=127.0.0.1"], env)
 
-    @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
     def test_the_installer_installs_and_enables_the_dashboard_unit(self):
         done = self.on_a_terminal("--remote", "--yes")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)

@@ -670,8 +670,21 @@ def _check_systemd_user():
         "start it: `systemctl --user daemon-reload`, and check `loginctl show-user $USER`"
 
 
+def _login_name():
+    """The user this server runs as. USER and LOGNAME are unset in some containers and service
+    managers; the account database still knows who this process is."""
+    name = os.environ.get("USER") or os.environ.get("LOGNAME")
+    if name:
+        return name
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_name
+    except (ImportError, KeyError, OSError):
+        return ""
+
+
 def _check_linger():
-    user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+    user = _login_name()
     rc, out, err = run_tool(["loginctl", "show-user", user, "-p", "Linger", "--value"])
     if rc == 127:
         return "off", "no user manager here, so nothing keeps units alive after a logout", \
