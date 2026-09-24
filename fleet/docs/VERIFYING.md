@@ -80,9 +80,9 @@ python3 tests/one-click-farm-test.py     # the one-click farm: machines, install
 A few details:
 
 - `policy-test.sh` checks the head office switch, the commit identity a lane pushes under, the
-  port block each project hands its lanes, a policy file that does not parse, the env file
-  `~/.config/fleet/env`, and `fleet kill`. Its argument is optional: it defaults to the
-  `bin/fleet` next to it.
+  port block each project hands its lanes, a policy file that does not parse, the names a spawn
+  accepts, the pending spec `fleet spawn --after` writes, the env file `~/.config/fleet/env`, and
+  `fleet kill`. Its argument is optional: it defaults to the `bin/fleet` next to it.
 - `stale-status-test.sh` starts a real systemd user unit to stand for a live lane. Without a
   running user manager it skips that case. It tests the `bin/fleet` next to it; set
   `FLEET=<path>` to test another one.
