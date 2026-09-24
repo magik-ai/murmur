@@ -2861,6 +2861,36 @@ class DashboardAgentLogTest(unittest.TestCase):
             detail = fetch_json(base, "/api/agent?slug=lane-4", token="s3cret")[1]
             self.assertEqual(detail["status"], "done")
 
+    def test_a_secret_in_a_lanes_brief_result_or_log_is_scrubbed(self):
+        # The brief, the result and the log hold the agent's own words, and an agent can paste a
+        # key into any of them. They get the scrub a job's output gets: every stored secret, and
+        # the token shapes scrub.py knows.
+        token = "ghp_" + "A1b2C3d4" * 5          # a GitHub token's shape, not a real token
+        stored = "stored-provider-key-0123"
+        (self.state / "secrets").mkdir()
+        (self.state / "secrets" / "demo.key").write_text(stored + "\n")
+        (self.state / "state").mkdir()
+        (self.state / "state" / "lane-5.json").write_text(json.dumps(
+            {"slug": "lane-5", "project": "alpha", "engine": "claude", "status": "done",
+             "task": f"push with {token}", "result_text": f"pushed with {stored}",
+             "last_activity": f"Bash: echo {token}"}))
+        (self.state / "logs" / "lane-5.task").write_text(f"the whole brief: push with {token}")
+        (self.state / "logs" / "lane-5.last").write_text(f"done, with {stored}")
+        self.write("lane-5.jsonl",
+                   {"type": "assistant", "message": {"content": [
+                       {"type": "text", "text": f"export GH_TOKEN={token}"}]}},
+                   {"type": "result", "result": f"used {stored}"})
+        with mock.patch.object(dashboard, "BIND", "127.0.0.1"), running_server() as base:
+            for route in ("/api/agent?slug=lane-5", "/api/agent/log?slug=lane-5", "/api/fleet"):
+                status, raw, _ = fetch(base, route)
+                self.assertEqual(status, 200, route)
+                self.assertNotIn(token, raw.decode(), route)
+                self.assertNotIn(stored, raw.decode(), route)
+                self.assertIn("[redacted]", raw.decode(), route)
+            detail = fetch_json(base, "/api/agent?slug=lane-5")[1]
+            self.assertEqual(detail["task"], "the whole brief: push with [redacted]")
+            self.assertEqual(detail["result_text"], "done, with [redacted]")
+
 class DashboardAgentMessageTest(unittest.TestCase):
     """Sending one lane a message. It lands in the lane's inbox through the CLI that owns it."""
 

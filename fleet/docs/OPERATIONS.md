@@ -1026,6 +1026,11 @@ true.
 | `/api/power/preview?action=<action>` | what throttle, drain or resume would do, with the lanes a drain would stop |
 | `/api/jobs`, `/api/jobs/<id>` | the long actions in flight, and one action's record |
 
+**Secrets are scrubbed from lane text.** A lane's brief, result and last activity on `/api/fleet`
+and `/api/agent`, and every line of `/api/agent/log`, are scrubbed before they are served, like the
+output of a job. Every key stored under `~/.fleet/secrets`, and anything shaped like an Anthropic,
+GitHub or DigitalOcean token, becomes `[redacted]`.
+
 The mail routes read through `gh`, never through `hq inbox`. A plain inbox read moves a cursor
 that every process signing as one name shares, so a page that polled it would eat an agent's
 mail.

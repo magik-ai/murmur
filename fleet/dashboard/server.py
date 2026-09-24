@@ -2194,6 +2194,20 @@ def agents():
     return out
 
 
+# The free text a lane record carries: its brief, its result and the last thing it did. An agent
+# can paste a secret into any of them, so they pass through the scrub a job's output gets before
+# this server hands them out.
+AGENT_TEXT_FIELDS = ("task", "result_text", "last_activity")
+
+
+def _scrub_agent(record, known):
+    """The record with every free text field scrubbed, in place. `known` is _job_secrets()."""
+    for key in AGENT_TEXT_FIELDS:
+        if isinstance(record.get(key), str):
+            record[key] = SCRUB.scrub(record[key], known)
+    return record
+
+
 def agent_detail(slug):
     """One agent's full record for the detail modal. The state file keeps task/result
     truncated (to stay small and light in the list); the FULL text lives in the agent's
@@ -2221,7 +2235,7 @@ def agent_detail(slug):
     last = read(".last")
     if last:
         s["result_text"] = last
-    return s
+    return _scrub_agent(s, _job_secrets())
 
 
 # ---------------------------------------------------------------- one lane's log
@@ -2341,6 +2355,8 @@ def agent_log(slug, tail=None):
         lines, truncated = _log_lines(candidate, wanted)
         if lines is None:
             return 500, {"error": "that log could not be read"}
+        known = _job_secrets()
+        lines = [SCRUB.scrub(line, known) for line in lines]
         return 200, {"slug": slug, "file": os.path.basename(candidate), "lines": lines,
                      "truncated": truncated, "missing": False}
     return 200, {"slug": slug, "file": None, "lines": [], "truncated": False, "missing": True,
@@ -4015,7 +4031,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 slug = parse_qs(urlparse(self.path).query).get("slug", [""])[0]
                 self._send(200, json.dumps(agent_detail(slug)))
             elif path.startswith("/api/fleet"):
-                self._send(200, json.dumps(agents()))
+                known = _job_secrets()
+                self._send(200, json.dumps([_scrub_agent(s, known) for s in agents()]))
             elif path in ("/", "/index.html"):
                 self._send(200, open(INDEX, "rb").read(), "text/html; charset=utf-8")
             else:
