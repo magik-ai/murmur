@@ -26,13 +26,9 @@ repositories and fake command-line tools. No suite changes a live farm, and none
 a cloud provider. There is one small exception: `stale-status-test.sh` starts a short-lived
 systemd user unit.
 
-Two things can break a test run for reasons that have nothing to do with your change:
-
-- **Root.** Run the tests as an ordinary user. The farm installer refuses to run as root, so its
-  tests skip or fail under root.
-- **`$USER`.** `fleet` reads `$USER` when it kills or cleans a lane. If your shell does not set
-  it (some containers do not), run `export USER=$(id -un)` first. Otherwise `policy-test.sh` and
-  `salvage-test.sh` fail with `USER: unbound variable`.
+Run the tests as an ordinary user. The farm installer refuses to run as root, so its tests skip
+under root. A few other cases skip, and say why, on a machine without IPv6 or without a systemd
+user manager.
 
 ## The farm runner
 
@@ -44,7 +40,7 @@ cd fleet
 
 ### Suites that take a path
 
-Six suites test the file you name on the command line. Always pass it, as shown here:
+Six suites test the file you name on the command line:
 
 ```bash
 python3 tests/supervisor-test.py lib/supervisor.py   # the daemon: respawns, cooldown, attempt cap
@@ -55,10 +51,9 @@ python3 tests/group-test.py      bin/fleet           # fleet group; spawn rollba
 bash    tests/salvage-test.sh    bin/fleet           # fleet clean, salvage and sweep
 ```
 
-Without the argument these six fall back to `~/work/fleet/...`, which is not where a clone of this
-repository puts `fleet`. The five Python suites then stop with an error. `salvage-test.sh` runs
-against the missing file and reports failures. The Python suites also refuse the wrong kind of
-file: give a supervisor suite `bin/fleet` and it stops with a message instead of a false result.
+Without the argument each suite tests the file in its own checkout. Pass a path to test another
+one. The Python suites refuse the wrong kind of file: give a supervisor suite `bin/fleet` and it
+stops with a message instead of a false result.
 
 `group-test.py` also covers what spawn does with a difficult brief: quotes, a trailing backslash,
 and a prompt over the size limit. `salvage-test.sh` covers what the destructive commands keep,
@@ -88,9 +83,9 @@ A few details:
   port block each project hands its lanes, a policy file that does not parse, the env file
   `~/.config/fleet/env`, and `fleet kill`. Its argument is optional: it defaults to the
   `bin/fleet` next to it.
-- `stale-status-test.sh` needs a running systemd user manager, because it starts a real unit to
-  stand for a live lane. It fails in a container that has none. It tests the `bin/fleet` next to
-  it; set `FLEET=<path>` to test another one.
+- `stale-status-test.sh` starts a real systemd user unit to stand for a live lane. Without a
+  running user manager it skips that case. It tests the `bin/fleet` next to it; set
+  `FLEET=<path>` to test another one.
 - The other suites load the code next to the test file. `events-test.py`, `salvage-test.py` and
   `codex-usage-test.py` also accept `FLEET_HOME=<checkout>` to test a different checkout.
 
@@ -115,10 +110,12 @@ bash    dashboard/test_browser.sh         # everything that needs a real browser
 
 1. It starts the stub server, `test_stub_server.py`, on a free port. The stub serves the real page
    with fixed test data.
-2. It runs `test_render_defer.mjs` against the stub. The page updates itself every three seconds,
+2. It runs `test_status_colours.mjs` against the stub: the five status colours on the Machine
+   tab, in the light and the dark theme, must read as the status they stand for.
+3. It runs `test_render_defer.mjs` against the stub. The page updates itself every three seconds,
    and it must not rebuild itself under you: a click, a half-typed message, an open drawer and the
    scroll position must all survive the update.
-3. It runs every `test_hostile*.mjs` and every `test_screens*.mjs`, each with its own stub on its
+4. It runs every `test_hostile*.mjs` and every `test_screens*.mjs`, each with its own stub on its
    own free port. The hostile checks feed the page wrong or failing answers, or open it without
    the write token, and check that nothing throws and that the reader is told. The screens checks
    draw each tab or section in every state, at a desktop width and a phone width, and fail if
