@@ -797,7 +797,11 @@ export FLEET_STATE="$FLEET_STATE"
 export FLEET_CONFIG="$FLEET_CONFIG"
 cd "$wt" || exit 1
 [ -n "$_menv" ] && [ -f "$_msec" ] && export $_menv="\$(cat "$_msec")"
-$_mcmd </dev/null 2>>"$log.err" | tee "$log.jsonl" | "$PY" "$FLEET_HOME/lib/parse_generic.py" "$slug"
+# The engine's exit code is written before its stdout closes, so the parser finds it on EOF: a
+# launch that printed one plain line and exited 1 is a failed lane, not one that ended.
+rm -f "$log.exit"
+{ ( $_mcmd ) </dev/null 2>>"$log.err"; echo \$? > "$log.exit"; } \\
+  | tee "$log.jsonl" | "$PY" "$FLEET_HOME/lib/parse_generic.py" "$slug" "$log.exit"
 RUN
   fi
   chmod +x "$log.run.sh"

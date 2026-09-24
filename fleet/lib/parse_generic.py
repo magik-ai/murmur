@@ -12,6 +12,9 @@ import time
 
 STATE = os.path.expanduser(os.environ.get("FLEET_STATE", "~/.fleet"))
 slug = sys.argv[1]
+# Where the lane's run.sh writes the engine's exit code; absent for a runner lane, whose stream
+# comes from run_remote.py, and then the lane settles on its stream alone.
+exitfile = sys.argv[2] if len(sys.argv) > 2 else ""
 statefile = os.path.join(STATE, "state", slug + ".json")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -169,6 +172,15 @@ def words_of(event):
     return " ".join(parts) or None
 
 
+def exit_code():
+    """The engine's exit code, or None when nobody recorded one."""
+    try:
+        with open(exitfile) as handle:
+            return int(handle.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
 s = load()
 s["status"] = "running"
 save(s)
@@ -176,6 +188,7 @@ save(s)
 _saw_event = False
 _saw_words = False
 _last_error = ""
+_last_line = ""
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -183,6 +196,7 @@ for line in sys.stdin:
     # Any line at all means the engine started. Aider, Ollama and the other plain-text CLIs never
     # print JSON, and counting only JSON lines settled every one of their lanes as "never started".
     _saw_event = True
+    _last_line = line
     # try to pull human text out of a json line; else use the raw line
     act = line
     try:
@@ -207,6 +221,8 @@ for line in sys.stdin:
     s["last_activity"] = act[:120]
     save(s)
 
+_exit = exit_code() if exitfile else None
+
 if not _saw_event and s.get("status") in ("starting", "running"):
     # Nothing ever arrived on the stream: no session, no turn, no activity. The lane did not finish
     # early, it never began - and "ended" makes those two identical on the card and in `fleet
@@ -228,6 +244,13 @@ elif s.get("status") in ("starting", "running"):
         s["status"] = "failed"
         s["result_text"] = (s.get("result_text")
                             or ("the engine could not start: " + _last_error)[:240])
+    elif _exit:
+        # The engine said it failed in the one way every CLI can: a bad key or an unknown model
+        # printed as one plain line, then exit 1, is a failed launch whatever the line says.
+        s["status"] = "failed"
+        s["result_text"] = (s.get("result_text")
+                            or (f"the engine exited with code {_exit}: "
+                                + (_last_error or _last_line))[:240])
     else:
         s["status"] = "ended"
     if not pr_known:

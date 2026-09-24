@@ -545,20 +545,60 @@ with machine(["live"]):
 check("the last test's result is still the word everyone reads",
       _live["health"] == "ok", _live["health"])
 check("and the prompt is kept under its own name",
-      _live["health_prompt"] == "Reply with exactly: OK", _live["health_prompt"])
+      _live["health_prompt"] == P.HEALTH, _live["health_prompt"])
+check("the prompt does not hold its own answer",
+      P.HEALTH_ANSWER not in P.HEALTH and not M.answered(P.HEALTH), P.HEALTH)
 
-with farm() as room:
-    _bin = room / "bin"
-    _bin.mkdir()
-    _echo = _bin / "echoback"
-    _echo.write_text('#!/bin/sh\necho "$@"\n')
-    _echo.chmod(0o755)
+def fake_model(room, name, script, health=None):
+    """A generic row whose CLI is `script`, first in its own bin directory. `health` is the
+    prompt the row was written with; None leaves it out, as a hand-written row may."""
+    binp = room / "bin"
+    binp.mkdir(exist_ok=True)
+    tool = binp / name
+    tool.write_text("#!/bin/sh\n" + script)
+    tool.chmod(0o755)
     pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(M.CONFIG).write_text(
-        '[echoback]\nlabel = "Echo"\nengine = "generic"\nbin = "%s"\n'
-        'run = "{bin} -p {task}"\nhealth = "Reply with exactly: OK"\nsource = "added"\n'
-        % _echo)
-    _health, _detail, _limits = M.health_check("echoback")
+        '[%s]\nlabel = "%s"\nengine = "generic"\nbin = "%s"\nrun = "{bin} -p {task}"\n'
+        % (name, name, tool)
+        + ('' if health is None else 'health = "%s"\n' % health)
+        + 'source = "added"\n')
+    return M.health_check(name)
+
+
+# A CLI that only says back what it was sent: with a bad key some do exactly that, or quote the
+# prompt in their error. "Reply with exactly: OK" held its own pass word, so this passed.
+with farm() as room:
+    _health, _detail, _limits = fake_model(room, "echoback", 'echo "$@"\n', P.HEALTH)
+check("a CLI that only echoes the prompt fails the Test",
+      _health == "fail", f"{_health}: {_detail}")
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(room, "echoold", 'echo "$@"\n', P.LEGACY_HEALTH)
+check("a row still written with the old prompt is asked the new one, so an echo fails it too",
+      _health == "fail", f"{_health}: {_detail}")
+
+# The echo above fails whichever prompt it is sent, so it cannot tell whether the row was moved to
+# the new one. This CLI answers each question truthfully: it passes only if it is asked the sum.
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "oldrow", 'case "$*" in *"17 plus 25"*) echo 42;; *"exactly: OK"*) echo OK;;\n'
+        '*) echo "$@";; esac\n', P.LEGACY_HEALTH)
+check("a row still written with the old prompt passes because it is asked the sum",
+      _health == "ok", f"{_health}: {_detail}")
+
+# A hand-written row with a prompt of its own: its answer is not 42, and the Test asks every model
+# the same question, so the row is asked the sum too.
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "customrow", 'case "$*" in *"17 plus 25"*) echo 42;; *) echo OK;; esac\n',
+        "Confirm you can respond to a request.")
+check("a row with a custom prompt passes because it is asked the sum",
+      _health == "ok", f"{_health}: {_detail}")
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "sums", 'case "$*" in *"17 plus 25"*) echo 42;; *) echo "$@";; esac\n', P.HEALTH)
 check("a test request carries the catalog's prompt, not the state's word",
       _health == "ok", f"{_health}: {_detail}")
 
@@ -576,11 +616,168 @@ with farm() as room:
     pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(M.CONFIG).write_text(
         '[grokfail]\nlabel = "Grok"\nengine = "generic"\nbin = "%s"\n'
-        'run = "{bin} -p {task}"\nhealth = "Reply with exactly: OK"\nsource = "added"\n'
-        % _grok)
+        'run = "{bin} -p {task}"\nhealth = "%s"\nsource = "added"\n'
+        % (_grok, P.HEALTH))
     _health, _detail, _limits = M.health_check("grokfail")
 check("a failing CLI whose error mentions grok or tokens does not pass the Test",
       _health == "fail", f"{_health}: {_detail}")
+
+print()
+print("what a real CLI prints around the answer")
+
+# The reply is read as a person would read it: what a terminal or a JSON stream wraps around the
+# number is taken off, and anything that makes it a different number is not.
+check("a colour code around the answer passes", M.answered("\x1b[1;32m42\x1b[0m\n"))
+check("an escaped newline right before the answer in JSON passes",
+      M.answered('{"type":"result","result":"Sure.\\n42"}'))
+check("escaped curly quotes around the answer in JSON pass",
+      M.answered('{"text":"\\u201c42\\u201d"}'))
+check("straight quotes around the answer pass", M.answered("'42'") and M.answered('"42"'))
+check("curly quotes around the answer pass", M.answered("\u201c42\u201d"))
+check("the Test asks for the number alone, so a sentence that ends on it does not pass",
+      not M.answered("The answer is 42."))
+check("the answer with one trailing period passes", M.answered("42.\n"))
+check("a coloured answer in quotes with a trailing period passes",
+      M.answered("\x1b[32m\u201c42\u201d.\x1b[0m\n") and M.answered("`42`\n"))
+check("-42 does not pass", not M.answered("-42"))
+check("42 with two trailing periods does not pass", not M.answered("42..\n"))
+check("420 does not pass", not M.answered("420"))
+check("4.2 does not pass", not M.answered("4.2"))
+check("an id that holds the digits does not pass", not M.answered("request req_a42f failed"))
+check("an HTTP 429 does not pass", not M.answered("HTTP 429 Too Many Requests"))
+
+# Only what the model said counts. A JSON line's usage, ids and error fields are not its reply,
+# and a CLI that exited non-zero failed whatever else it printed.
+_BADKEY = '{"type":"error","message":"invalid API key","usage":{"input_tokens":42}}'
+check("42 in a token count does not pass",
+      not M.answered('{"type":"result","result":"done","usage":{"output_tokens":42}}'))
+check("42 as an id does not pass", not M.answered('{"id":"42","text":"no idea"}'))
+check("42 in an error event's metadata does not pass", not M.answered(_BADKEY))
+check("the answer in a stream-json message passes",
+      M.answered('{"type":"assistant","message":{"content":[{"type":"text","text":"42"}]}}'))
+check("the answer in a codex item passes",
+      M.answered('{"type":"item.completed","item":{"type":"agent_message","text":"42"}}'))
+
+# Gemini's --output-format json writes one object across many lines (JSON.stringify(o, null, 2)),
+# so no line parses alone and a line reader took its stats for words.
+_GEMINI = ('{\n  "response": "%s",\n  "stats": {\n    "models": {\n      "gemini-2.5-pro": {\n'
+           '        "tokens": {\n          "input": 42\n        }\n      }\n    }\n  }\n}\n')
+check("an indented JSON reply whose only 42 is a token count does not pass",
+      not M.answered(_GEMINI % "I cannot answer"))
+check("an indented JSON reply that says 42 passes", M.answered(_GEMINI % "42"))
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "geminiwrong", "cat <<'JSON'\n%sJSON\n" % (_GEMINI % "I cannot answer"), P.HEALTH)
+check("a Gemini-shaped CLI that answers wrong fails the Test even with 42 in its stats",
+      _health == "fail", f"{_health}: {_detail}")
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "geminiright", "cat <<'JSON'\n%sJSON\n" % (_GEMINI % "42"), P.HEALTH)
+check("a Gemini-shaped CLI whose response is 42 passes the Test",
+      _health == "ok", f"{_health}: {_detail}")
+
+# A notice before the document (a cached-settings line, an update hint) made the whole stdout
+# unparseable, and the line reader then took the document's stats for words. Once any JSON
+# document parses, only its reply fields count and nothing printed around it does.
+_NOTICE = "Notice: using cached settings\n" + _GEMINI
+check("a notice before an indented JSON reply whose only 42 is a token count does not pass",
+      not M.answered(_NOTICE % "I cannot answer"))
+check("a notice before an indented JSON reply that says 42 passes",
+      M.answered(_NOTICE % "42"))
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "noticewrong", "cat <<'JSON'\n%sJSON\n" % (_NOTICE % "I cannot answer"), P.HEALTH)
+check("a CLI that prints a notice, then JSON with 42 only in its stats, fails the Test",
+      _health == "fail", f"{_health}: {_detail}")
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "noticeright", "cat <<'JSON'\n%sJSON\n" % (_NOTICE % "42"), P.HEALTH)
+check("a CLI that prints a notice, then JSON whose response is 42, passes the Test",
+      _health == "ok", f"{_health}: {_detail}")
+
+# With no document to parse, the plain reading applies, but a line shaped like a JSON member is a
+# fragment of bookkeeping, never the model's words.
+check("a JSON member line in otherwise plain output does not pass",
+      not M.answered('I cannot answer that.\n  "input_tokens": 42,\nDone.\n'))
+check("the Test asks for the number alone, so plain output with 42 in a sentence does not pass",
+      not M.answered("Thinking...\nThe answer is 42\n"))
+check("plain output with 42 alone on a line passes", M.answered("Thinking...\n  42  \n"))
+
+# The Test asks for the number only, so the answer is a line that is the number and nothing else.
+# A count in a footer is on a line of its own words, and a sign makes it a different number.
+check("I cannot answer, then a usage footer with 42, does not pass",
+      not M.answered("I cannot answer\nUsage: 42 tokens consumed\n"))
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "plainfooter", "printf 'I cannot answer\\nUsage: 42 tokens consumed\\n'\n", P.HEALTH)
+check("a plain-text CLI that cannot answer, then a 42 usage footer, fails the Test",
+      _health == "fail", f"{_health}: {_detail}")
+with farm() as room:
+    _health, _detail, _limits = fake_model(room, "minus", "echo -42\n", P.HEALTH)
+check("a plain-text CLI that says -42 fails the Test", _health == "fail", f"{_health}: {_detail}")
+
+# A JSON-lines stream is a run of documents: the reply in an early event counts, and the usage in
+# the closing one does not, whatever notice came first.
+check("a notice, then a codex event stream whose message is 42, passes",
+      M.answered('Reading config\n'
+                 '{"type":"item.completed","item":{"type":"agent_message","text":"42"}}\n'
+                 '{"type":"turn.completed","usage":{"input_tokens":7}}\n'))
+check("a notice, then a codex event stream whose only 42 is usage, does not pass",
+      not M.answered('Reading config\n'
+                     '{"type":"item.completed","item":{"type":"agent_message","text":"no"}}\n'
+                     '{"type":"turn.completed","usage":{"input_tokens":42}}\n'))
+
+# A footer after the document (a usage line) made the whole stdout unparseable, and the plain
+# reading then took the footer's 42 for words. Wherever documents sit in the output, text outside
+# them is never the model.
+_FOOTER = '{"response":"%s"}\nUsage: 42 tokens consumed\n'
+check("JSON that cannot answer, then a usage footer with 42, does not pass",
+      not M.answered(_FOOTER % "I cannot answer"))
+check("JSON whose response is 42, then the same footer, passes", M.answered(_FOOTER % "42"))
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "footerwrong", "cat <<'JSON'\n%sJSON\n" % (_FOOTER % "I cannot answer"), P.HEALTH)
+check("a CLI that prints JSON that cannot answer, then a 42 usage footer, fails the Test",
+      _health == "fail", f"{_health}: {_detail}")
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(
+        room, "footerright", "cat <<'JSON'\n%sJSON\n" % (_FOOTER % "42"), P.HEALTH)
+check("a CLI that prints JSON whose response is 42, then a usage footer, passes the Test",
+      _health == "ok", f"{_health}: {_detail}")
+
+_SANDWICH = ('Notice: using cached settings\n'
+             '{"type":"item.completed","item":{"type":"agent_message","text":"%s"}}\n'
+             '{"type":"turn.completed","usage":{"input_tokens":7}}\n'
+             'Done in 42 ms\n')
+check("a notice, JSON lines that cannot answer, and a 42 footer do not pass",
+      not M.answered(_SANDWICH % "no idea"))
+check("a notice, JSON lines whose message is 42, and a footer pass",
+      M.answered(_SANDWICH % "42"))
+
+# Plain text that happens to hold brackets is still plain text, and still answers.
+check("the Test asks for the number alone, so a sentence with a footnote does not pass",
+      not M.answered("The answer is 42 [1]\n[1] arithmetic\n"))
+check("plain output that is 42, then a footnote in brackets, passes",
+      M.answered("42\n[1] arithmetic\n"))
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(room, "badkey", "echo '%s'\nexit 1\n" % _BADKEY,
+                                           P.HEALTH)
+check("a CLI that exits 1 with 42 only in its error metadata fails the Test",
+      _health == "fail", f"{_health}: {_detail}")
+check("and the reason names the exit code and the error line",
+      "code 1" in _detail and "invalid API key" in _detail, _detail)
+
+with farm() as room:
+    _health, _detail, _limits = fake_model(room, "saysthenfails", "echo 42\nexit 2\n", P.HEALTH)
+check("a CLI that says 42 and exits 2 still fails the Test",
+      _health == "fail" and "code 2" in _detail, f"{_health}: {_detail}")
 
 print()
 print("a key never goes through this page")
@@ -623,7 +820,7 @@ with farm() as room:
     _where = room / "where.txt"
     _tool = _bin / "pwdback"
     _tool.write_text("#!/bin/sh\npwd > '" + str(_where) + "'\n"
-                     "touch fleet-test-request-was-here\necho OK\n")
+                     "touch fleet-test-request-was-here\necho 42\n")
     _tool.chmod(0o755)
     pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(M.CONFIG).write_text(
@@ -666,7 +863,7 @@ with farm() as room:
     _tool = _bin / "argvback"
     _tool.write_text("#!/bin/sh\n: > '" + str(_argv) + "'\n"
                      'for a in "$@"; do echo "$a" >> ' + "'" + str(_argv) + "'; done\n"
-                     "echo OK\n")
+                     "echo 42\n")
     _tool.chmod(0o755)
     _secret = pathlib.Path(M._secret_path("g2"))
     _secret.parent.mkdir(parents=True, exist_ok=True)
@@ -1390,6 +1587,63 @@ with world() as (room, calls):
                   for line in calls.read_text().splitlines()), calls.read_text())
 
 print()
+print("a generic lane settles on its engine's exit code")
+
+# A bad key or an unknown model, as most CLIs report it: one plain line on stdout, then exit 1.
+# The stream alone cannot tell that from a plain-text engine that worked and said one line, so
+# the lane's own run.sh writes down the exit code and the parser settles on it. The run.sh is
+# the one `fleet spawn` wrote, run by bash, with the fake engine first on PATH.
+SETTLE_CATALOG = """
+[fakecli]
+label  = "Fake CLI"
+engine = "generic"
+bin    = "fakecli"
+run    = "{bin} -p {task}"
+source = "added"
+
+[fakeexec]
+label  = "Fake CLI by exec"
+engine = "generic"
+bin    = "fakecli"
+run    = "exec {bin} -p {task}"
+source = "added"
+"""
+
+
+def settle(room, lane, body, engine="fakecli"):
+    """The status and reason a generic lane settles on when its engine runs `body`."""
+    import json
+    _fake(room / "bin" / "fakecli", body)
+    done = fleet("spawn", "--project", "demo", "--lane", lane, "--engine", engine,
+                 "--task", "t", "--force")
+    runs = list((room / "state" / "logs").glob(lane + "-*.run.sh"))
+    if done.returncode != 0 or not runs:
+        return "no spawn", done.stdout + done.stderr
+    subprocess.run(["bash", str(runs[0])], env=dict(os.environ), capture_output=True,
+                   timeout=60)
+    slug = runs[0].name[:-len(".run.sh")]
+    rec = json.loads((room / "state" / "state" / (slug + ".json")).read_text())
+    return rec.get("status"), rec.get("result_text") or ""
+
+
+with world(SETTLE_CATALOG, {"fakecli": {"enabled": True, "health": "ok"},
+                            "fakeexec": {"enabled": True, "health": "ok"}}) as (room, calls):
+    project(room)
+    _status, _why = settle(room, "sx", 'echo "Error: invalid API key"\nexit 1\n')
+    check("a launch that prints one plain line and exits 1 is failed, not ended",
+          _status == "failed", f"{_status}: {_why}")
+    check("and the line it printed is the reason",
+          "invalid API key" in _why and "code 1" in _why, _why)
+    _status, _why = settle(room, "sz", 'echo "Applied the edit."\nexit 0\n')
+    check("the same line with exit 0 still ends the lane as it did",
+          _status == "ended", f"{_status}: {_why}")
+    # A row may start its CLI with exec; that must replace only the engine's own subshell, or
+    # the exit code is never written and the failed launch reads as one that ended.
+    _status, _why = settle(room, "se", 'echo "Error: invalid API key"\nexit 1\n', "fakeexec")
+    check("a row that runs its CLI by exec and exits 1 is failed with code 1",
+          _status == "failed" and "code 1" in _why, f"{_status}: {_why}")
+
+print()
 print("the two routes, behind the token")
 
 with world(full_catalog()) as (room, calls):
@@ -1505,6 +1759,118 @@ with world(full_catalog()) as (room, calls):
         server.shutdown()
         server.server_close()
         SERVER.TOKEN = _old_token
+
+print()
+print("a credential a failing CLI prints is never kept")
+
+# The Test keeps what a failing CLI said, in models-state.json and on the page. A CLI that prints
+# its own key while it fails would put the key there, so the marker below must reach neither the
+# state file nor either route that serves the rows, on stderr or stdout, bare or as key=value.
+MARKER = "example_secret_marker_9876"
+
+
+@contextlib.contextmanager
+def leaky(script, auth_env="DEMO_TOKEN"):
+    """A generic row whose CLI runs `script` with DEMO_TOKEN set to the marker, Tested through
+    the Test button's route; yields (state file text, GET /api/models, GET /api/engines)."""
+    import json as _json
+    import threading as _threading
+    import urllib.request as _ureq
+    with farm() as room:
+        tool = room / "probe"
+        tool.write_text("#!/bin/sh\n" + script)
+        tool.chmod(0o755)
+        pathlib.Path(M.CONFIG).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(M.CONFIG).write_text(
+            '[probe]\nlabel = "Probe"\nengine = "generic"\nbin = "%s"\nrun = "{bin} -p {task}"\n'
+            'auth_env = "%s"\nsource = "added"\n' % (tool, auth_env))
+        kept, old_token = os.environ.get("DEMO_TOKEN"), SERVER.TOKEN
+        os.environ["DEMO_TOKEN"] = MARKER
+        SERVER.TOKEN = "test-token-not-a-secret"
+        server = SERVER.Server(("127.0.0.1", 0), SERVER.Handler)
+        _threading.Thread(target=server.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        auth = {"Authorization": "Bearer test-token-not-a-secret",
+                "Content-Type": "application/json"}
+
+        def call(path, body=None):
+            request = _ureq.Request(base + path, headers=auth, method="GET" if body is None
+                                    else "POST", data=None if body is None
+                                    else _json.dumps(body).encode())
+            with _ureq.urlopen(request, timeout=60) as answer:
+                return answer.read().decode()
+        try:
+            tested = call("/api/models", {"action": "test", "id": "probe"})
+            yield (pathlib.Path(M.STATE).read_text() + tested, call("/api/models"),
+                   call("/api/engines"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            SERVER.TOKEN = old_token
+            if kept is None:
+                os.environ.pop("DEMO_TOKEN", None)
+            else:
+                os.environ["DEMO_TOKEN"] = kept
+
+
+for _where, _script in (
+        ("on stderr as credential=, stdout harmless",
+         'echo starting; echo "credential=$DEMO_TOKEN" >&2; exit 1\n'),
+        ("on stdout as credential=", 'echo "credential=$DEMO_TOKEN"; exit 1\n'),
+        ("bare on stderr, stdout harmless", 'echo starting; echo "sent $DEMO_TOKEN" >&2; exit 1\n'),
+        ("bare on stdout, exit 0", 'echo "sent $DEMO_TOKEN and no answer"\n'),
+        ("on stdout as an auth failure", 'echo "401 unauthorized: token $DEMO_TOKEN"\n')):
+    with leaky(_script) as (_state_text, _models, _engines):
+        check(f"a credential {_where} is not in models-state.json or the Test's answer",
+              MARKER not in _state_text and "probe" in _state_text, _state_text[:300])
+        check(f"nor in the rows /api/models and /api/engines return ({_where})",
+              MARKER not in _models and MARKER not in _engines and "probe" in _engines,
+              (_models + _engines)[:300])
+
+check("redact takes out the row's auth variable, however it is named",
+      M.redact("said abcdefgh123", "WEIRD_NAME", {"WEIRD_NAME": "abcdefgh123"})
+      == "said [redacted]")
+check("and any variable whose name ends in KEY, TOKEN, SECRET or PASSWORD",
+      M.redact("a pw1234567 b", "", {"DB_PASSWORD": "pw1234567"}) == "a [redacted] b")
+check("but not a value shorter than eight characters, so a reply of 42 survives",
+      M.redact("42", "", {"SOME_KEY": "42"}) == "42")
+check("the row's own credential goes at any length, since `fleet models auth` takes a short one",
+      M.redact("sent abc1234 and 42", "DEMO_TOKEN", {"DEMO_TOKEN": "abc1234"})
+      == "sent [redacted] and 42")
+check("and so does the farm's stored secret for the row, even with no auth variable named",
+      M.redact("sent abc1234", "", {}, secrets=("abc1234",)) == "sent [redacted]")
+
+# The review's case end to end: a seven-character key in the key file, echoed on stderr by a
+# CLI that fails, Tested through the command a person runs.
+with farm() as room:
+    _tool = room / "probe"
+    _tool.write_text('#!/bin/sh\necho ready; echo "sent $DEMO_TOKEN" >&2; exit 1\n')
+    _tool.chmod(0o755)
+    (room / "config").mkdir(parents=True, exist_ok=True)
+    (room / "config" / "models.toml").write_text(
+        '[probe]\nlabel = "Probe"\nengine = "generic"\nbin = "%s"\nrun = "{bin} -p {task}"\n'
+        'auth_env = "DEMO_TOKEN"\nsource = "added"\n' % _tool)
+    (room / "state" / "secrets").mkdir(parents=True, exist_ok=True)
+    (room / "state" / "secrets" / "probe.key").write_text("abc1234\n")
+    _env = {k: v for k, v in os.environ.items() if k != "DEMO_TOKEN"}
+    _env["FLEET_CONFIG"] = str(room / "config")
+    _env["FLEET_STATE"] = str(room / "state")
+    _done = subprocess.run([sys.executable, str(LIB / "models.py"), "test", "probe"],
+                           capture_output=True, text=True, env=_env, timeout=120)
+    _state_file = room / "state" / "models-state.json"
+    _kept = _state_file.read_text() if _state_file.exists() else ""
+    check("a short stored key a failing CLI echoes is not in `models.py test`'s output",
+          "abc1234" not in _done.stdout + _done.stderr and "probe" in _kept,
+          "ran" if "abc1234" not in _done.stdout + _done.stderr else "leaked")
+    check("nor in models-state.json", "abc1234" not in _kept and "fail" in _kept,
+          "kept" if "abc1234" not in _kept else "leaked")
+
+check("key=value and key: value pairs lose their value, a Bearer header included",
+      M.redact('api_key=abc token: xyz "password": "p w" Authorization: Bearer q.r.s', "", {})
+      == 'api_key=[redacted] token: [redacted] "password": [redacted] '
+      'Authorization: [redacted]', M.redact('api_key=abc token: xyz "password": "p w" '
+                                            'Authorization: Bearer q.r.s', "", {}))
+check("what is kept is cut to 200 characters", len(M.redact("x" * 500, "", {})) == 200)
 
 print()
 print("where this suite runs")

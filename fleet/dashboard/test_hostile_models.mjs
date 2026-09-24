@@ -1358,7 +1358,7 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
     id: "lmstudio", label: "LM Studio", color: "#8b949e", kind: "local", tos_kind: "safe",
     engine: "generic", bin: "lms", install_hint: "brew install lmstudio",
     pull_hint: "lms get <variant> --yes", auth_env: "", run: "{bin} run {variant} {task}",
-    health: "Reply with exactly: OK", tos: "runs on this machine, so there are no service terms",
+    health: "What is 17 plus 25? Reply with the number only.", tos: "runs on this machine, so there are no service terms",
     access: "Runs on this machine. Nothing is paid.", variants: ["llama3.1", "qwen2.5-coder"],
     docs: "https://example.invalid/docs/lmstudio", added: false,
   }];
@@ -1413,15 +1413,15 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   const own = [
     { id: "one", label: "Refuses it", kind: "key", engine: "generic", bin: "one",
       install_hint: "", pull_hint: "", auth_env: "ONE_API_KEY", run: "{bin} -p {task}",
-      health: "Reply with exactly: OK", tos: "its terms forbid non-interactive use",
+      health: "What is 17 plus 25? Reply with the number only.", tos: "its terms forbid non-interactive use",
       access: "An API key.", variants: [], docs: "", added: false },
     { id: "two", label: "Documents it", kind: "key", engine: "generic", bin: "two",
       install_hint: "", pull_hint: "", auth_env: "TWO_API_KEY", run: "{bin} -p {task}",
-      health: "Reply with exactly: OK", tos: "a documented non-interactive mode",
+      health: "What is 17 plus 25? Reply with the number only.", tos: "a documented non-interactive mode",
       access: "An API key.", variants: [], docs: "", added: false },
     { id: "three", label: "Says nothing", kind: "key", engine: "generic", bin: "three",
       install_hint: "", pull_hint: "", auth_env: "THREE_API_KEY", run: "{bin} -p {task}",
-      health: "Reply with exactly: OK", tos: "", access: "An API key.", variants: [],
+      health: "What is 17 plus 25? Reply with the number only.", tos: "", access: "An API key.", variants: [],
       docs: "", added: false },
   ];
   const second = await open({

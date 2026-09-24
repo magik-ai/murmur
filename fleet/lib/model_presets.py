@@ -36,7 +36,13 @@ about a service, and belongs in that farm's own models.toml.
 import copy
 import re
 
-HEALTH = "Reply with exactly: OK"
+# The answer is not in the question: a CLI that echoes the prompt, or quotes it back in an error
+# about a bad key, must not pass the Test. models.health_check passes only a reply line that is 42 alone.
+HEALTH = "What is 17 plus 25? Reply with the number only."
+HEALTH_ANSWER = "42"
+# What every added row was written with before, and what those farms' models.toml still say.
+# Its answer is in its own text, so a row that carries it is asked the new question instead.
+LEGACY_HEALTH = "Reply with exactly: OK"
 
 PRESETS = [
     {

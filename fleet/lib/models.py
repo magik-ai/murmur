@@ -91,7 +91,9 @@ def effective(mid, cat=None, st=None):
     # the last test went, and that is what every reader means by the word. The prompt gets its
     # own name here before the state overwrites it: without this the test request asked the
     # model "unchecked" and no generic model could ever pass its own health check.
-    m["health_prompt"] = str(m.get("health") or "Reply with exactly: OK")
+    # Every model is asked the sum and must answer 42, so a row's own prompt (the legacy sentence
+    # or a hand-written one) is not asked: its answer would not be 42.
+    m["health_prompt"] = PRESETS.HEALTH
     m["enabled"] = srec.get("enabled", bool(m.get("default_on", False)))
     m["health"] = srec.get("health", "unchecked")      # ok | fail | unchecked
     m["health_detail"] = srec.get("health_detail", "")
@@ -145,13 +147,17 @@ def health_check(mid):
     auth_env = m.get("auth_env", "")
     if auth_env and not os.environ.get(auth_env) and not _model_secret(mid):
         return "fail", f"no credential: set {auth_env} (fleet models auth {mid})", ""
-    prompt = m.get("health_prompt") or "Reply with exactly: OK"
+    prompt = m.get("health_prompt") or PRESETS.HEALTH
     run = m.get("run", "{bin} -p {task}")
     cmd = _fill(run, binp, _shquote(prompt), m.get("variant", ""))
     env = dict(os.environ)
     sec = _model_secret(mid)
     if auth_env and sec:
         env[auth_env] = sec
+
+    def said(text, cap=120):
+        # Redacted before it is cut, so a cut can never keep the first half of a secret.
+        return redact(text, auth_env, env, secrets=(sec,))[:cap]
     try:
         # An empty room of its own, thrown away with the answer. A test request runs a real
         # coding agent and some of them edit and commit in the directory they start in; the
@@ -162,22 +168,202 @@ def health_check(mid):
             r = subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True,
                                timeout=90, env=env, cwd=room)
         out = (r.stdout or "") + " " + (r.stderr or "")
-        # OK as a word, not as letters: "grok", "tokens" and "Run 'grok models'" in a failing
-        # CLI's own error all contain them, and a Test that cannot fail routes lanes to a
-        # model whose key is wrong.
-        if re.search(r"\bOK\b", r.stdout or "", re.IGNORECASE):
-            limits = _sniff_limits(out)
-            return "ok", "test request succeeded", limits
+        if r.returncode != 0:
+            # A CLI that failed says so in its exit code, and nothing it printed on the way out
+            # (a token count, a request id) can outvote that.
+            return ("fail", f"CLI exited with code {r.returncode}{_kind(out)}: "
+                    + said(_error_line(r.stdout, r.stderr)), "")
+        if answered(r.stdout or ""):
+            return "ok", "test request succeeded", said(_sniff_limits(out))
         low = out.lower()
         if any(w in low for w in ("rate limit", "quota", "429", "exceeded", "insufficient")):
-            return "fail", "reachable but rate-limited/quota: " + out.strip()[:120], _sniff_limits(out)
+            return ("fail", "reachable but rate-limited/quota: " + said(out.strip()),
+                    said(_sniff_limits(out)))
         if any(w in low for w in ("unauthor", "401", "403", "invalid", "forbidden")):
-            return "fail", "auth rejected: " + out.strip()[:120], ""
-        return "fail", "no OK in response: " + (r.stdout or r.stderr or "").strip()[:120], ""
+            return "fail", "auth rejected: " + said(out.strip()), ""
+        return "fail", "no 42 in response: " + said((r.stdout or r.stderr or "").strip()), ""
     except subprocess.TimeoutExpired:
         return "fail", "test request timed out (90s)", ""
     except Exception as e:
         return "fail", f"error: {e}", ""
+
+
+# What a CLI prints can hold a credential (a failing CLI echoing its key, a debug line with an
+# Authorization header), and the Test keeps what it printed in models-state.json and shows it on
+# the page. Every such fragment goes through redact() before it is kept.
+REDACTED = "[redacted]"
+REDACT_CAP = 200
+_SECRET_NAME_RE = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD)$", re.I)
+_SECRET_PAIR_RE = re.compile(
+    r"([A-Za-z0-9_.-]*(?:key|token|secret|password|credential|authorization)[A-Za-z0-9_.-]*"
+    r"[\"']?\s*[=:]\s*)"
+    r"((?:bearer|basic|token)\s+\S+|\"[^\"]*\"|'[^']*'|[^\s,;&]+)", re.I)
+
+
+def redact(text, auth_env="", env=None, cap=REDACT_CAP, secrets=()):
+    """`text` with every secret it can recognise replaced by [redacted], cut to `cap` characters.
+
+    A secret is the value of the row's auth variables and the row's stored `secrets`, at any
+    length; the value of any other variable whose name ends in KEY, TOKEN, SECRET or PASSWORD,
+    at eight characters or more; and the value in any key=value or key: value whose key names a
+    credential."""
+    text = str(text or "")
+    env = os.environ if env is None else env
+    names = {n for n in re.split(r"[\s,]+", auth_env or "") if n}
+    # The row's own credential is known to be one, and `fleet models auth` accepts a short one,
+    # so it has no floor. A stranger variable only looks like a credential by its name, and a
+    # value like "1" there must not blank out the reply.
+    own = {str(env.get(n) or "") for n in names} | {str(s or "") for s in secrets}
+    values = {v for v in own if v}
+    values |= {str(v or "") for n, v in env.items()
+               if _SECRET_NAME_RE.search(n) and len(str(v or "")) >= 8}
+    for value in sorted(values, key=len, reverse=True):
+        text = text.replace(value, REDACTED)
+    text = _SECRET_PAIR_RE.sub(lambda m: m.group(1) + REDACTED, text)
+    return text[:cap]
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+_JSON_ESCAPE_RE = re.compile(r'\\(?:u[0-9a-fA-F]{4}|["\\/bfnrt])')
+_QUOTES = "\"'\u2018\u2019\u201c\u201d`"
+
+
+def _unescape(m):
+    try:
+        return json.loads('"' + m.group(0) + '"')
+    except ValueError:
+        return m.group(0)
+
+
+# The keys the lane parsers read an agent's words from (parse_generic.words_of, parse_codex's
+# item.text, stream-json message content), and Gemini's response. Usage, ids and error fields are
+# never among them, so a 42 in a token count or a request id is not an answer.
+_REPLY_KEYS = ("response", "text", "message", "content", "delta", "data", "result", "item")
+# Where a CLI keeps its bookkeeping. A reply key nested under one of these is a count or a label,
+# never the model's words, so the search does not go in.
+_META_KEYS = ("stats", "usage", "tokens", "id", "ids", "model", "models", "error", "errors",
+              "metadata", "session_id", "request_id")
+
+
+def _reply_parts(value, out, in_reply=True):
+    if isinstance(value, str):
+        if in_reply:
+            out.append(value)
+    elif isinstance(value, list):
+        for v in value:
+            _reply_parts(v, out, in_reply)
+    elif isinstance(value, dict):
+        # An error event quotes the request back and carries metadata; it is never the reply.
+        if (value.get("error") or value.get("is_error")
+                or "error" in str(value.get("type") or "").lower()):
+            return
+        for k, v in value.items():
+            if k in _REPLY_KEYS:
+                _reply_parts(v, out, True)
+            elif str(k).lower() not in _META_KEYS:
+                # A wrapper such as {"candidates": [{"content": ...}]}: its reply fields count,
+                # its own strings do not.
+                _reply_parts(v, out, False)
+
+
+_MEMBER_RE = re.compile(r'^\s*"(?:[^"\\]|\\.)*"\s*:')
+
+
+def _is_document(value):
+    # A footnote such as [1] or [x, y] parses too; a list is a document only when it holds an
+    # object or a list, as a CLI's array output does.
+    if isinstance(value, dict):
+        return True
+    return isinstance(value, list) and any(isinstance(v, (dict, list)) for v in value)
+
+
+def _documents(text):
+    """Every JSON document in text, at any position, in order. Decoding is tried at each brace or
+    bracket that is not inside a document already found, so JSON lines, one indented document,
+    and a notice before or a footer after are all read the same way."""
+    dec = json.JSONDecoder()
+    docs, i = [], 0
+    while True:
+        starts = [at for at in (text.find("{", i), text.find("[", i)) if at >= 0]
+        if not starts:
+            return docs
+        at = min(starts)
+        try:
+            doc, end = dec.raw_decode(text, at)
+        except ValueError:
+            i = at + 1
+            continue
+        if _is_document(doc):
+            docs.append(doc)
+            i = end
+        else:
+            i = at + 1
+
+
+def reply_text(stdout):
+    """What the model said.
+
+    If the output holds any JSON document, the reply is the reply fields of those documents and
+    nothing else: a notice before, a line between or a usage footer after is the CLI talking, not
+    the model, and a document's stats are not an answer. Only output with no document is read as
+    plain text, and even then a line shaped like a JSON member is a fragment of bookkeeping,
+    never words."""
+    clean = _ANSI_RE.sub("", stdout or "")
+    docs = _documents(clean)
+    if docs:
+        parts = []
+        _reply_parts(docs, parts)
+        return "\n".join(parts)
+    return "\n".join(ln for ln in clean.splitlines() if not _MEMBER_RE.match(ln))
+
+
+def _error_line(stdout, stderr):
+    """The last thing the CLI said before it gave up: stderr first, then stdout, with a JSON
+    error event reduced to its message."""
+    for stream in (stderr, stdout):
+        lines = [ln.strip() for ln in (stream or "").splitlines() if ln.strip()]
+        if not lines:
+            continue
+        last = lines[-1]
+        try:
+            event = json.loads(last)
+        except ValueError:
+            return last
+        if isinstance(event, dict):
+            err = event.get("error")
+            msg = (err.get("message") if isinstance(err, dict) else err) or event.get("message")
+            if isinstance(msg, str) and msg.strip():
+                return msg.strip()
+        return last
+    return "no output"
+
+
+def _kind(out):
+    low = out.lower()
+    if any(w in low for w in ("rate limit", "quota", "429", "exceeded", "insufficient")):
+        return ", rate-limited/quota"
+    if any(w in low for w in ("unauthor", "401", "403", "invalid", "forbidden")):
+        return ", auth rejected"
+    return ""
+
+
+def answered(stdout):
+    """Whether a test reply is the answer: some line of the reply that is 42 and nothing else.
+
+    The Test asks for the number only, so 42 inside a sentence or a footer (Usage: 42 tokens
+    consumed) is not the answer, and neither are -42, 420 or 4.2. Real CLIs still wrap a correct
+    reply: a colour code, a JSON string with escaped quotes or an escaped newline, quotes of any
+    kind around it, surrounding spaces and one full stop after it. Those are taken off each line
+    first, so a working model is not failed on its packaging."""
+    text = _ANSI_RE.sub("", reply_text(stdout))
+    text = _JSON_ESCAPE_RE.sub(_unescape, text)
+    for line in text.splitlines():
+        line = line.strip().strip(_QUOTES).strip()
+        if line.endswith("."):
+            line = line[:-1].strip(_QUOTES).strip()
+        if line == PRESETS.HEALTH_ANSWER:
+            return True
+    return False
 
 
 def _sniff_limits(text):
