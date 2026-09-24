@@ -5,21 +5,21 @@ metadata:
   type: feedback
 ---
 
-**What happened (2026-03-05, the scheduling app repository):** I armed a sweep that
+**What happened (2026-03-05, the scheduling app repository):** I set up a sweep that
 merged every green, unlabelled, conflict-free pull request "by me". All of our agents
 push through one shared account, so "by me" meant everybody. In about twenty minutes it
-merged five pull requests that other agents had deliberately parked, including a pricing
-screen that was waiting on the owner and a set of test fixtures held back behind a
-contract change.
+merged five pull requests that other agents had parked. One was a pricing
+screen waiting for the owner. Another was a set of test fixtures held back until a
+contract change landed.
 
-**Why it matters:** nothing red merged and nothing marked with a stop label was touched,
-so the guards were fine. The selection was the hole, and it cost two agents a morning of
+**Why it matters:** nothing red merged, and nothing with a stop label was touched, so
+the guards worked. The selection was the hole, and it cost two agents a morning of
 reverts.
 
 **How to apply:** an automation picks pull requests from a list of branches the
 orchestrator created in this session, or from a branch prefix it owns, and from nothing
 else. Before arming any of them, check the claims on the board: a branch claimed by
-another agent is a hard stop. A parked pull request often carries no label at all, so the
-absence of a label is not consent.
+another agent is a hard stop. A parked pull request often has no label at all, so a
+missing label is not permission.
 
 Related: [[check-the-board-before-arming-a-merge]], [[the-queue-throws-out-the-whole-batch]].

@@ -1,5 +1,4 @@
 {
-  "//": "Template: copy to .claude/settings.json in your repo. Copy templates/hooks/block-generated-edits.sh to .claude/hooks/block-generated-edits.sh, which is what the command below runs, and copy templates/hooks/generated-files.example.txt to .claude/generated-files.txt, which is the list of protected paths that script reads. The script is byte for byte the one the team plugin ships, so use one or the other and not two copies that drift. With no list file it blocks nothing. This file is committed, so the guard applies to every agent and every person who opens the repo, not only to whoever set it up. The matcher lists every file-writing tool your harness offers: a tool missing from this list is an open door.",
   "hooks": {
     "PreToolUse": [
       {

@@ -1,90 +1,105 @@
 # Tracker adapter: Notion
 
-Notion is a database, not a tracker, so this adapter is mostly a database
-design. It suits a team that already plans in Notion. The gap to know before
-choosing it: there is no pull request integration, so the link between an issue
-and a PR is something your own automation writes.
+Notion is a database, not a tracker, so most of this adapter is a database
+design. It suits a team that already plans in Notion. Notion's GitHub
+integration can link pull requests to tasks and move their status, but only
+through a database property you add yourself (see "Link the pull request").
+
+The API calls below are Notion API endpoints on `https://api.notion.com`.
 
 ## Ids
 
-Page ids are UUIDs, useless in a branch name. Add a **unique ID** property to
-the database (it produces values like `ENG-123`) and use that everywhere.
-Whether that property type is available depends on your plan, so check first;
-the fallback is a plain text `Key` property filled by hand. Branch:
-`ENG-123-short-slug`. PR title: `ENG-123: what the change does`.
+Page ids are long UUIDs, useless in a branch name. Add a **Unique ID**
+property to the database, with a prefix, so it produces values like `ENG-123`,
+and use that id everywhere. Branch: `ENG-123-short-slug`. Pull request title:
+`ENG-123: what the change does`.
 
 ### Setup: the database properties
 
-Create these once and treat the names as the contract.
+Create these once, and treat the names as the contract.
 
 | Property | Type | Holds |
 |---|---|---|
-| `Key` | unique id | `ENG-123` |
-| `Status` | status | Backlog, Todo, In Progress, In Review, Done |
-| `Agent` | select | one option per codename |
-| `Pull request` | url | the PR link |
-| `Branch` | text | the branch name |
-| `Owner next step` | text | what the owner must do, when In Review |
+| `Key` | Unique ID, with a prefix | `ENG-123` |
+| `Status` | Status | Backlog, Todo, In Progress, In Review, Done |
+| `Agent` | Select | one option per code name |
+| `Pull request` | URL | the pull request link |
+| `Branch` | Text | the branch name |
+| `Owner next step` | Text | what the owner must do, when In Review |
+
+If you use Notion's GitHub integration, also add a `GitHub Pull Requests`
+property (see "Link the pull request").
 
 ## Take a task
 
 One page update and one comment:
 
-- `PATCH /v1/pages/<page_id>` setting `Agent` to your codename and `Status` to
-  In Progress.
-- `POST /v1/comments` with the page as parent: "Taken by `<codename>` on
+- `PATCH /v1/pages/<page_id>`, setting `Agent` to your code name and `Status`
+  to In Progress.
+- `POST /v1/comments`, with the page as the parent: "Taken by `<codename>` on
   `<date>`. Working: one line."
 
-The owner stays in the `Assignee` people property if you have one.
+The owner stays in the `Assignee` people property, if you have one.
 
 ## Link the pull request
 
-Nothing links itself here. When the PR opens, write both properties in one
-`PATCH`: `Pull request` gets the URL, `Branch` gets the branch name. Do it from
-a CI step on `pull_request: opened` with an internal integration token, so a
-forgetful agent cannot break the chain.
+With Notion's GitHub integration, add a `GitHub Pull Requests` property to the
+database. A pull request whose title contains the task's Unique ID (for
+example `ENG-123`) is then linked to that task. In the property's settings,
+you can also have the `Status` property change when the pull request is
+opened, has a review requested, is approved, or is merged.
+
+Without the integration, nothing links itself. When the pull request opens,
+write both properties in one `PATCH`: `Pull request` gets the URL, and `Branch`
+gets the branch name. Do it from a CI step that runs when a pull request opens,
+with an internal integration token, so an agent that forgets cannot break the
+link.
 
 ## Post evidence
 
 Post the acceptance comment with `POST /v1/comments`: root cause in one
 sentence, what the fix does, the regression test that guards it, the merged
-PR link.
+pull request link.
 
-Screenshots are awkward. What the API allows for uploading files has changed
-more than once, so check what your workspace's API version supports before
-building on it. The route that always works: host the image where the team can
-already open it, and link it from the comment.
+Screenshots take more work. Before you build on file uploads through the API,
+check what the current Notion API version supports. The route that always
+works: put the image where the team can already open it, and link to it from
+the comment.
 
 ## Move status
 
 `PATCH /v1/pages/<page_id>` on the `Status` property. Keep the option names
-exactly as listed above: everything else here matches on those strings.
+exactly as listed above: everything else here matches on those names.
 
 ## Resting states
 
-- **Done**: Status Done, acceptance comment posted, `Pull request` filled.
-- **In Review**: Status In Review, `Owner next step` filled, and the same
-  sentence repeated in the last comment so it is visible on the page.
-- **Backlog**: Status Backlog, last comment saying what landed, what did not,
-  and what picking it up means.
+- **Done**: `Status` is Done, the acceptance comment is posted, and
+  `Pull request` is filled in.
+- **In Review**: `Status` is In Review, `Owner next step` is filled in, and the
+  same sentence is repeated in the last comment, so it is visible on the page.
+- **Backlog**: `Status` is Backlog, and the last comment says what landed, what
+  did not, and what picking it up means.
 
-A board grouped by `Status` and filtered by `Agent` is your sign-off checklist.
+A board view grouped by `Status` and filtered by `Agent` is your checklist
+before signing off.
 
 ## Agent label
 
-The `Agent` select property, one option per codename. A select holds one value,
-matching the rule that one agent owns an issue at a time. Add a codename as a
-new option rather than reusing somebody else's.
+The `Agent` select property, with one option per code name. A select holds one
+value, which matches the rule that one agent owns an issue at a time. When a
+code name is missing, add it as a new option. Never reuse someone else's.
 
 ## Automation available
 
-Database automations can set a property or post a comment on a change, and what
-they can trigger depends on your plan. With no pull request integration, treat
-CI as the automation: one script patching the page on PR open and on merge
-covers both moments that matter.
+Notion's GitHub integration, described above. Database automations can edit a
+property or send a notification when a page is added or a property changes.
+Most automation types need a paid plan. Without the GitHub integration, use
+CI as the automation: one script that updates the page when a pull request
+opens and when it merges covers both moments that matter.
 
 ## Read-only access for headless workers
 
-An internal integration with read content capability, shared into the database.
-Send its token as a bearer header with a `Notion-Version` header. That worker
-reads the issue and cannot damage the database.
+An internal integration with only the Read content and Read comments
+capabilities, connected to the database. Send its token in the `Authorization`
+header as `Bearer <token>`, together with a `Notion-Version` header. A worker
+with that token can read the issue, and cannot change the database.

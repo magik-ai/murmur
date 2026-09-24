@@ -3,8 +3,8 @@
 # Checks that cannot fail
 
 Traps in continuous integration, in the merge queue, and in the habits around
-them. A check that lies is worse than a check that is missing, so each entry
-names the lie and the reading that beats it.
+them. A check that gives a false answer is worse than a missing check, so each
+entry names the false answer and what to read instead.
 
 - [🎰 The merge queue throws out the whole batch when two pull requests add the same new file, and the local conflict check does not see that kind of clash](the-queue-throws-out-the-whole-batch.md)
 - [📝 A one-line comment change on an endpoint passes branch checks and fails inside the queue, because the generated client is compared only there](the-generated-client-is-checked-only-in-the-queue.md)
