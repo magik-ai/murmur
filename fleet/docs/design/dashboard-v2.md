@@ -1,288 +1,333 @@
-# Dashboard v2: the owner's review, and what changes
+# The dashboard's three tabs
 
-Design record, 2026-09-22. The first product version of the dashboard went live on the
-reference farm on 2026-09-21 and the owner used it for a day. His review, in one line: it still
-looks like something an agent configured for itself; a person from outside cannot read it or
-run anything from it. This record turns each of his points into a decision, then into a build
-plan. It supersedes the information architecture of `dashboard-product.md`; everything else in
-that record (states, vocabulary, API conventions, no framework) stands.
+This design record describes the dashboard's three tabs, Board, Mail and Machine: what each one
+is for, how it is laid out, and why. [`dashboard-product.md`](dashboard-product.md) holds what the
+tabs share: the shell, the API rules, the panel states and the vocabulary. Three sections of the
+Machine tab have records of their own: [`hosting.md`](hosting.md),
+[`models-providers.md`](models-providers.md) and [`github-projects.md`](github-projects.md).
 
-## 1. What the owner said, and the decision for each
+Words used below. A **farm** is an always-on Linux machine that runs coding agents. A **lane** is
+one agent doing one task on its own branch. The **head office** is a private GitHub repository the
+agents use for names, branch claims and messages.
 
-| He said | What it means | Decision |
-|---|---|---|
-| Overview is about nothing; nothing can be read off it | A summary page of summaries has no job when the farm is one screen | Remove it. The landing view is the Board (below) |
-| The old dashboard (agents, machine status, account status on one screen) must stay the main view, redesigned if you like | The one screen an operator keeps open all day | Board = agents grid + machine strip + accounts strip, nothing else |
-| Filtering by chips is strange; give two dropdowns, agent and status | Chips for 20 spawners do not scale | Two selects (started by, status) plus a text search; chips go |
-| Move machine things into one place: setup of the machine, of accounts, of engines, turning the farm on and off | The operator wants a control room, not a status page | Machine tab with sections: Power, Services, Accounts, Engines, Projects, Health, Settings |
-| Accounts: I press Kimi and it says no. No UX around adding; a stub | Cards showed catalog entries as if they were switchable; add returned an ssh line and stopped | Engines: only installed engines get a switch; the rest show "not installed" and the install hint, no button. Accounts: a real add flow with a login state that flips by itself |
-| No idea what Projects is for | A registry table with no purpose on its own | Fold into Machine as a section (register, remove, ports) |
-| Turning the farm on and off from the UI, knowing the UI lives on the farm | Pause and resume the agents, not the machine | Power: pause spawns, drain (salvage and stop lanes), resume; service start and stop for daemon, CI runner, sweep; the dashboard itself never stops itself |
-| Mail: scrolling scrolls everything, blocks must be fixed, I do not understand what is happening | The page scrolled as one document; the "who is in the office" list was endless | Mail becomes a fixed three-pane app: conversations (scroll), thread (scroll), composer (pinned); people in a collapsible side panel with a count; plain words on every label |
-| Queue looks awful, cannot configure or see anything; open cards are giant columns with black bubbles | The card layout with the "not covered here" blob and stage chips | Queue becomes a table with a detail panel: one row per run, stages as a compact strip, detail with stage tabs and a real log viewer; the uncovered list behind a count; controls: enqueue, cancel, runner on and off |
-| Every tab: components, native feel, usability, clarity, settings and control in place | Product, not console output | Every tab has a control bar, a settings drawer where settings exist, and copy a stranger reads |
+The main requirement: a person from outside the project must be able to read the dashboard, and
+run the farm from it, without a terminal and without being told how.
 
-Contested decision, mine: the plan review runs on Claude Opus on the farm, not Codex, because
-the Codex subscription is out of room today (100% of the weekly window). Recorded for the owner.
+## 1. Requirements and decisions
+
+| Requirement | Decision |
+|---|---|
+| Every tab has a job of its own. A page of summaries of the other tabs has none. | There is no Overview. The page opens on the Board. |
+| The screen an operator keeps open all day shows the agents, the machine and the subscriptions together. | The Board: the agents, with a machine strip and an accounts strip above them, and nothing else. |
+| Filtering must work with twenty code names. A row of twenty chips does not. | Two selects, "Started by" and "Status", and a search box. No chips. |
+| Everything about the machine is in one place: power, services, machines, accounts, models, projects, health. | The Machine tab, with one section for each. |
+| A switch is drawn only where pressing it can work. | A model that is not installed, or has no key, gets no switch. Adding an account is a real flow whose login state flips by itself. |
+| The project registry has no purpose on its own. | Projects is a section of the Machine tab, not a tab. |
+| The farm can be paused and resumed from the page, and the page itself runs on the farm. | The power actions act on the agents, never on the machine. The dashboard never stops itself. |
+| Mail must not scroll as one long document, and every label must be plain words. | Mail is three fixed panes, each with its own scroll, and a fixed list of words (amendment 12). |
+| Every tab reads as a product, not as console output. | Controls sit next to what they change, and every sentence is written for a stranger. |
 
 ## 2. Information architecture
 
-Four tabs. The sidebar stays; the header keeps the product name, capacity pill, freshness label,
-search and theme.
+Three tabs. The sidebar and the header are described in `dashboard-product.md` section 2.
 
 | Tab | Job | Sections |
 |---|---|---|
-| Board | the screen you keep open | Agents (grid or table, two selects and search, drawer), Machine strip (load, memory, disk, GPU, temperature, capacity, power mode), Accounts strip (each subscription's windows as bars) |
-| Mail | talk to the agents | Conversations, Thread, Composer, People |
-| Queue | what is being verified | Runs table, Detail panel, Controls |
-| Machine | set up and control the farm | Power, Services, Accounts, Engines, Projects, Health, Settings |
+| Board | the screen you keep open | Setup checklist (only while something is unfinished), Machine strip, Accounts strip, Agents (cards or a table, two selects and a search box, a drawer for each lane) |
+| Mail | talk to the agents | Conversations, the thread with its composer, Agents |
+| Machine | set up and control the farm | Power, Services, Hosting, Accounts, Models, Projects, Health |
 
 ## 3. Board
 
-Agents. Control bar: select "Started by" (all plus each spawner with counts), select "Status"
-(all plus the five meanings with counts), search box (lane, branch, PR number), view toggle cards
-or table, sort in table. The card keeps: mark and name, project and lane and engine, status pill,
-brief excerpt (two lines, markdown stripped), checks strip, cost and tokens, age, "has a change
-open" link. The drawer stays as it is (brief, result, checks, log, message the lane) and gains
-Stop (fleet kill) and Retire (fleet kill --retire) with confirmation.
+**Setup checklist.** Drawn only while a prerequisite from `/api/health` is missing or failing. It
+has no dismiss button: the only way to put it away is to fix what it names. When no agent has
+ever run on the farm, the Board is the checklist plus the commands that produce the first agent:
+`fleet add-project` when no project is registered, the spawn command with the first project's
+name, and `fleet status`.
 
-Machine strip: one row of tiles under the header, the same tiles as today's System top row, plus
-the power mode as a word with a link to Machine. Accounts strip: one row, one compact card per
-subscription: name, session and weekly bars, reset countdown, red when out of room; the codex
-account in the same row. Click opens Machine, Accounts section.
+**Machine strip.** One row of tiles: Load, Memory free, Disk free, Graphics card and Temperature.
+A sensor that is not set up says "Not configured". One that is set up but silent says "No
+answer". Capacity and the sweep countdown are in the header, so they are not tiles.
+
+**Accounts strip.** One row, one card per subscription, the Claude accounts and Codex together.
+A card shows the name, the vendor's mark, every window as a bar with its percent, and when the
+soonest window resets. A card whose account is out of room has a red border. Pressing a card
+opens the Machine tab at Accounts.
+
+**Agents.** The control bar has a "Started by" select (Anyone, then each spawner with a count), a
+"Status" select (Any, then the five meanings with counts), a search box (lane, branch or change
+number), the count of lanes shown, and a Cards or Table switch that this browser remembers. The
+first 60 lanes are drawn, then a "Show the other N" button.
+
+A card shows the code name's mark and the lane's name, a status pill, the project and the lane,
+the start of the brief, the pull request's checks, the age, the cost, the tokens out, "change
+open" when there is a pull request, and the engine's mark. A line is added when the lane's record
+cannot be read, when its contract was not met, or when it dropped part of its scope. The table
+has the columns Lane, Project, Status, Model, Started by, Started, Cost and Tokens out, and sorts
+on any of them.
+
+**The lane drawer** opens from a card or a row and keeps the list on screen. It shows the lane's
+facts (status, project, lane, engine and model, who started it, when, cost, tokens, restart
+policy, branch, worktree), the change and its checks, the brief, the result, the last 200 lines
+of the log with a Refresh button, "Message this lane", and "Ending this lane" (amendment 8).
 
 ## 4. Mail
 
-Layout: `grid-template-columns: 280px 1fr 260px` on desktop, each column its own scroll area,
-the page never scrolls. Left: "Conversations", "Everyone" pinned first (that is the `all` box),
-then boxes newest first, unread badge, search box, "show all". Middle: thread header (name, mark,
-last seen), messages newest at the bottom with day separators, the composer pinned to the
-bottom with the recipient select prefilled to the open conversation and a hint "sent as
-dashboard". Right: "People" with live sessions first and stale ones under a collapsed "not heard
-from lately (N)". Timeline is a toggle in the thread header. Words: conversation, message, sent
-as, last seen. No jargon on screen.
+The three panes hold themselves to the window with
+`grid-template-columns: 280px minmax(0, 1fr) 260px`. Each pane scrolls on its own, and the page
+under them never scrolls.
 
-## 5. Queue
+- **Left, "Conversations"**: a search box, then "Everyone" pinned first (the `all` conversation),
+  then the others, newest first. Each row says when it was last active, with an unread count. The
+  first 12 are listed, then "Show all N". What you have read is remembered in this browser, never
+  on the server.
+- **Middle, the thread**: a header with the name, its mark, when it was last seen, and the
+  "Everything the office did" toggle. The toggle swaps the thread for the office's whole timeline:
+  messages, branch claims and sessions. Messages run from oldest at the top to newest at the
+  bottom, with a line between days. The last 100 are drawn, with a button for the earlier ones.
+  The composer is pinned under the thread and always writes to the open conversation.
+- **Right, "Agents"**: the agents that are here now, and a collapsed "Not heard from lately (N)".
 
-Layout: a table (PR, branch, state, stages strip, started, took, verdict) with three groups as
-row bands (Running, Waiting, Recent), sortable, filter by state and project. Clicking a row
-opens a detail panel on the right (not a card in the grid): summary facts, a tab per stage with
-its log (monospace, scrollable, wrapped, with a copy button), the failed tests as a list, the
-"not covered here" gates as a count with an expandable list, verdicts and their disagreement
-explained in one sentence. Controls bar: "Verify a change" (PR number, project) posting
-`fleet ci enqueue`, Cancel on a running or waiting row, Runner on or off (`fleet ci daemon`),
-and the explanation moved to a "?" tooltip. Empty state keeps the sentence and the count.
+The words on screen are conversation, message, sent as and last seen (amendment 12). A sender's
+name carries the same mark and colour as its agent card.
+
+## 5. No queue tab
+
+This section number covered a tab for a verification queue, which the dashboard does not have. A
+lane's pull request checks come from GitHub and show on its card (section 3).
 
 ## 6. Machine
 
-Power. The four modes plus Automatic as today, and three actions: Pause spawns (mode balanced or
-hard per current setting), Drain (`fleet game-mode on`: salvage and stop lanes), Resume
-(`fleet game-mode off`). Each shows what it will do before the confirm, and the dashboard says
-plainly it keeps running through all of them.
+The sections come in the order a person needs them: power, the services that do the work, the
+machines, the accounts and models the agents spend, the projects they work in, and what is
+missing.
 
-Services. One row per service (agent runner, verification runner, sweep timer, dashboard) with
-state, last change, and Start, Stop, Restart where fleet has the verb (`fleet daemon`, `fleet ci
-daemon`, `fleet autosweep`); the dashboard row is read-only with the restart command shown.
+**Power.** The five settings (Full, Shared, Background, Paused, Automatic) are switched from the
+header on every tab. On a machine without a systemd slice the header has no power control, and
+this section shows the five settings instead. Three actions change the whole farm: "Throttle the
+farm and stop new agents", Drain and Resume (amendment 3). Each one asks first, and its confirm
+says what it will do. The section says that the dashboard keeps running through all of them.
 
-Accounts. Table: name, engine, login state (logged in, waiting for login, expired), session and
-weekly windows, last read. Add: form (name, engine) then a step-by-step panel: the exact command
-to run, a "waiting for the login" state that polls the credentials file and flips to "logged in"
-on its own, Done. Remove with confirmation (moves to backup, says where). Refresh now.
+**Services.** One row per service, with its state, when it last changed, what it does, and Start,
+Stop and Restart where `fleet` has the verb:
 
-Engines. Table: engine, installed (yes or no, with the path or the install hint), enabled switch
-(only when installed), last test result, Test. No switch on an uninstalled engine, and no
-"prepared, do not enable" copy from one farm's notes in the catalog.
+| Service | What is read | Commands |
+|---|---|---|
+| Agent runner | `fleet-daemon.service` | `fleet daemon start`, `fleet daemon stop` |
+| Sweep timer | `fleet-sweep.timer` | `fleet autosweep on`, `fleet autosweep off` |
+| This dashboard | its tmux session and its listening socket | none: the row is read-only and shows `fleet dashboard restart` |
 
-Projects. Table: name, repository, base branch, ports, open lanes; Add (name, repository, port
-base), Remove with confirmation (registry only, worktrees untouched).
+Restart is Stop and then Start.
 
-Health. Today's prerequisites table with the fix commands, sensors with their state.
+**Hosting.** The machines this farm owns: your own machine over SSH, or a DigitalOcean Droplet.
+See [`hosting.md`](hosting.md).
 
-Settings. Product name, mail identity, bind and port, token (rotate button that mints a new
-token and shows it once), sweep interval, respawn limits: read from where they live, written
-where fleet has a writer, read-only with the file path otherwise.
+**Accounts.** A table with the account (its name, a room pill and the vendor's mark), its login
+state (amendment 13), its windows as bars, when it was last read, and Remove. The heading has two
+buttons, "Refresh now" and "Add an account". Adding is a dialog in the drawer:
 
-## 7. Server routes to add
+1. Pick the engine: Claude or Codex.
+2. Name it. Codex is one shared login for the whole farm, so its name is always `codex`.
+3. Run the command the farm gives, in a terminal on your own machine, and follow its steps.
+4. Wait for the login. The dialog reads the login state every two seconds and flips to "Logged
+   in" by itself.
 
-| Route | Backing verb |
+Remove asks first, then moves the account's folder to `~/.fleet/dead-account-backups/`. Nothing is
+deleted. The default account and Codex cannot be removed.
+
+**Models.** The providers the agents are spawned with, and the models switched on for each. See
+section 11 and [`models-providers.md`](models-providers.md).
+
+**Projects.** The repositories a lane may be opened in, and the GitHub login the agents act as.
+See [`github-projects.md`](github-projects.md) and amendment 14.
+
+**Health.** Drawn only when the farm sets `FLEET_DASH_HEALTH=on`, because its tiles read hardware
+sensors that most machines do not have. It shows the sensor tiles and the prerequisites table from
+`/api/health` (Tool, State, What it means, Fix). The tab's count of missing or failing
+prerequisites is shown only while this section is. The Board's setup checklist does not depend on
+this setting.
+
+There is no Settings section. The dashboard's settings are environment variables:
+`FLEET_DASH_TITLE`, `FLEET_DASH_HQ_AGENT`, `FLEET_DASH_BIND`, `FLEET_DASH_PORT`,
+`FLEET_DASH_TOKEN` and `FLEET_DASH_HEALTH`. The page never shows the token (amendment 4).
+
+## 7. Server routes
+
+The routes these tabs use beyond those in `dashboard-product.md` section 3, and what runs behind
+each:
+
+| Route | What runs |
 |---|---|
-| POST /api/agents/kill {slug, retire} | `fleet kill [--retire] <slug>` |
-| GET /api/services, POST /api/services {service, action} | `systemctl --user` status and `fleet daemon`, `fleet ci daemon`, `fleet autosweep` |
-| POST /api/power {action: pause, drain, resume} | `fleet mode`, `fleet game-mode on, off` |
-| POST /api/ci/enqueue {project, pr}, POST /api/ci/cancel {id} | `fleet ci enqueue`, `fleet ci cancel` |
-| GET /api/accounts/login-state | credentials file presence and age per account |
-| POST /api/projects/remove {name} | registry edit through `fleet` if it has a verb, else a guarded edit of projects.toml |
-| GET /api/engines | catalog plus installed check per engine |
-| POST /api/settings/token-rotate | rewrite dash-token, return it once |
+| `POST /api/agents/kill {slug, retire}` | `fleet kill [--retire] <slug>`; the answer carries the lane's restart policy and a sentence on what the press did |
+| `GET /api/services` | nothing: the services snapshot (amendment 5) |
+| `POST /api/services {service, action}` | `fleet daemon start` or `stop`, `fleet autosweep on` or `off`; a restart is the stop and then the start; the dashboard's own row is refused |
+| `GET /api/power/preview?action=` | nothing: what throttle, drain or resume will do, with the lanes a drain would stop, read from state files |
+| `POST /api/power {action}` | `throttle` runs `fleet mode balanced` and answers at once; `drain` runs `fleet game-mode on` and `resume` runs `fleet game-mode off`, each as a job |
+| `GET /api/accounts/login-state` | nothing: each account's credentials file and the last usage snapshot, never the vendor |
+| `POST /api/accounts/refresh` | wakes the account reader; refused for 60 seconds after a press |
+| `POST /api/accounts/add {name, engine}` | creates the account's folder and answers the login command with its steps; for Codex, which is one shared login, it creates nothing and answers the command that logs it in again |
+| `POST /api/accounts/remove {name}` | moves the account's folder to `dead-account-backups` |
+| `GET /api/projects/next-port` | nothing: the next free port block |
+| `POST /api/projects/remove {name}` | a guarded rewrite of `projects.toml`, because `fleet` has no verb for it (amendment 14) |
+| `GET /api/engines` | nothing: the model catalog, and whether each command is installed |
+| `GET /api/jobs`, `GET /api/jobs/<id>` | nothing: the long actions in flight, and one action's record (amendment 7) |
 
-All writes behind the token and the cross-site refusal, argv lists only, `--` before positionals
-where the CLI parses options.
+Every write is behind the token and the cross-site refusal. Every command is an argv list, never a
+shell string. `hq` parses its arguments with argparse, so `hq msg` gets `--` before its positional
+arguments. `fleet` reads its arguments with a case loop and gets no `--`.
 
-## 8. Build plan
+## 8. Acceptance
 
-Three lanes on the farm, disjoint paths, then an adversarial review on the farm, then an
-end-to-end run on the Mac harness (extended with the new routes) and a live check.
+A person who has never seen the farm must be able to:
 
-- server: routes in section 7, tests.
-- ui: Board, Mail, Queue, Machine, the removal of Overview, Projects, Accounts, System as tabs,
-  stub fixtures, contract and hostile and screenshot checks.
-- docs: QUICKSTART step 9, README paragraphs, this record's copy into the murmur handbook, the
-  machine chapter.
+- open the Board and say who is running, whether the machine is healthy, and whether any account
+  is out of room;
+- open Mail, find a conversation and reply, without being told how;
+- open Machine, add an account, switch a model on, pause the farm and resume it.
 
-Acceptance: a person who has never seen the farm opens the Board and can say who is running, is
-the machine healthy, is any account out of room; opens Mail and can find a conversation and
-reply without being told how; opens Queue and can read why a run failed and start a new one;
-opens Machine and can add an account, switch an engine, pause the farm and resume it.
+Amendment 19 says how this is checked.
 
-## 9. Amendments after the farm review (2026-09-22, review on PR #15, verdict RED)
+## 9. Amendments
 
-Where this section conflicts with sections 2 to 8, this section wins.
+These numbered rules refine sections 2 to 8. Code and tests cite them by number ("amendment 7"),
+so the numbers do not change.
 
-1. **Board keeps the queue.** Board = setup checklist (only while a prerequisite is missing or no
-   agent has ever run; then it is the whole page, with the spawn command filled with the first
-   registered project's name), the machine strip, the accounts strip, then a two-pane canvas:
-   agents on the left, the verification queue on the right (running and waiting rows only, plus a
-   count of recent runs linking to the Queue tab), one draggable splitter whose position lives in
-   localStorage, stacking to one column under 1100 px.
-2. **Header keeps** the product name, capacity pill, project filter, freshness label, jump
-   palette, theme switch, and the power mode as a four-state control (Full, Shared, Background,
-   Paused, plus Automatic), not a word. The sweep countdown moves into the machine strip.
-3. **Power actions, honestly labelled.** There is no spawn-only verb. The button is "Throttle the
-   farm and stop new agents" (`fleet mode balanced`) and its confirm names the CPU and memory caps
-   and that the verification database is released. Drain runs `fleet game-mode on`; its confirm
-   lists by name the lanes it will salvage and kill and says it stops the agent runner and the
-   verification database, a run in flight loses its verdict, a lane with no restart policy loses
-   whatever salvage could not push. Resume runs `fleet game-mode off`; its confirm says the agent
-   runner restarts and will respawn every until-pr and until-merged lane, spending subscription.
-   A spawn-independent pause flag in lib/mode.py is a later, separate change.
-4. **Token rotation is out.** Settings shows the token as present or absent, never its value, and
-   the two commands (`fleet dashboard token`, `fleet dashboard restart`).
-5. **Services come from the snapshot.** GET /api/services is served from the 45 second refresher:
-   `systemctl --user is-active` for fleet-daemon.service, fleet-ci.service, fleet-sweep.timer, and
-   the dashboard's own state from its tmux session and listening socket as run.sh status does.
-   /api/ci's per-request is-active call moves into the same snapshot. No GET runs a tool.
-6. **Routes: already served versus to add.** Already served and needing UI only: POST
-   /api/accounts/add (returns the ssh command and the steps; codex has its own branch), POST
-   /api/accounts/remove (moves to dead-account-backups), POST /api/mode, POST /api/models
-   (enable, disable, test), POST /api/projects, GET /api/ci/log (256 KB tail, truncated flag).
-   To add: POST /api/agents/kill {slug, retire}; GET and POST /api/services; POST /api/power
-   {action: throttle, drain, resume}; POST /api/ci/enqueue {project, pr}; POST /api/ci/cancel
-   {id}; GET /api/accounts/login-state; POST /api/projects/remove; GET /api/jobs/<id>.
-7. **Long actions are jobs.** Each write names its own timeout. Any action that can exceed thirty
-   seconds (drain, resume, add project, enqueue) answers at once with a job id recorded under
-   $FLEET_STATE/jobs, is polled by GET /api/jobs/<id>, the control that started it stays disabled
-   showing the running job, and a second press of a running action is refused.
-8. **Stop versus Retire** are drawn from the lane's restart field: with a restart policy, Stop is
-   "Stop this pass" and its confirm says the runner will respawn it under a new name, Retire ends
-   it; with no policy only Stop is shown.
-9. **The queue runner** is `fleet ci daemon start|stop`, never `fleet daemon` (the agent runner);
-   the existing banner in queue.js that says "fleet daemon start" is wrong and is fixed.
-10. **Stage logs**: monospace, soft-wrapped with a wrap toggle, scrolled to the bottom on open, a
-    find box that highlights and steps through matches, a copy button, and the line "showing the
-    last 256 KB of this stage, the whole log is `fleet ci log <id>`" whenever truncated is set; the
-    panel keeps its scroll position across the tick.
-11. **Mail send feedback.** On send the message appears in the open thread at once as "sending",
-    becomes "sent, it will show here at the next refresh" on the 200, and the server wakes the
-    refresher so that is seconds. A failure leaves the text in the composer.
-12. **Mail labels, in full:** "Conversations" over the left pane; "Everyone" first with "every
-    agent on this farm" under it; badge title "Unread since you last looked"; "Show all N";
-    "People" over the right pane with "Here now" and "Not heard from lately (N)"; "Last seen 4 min
-    ago"; composer label "Message to <name>"; "Sent as dashboard, not as you" under Send;
-    "Everything the office did" for the timeline toggle; "The office last answered N minutes
-    ago" for a stale snapshot. Never: mailbox, box, feed, hq, issue, thread id.
-13. **Login states**: logged in, waiting for the first login, token expired (the keepalive timer
-    usually fixes this), rate-limited so the farm cannot tell, each with the sentence
-    claude_accounts.py already writes. The table shows when it was last read; "Refresh now" is
-    disabled for sixty seconds after a press.
-14. **Projects remove** refuses while the project has open lanes and says how many; edits only the
-    registry; the confirm names the port block that becomes free. Add defaults the port base to
-    the next free block above the highest registered one.
-15. **Engines**: Enable and Test each send one real request to the provider and the button says
-    so. Provider keys stay on the command line (`fleet models auth <id>`, key on stdin), never a
-    web form. Spawning stays out of the browser: money and identity belong to a session that has
-    a name. Also out: fleet dashboard stop and restart, fleet clean --force, fleet sweep --force.
-16. **Read-only page.** Every control renders disabled with the sentence from /api/access when the
-    page holds no write token. A read-only dashboard is legitimate and must not look broken.
-17. **Small screens.** Under 1100 px the People pane collapses to a count in the thread header;
-    under 800 px the conversation list becomes a select above the thread; the queue detail panel
-    becomes a full-width sheet under 1000 px.
-18. **Routes and bookmarks.** #/overview, #/projects, #/accounts and #/system redirect to their new
-    homes; the palette is rebuilt from the four tabs. docs/OPERATIONS.md joins the docs lane.
-19. **Acceptance**: the screenshot check extended to the four tabs in all states, the hostile
-    check for every new control in the read-only state, the end-to-end harness extended with the
-    new routes, and one timed run: a person who has not seen the farm answers who is running, is
-    the machine healthy, is any account out of room, and where did this run fail, in under two
-    minutes, from the Board and the Queue alone.
+1. **The Board** is four things, in this order: the setup checklist (only while a prerequisite is
+   missing or failing), the machine strip, the accounts strip, and the agents at full width. When
+   no agent has ever run, the checklist and the commands that start the first agent are the whole
+   page, with the spawn command filled in with the first registered project's name.
+2. **The header** is described in `dashboard-product.md` section 2. Its power setting is a
+   control, not a word: a select with Full, Shared, Background, Paused and Automatic. It is drawn
+   only on a machine with a systemd slice to cap, and it is switched off on a read-only page.
+3. **Power actions are labelled as what they do.** No command only stops new spawns. So the
+   button is "Throttle the farm and stop new agents" (`fleet mode balanced`), and its confirm
+   names the CPU and memory caps from the farm's own power profile. Drain runs
+   `fleet game-mode on`. Its confirm lists by name the lanes it will salvage and stop, and says
+   that it stops the agent runner and that a lane with no restart policy loses whatever salvage
+   could not push. Resume runs `fleet game-mode off`. Its confirm says that the agent runner
+   starts again and respawns every until-pr and until-merged lane, which spends subscription.
+4. **The token never appears on the page.** The page cannot rotate it either.
+   `fleet dashboard token` prints it, and `fleet dashboard restart` restarts the server.
+5. **Services come from the snapshot.** `GET /api/services` is served from the 45 second
+   refresher: `systemctl --user is-active` for `fleet-daemon.service` and `fleet-sweep.timer`,
+   and the dashboard's own row from its tmux session and its listening socket, the way
+   `run.sh status` reads them. No GET runs a tool.
+6. **Routes.** Section 7 lists every route these tabs use and what runs behind each.
+7. **Long actions are jobs.** Each write names its own timeout. An action that can take more than
+   thirty seconds (drain, resume, registering a project) answers at once with a job id. The
+   record lives under `$FLEET_STATE/jobs`, and the page polls `GET /api/jobs/<id>`. The control
+   that started it stays disabled while the job runs, and a second press is refused with 409.
+   Actions that share a resource share a key, so Drain and Resume can never run at once. A
+   finished record is kept for a day.
+8. **Stop versus Retire** comes from the lane's restart field. With a restart policy, the drawer
+   offers "Stop this pass", whose confirm says the runner will start the lane again under a new
+   name, and "Retire this lane", which ends it for good. With no policy it offers only "Stop this
+   lane". The worktree and the branch stay either way.
+9. **Not used.** This number covered the runner of a verification queue, which the dashboard does
+   not have.
+10. **Not used.** This number covered that queue's logs.
+11. **Mail send feedback.** A sent message appears in the open conversation at once as "sending".
+    It becomes "sent, it will show here at the next refresh" when the server answers 200, and the
+    server wakes its refresher, so that takes seconds. A failure leaves the text in the composer.
+12. **Mail labels, in full:** "Conversations" over the left pane; "Everyone" first, with "every
+    agent on this farm" under it; "Unread since you last looked" as the unread count's title;
+    "Show all N"; "Agents" over the right pane, with "Here now" and "Not heard from lately (N)";
+    "Last seen 10m ago"; the composer label `Message to <name>`; "Sent as dashboard, not as you"
+    beside Send; "Everything the office did" for the timeline toggle; "The office last answered
+    10m ago" for an old snapshot. Never on screen: mailbox, box, feed, hq, issue, thread id.
+13. **Login states**: Logged in, Waiting for the first login, Token expired (the keepalive timer
+    usually fixes this), Rate limited (the farm cannot tell how much room is left), and Cannot
+    tell. Each comes with the sentence the server writes. The table shows when each account was
+    last read. "Refresh now" is disabled for sixty seconds after a press.
+14. **Removing a project** is refused while the project has open lanes, and the refusal says how
+    many. It edits only the registry, and keeps a copy of the old file next to it. The checkout
+    and the worktrees stay. The answer names the port block that becomes free. Adding a project
+    defaults its port base to the next free block above the highest one registered.
+15. **Models.** Switching a model on, and Test, each send one real request to the provider, and
+    the buttons say so. A provider key is given on the command line (`fleet models auth <id>`,
+    which reads the key from stdin), never in a web form. Spawning stays out of the browser:
+    money and identity belong to a session that has a name. These also stay in the terminal:
+    `fleet dashboard stop` and `restart`, `fleet clean --force` and `fleet sweep --force`.
+16. **A read-only page.** When the page holds no write token, every control is drawn switched off,
+    and one line on every tab gives the reason from `/api/access`. A read-only dashboard is a
+    legitimate way to run it, and it must not look broken.
+17. **Small screens.** Under 1100 px, the Mail tab's Agents pane becomes a button with a count in
+    the thread header, and slides over the thread when pressed. Under 800 px, the conversation
+    list becomes a select above the thread.
+18. **Old addresses still work.** `#/overview` and `#/agents` open the Board, `#/projects` and
+    `#/accounts` open those sections of the Machine tab, and `#/system` opens the Machine tab. The
+    jump palette offers the three tabs, every agent, every project and every conversation.
+19. **Acceptance checks.** The screenshot checks cover every tab in every stub state, at a desktop
+    width and a phone width. The hostile checks cover every control in the read-only state. And a
+    person who has not seen the farm answers, from the Board alone and in under two minutes: who
+    is running, is the machine healthy, and is any account out of room.
 
-## 10. Lane split for the build (all on the farm, disjoint paths)
+## 10. Where each tab's code lives
 
-- **server**: fleet/dashboard/server.py, fleet/dashboard/test_server.py, fleet/docs/OPERATIONS.md
-  (route table). Routes of amendment 6 "to add", jobs of amendment 7, services snapshot of
-  amendment 5, mail wake of amendment 11 (server half).
-- **ui-board-mail**: fleet/dashboard/index.html, static/app.js, static/app.css, static/core/**,
-  static/views/board.js (new), static/views/mail.js, static/views/agents.js (folded into board or
-  kept as the agents pane module), test_ui.mjs, test_browser.sh (which runs every test_hostile*.mjs
-  and test_screens*.mjs by glob), test_hostile.mjs, test_screens.mjs. Removes overview.js,
-  projects.js, accounts.js, system.js. Registers views "queue" and "machine" from their files
-  with the existing view contract, and links static/queue.css and static/machine.css from
-  index.html from the start.
-- **ui-queue-machine**: static/views/queue.js, static/views/machine.js (new), static/queue.css,
-  static/machine.css, test_stub_server.py (adds every route of amendment 6, jobs, services,
-  login-state, projects remove, with fixtures in all states), test_hostile_queue_machine.mjs,
-  test_screens_queue_machine.mjs. Does not edit core/**, app.js, app.css or index.html; a helper it
-  needs is defined in its own file.
-- **docs**: fleet/docs/QUICKSTART.md, fleet/docs/sharp-edges.md, fleet/README.md, README.md,
-  docs/12-the-machine.md, docs/06-ci-and-merge.md.
+| Part | Files, under `fleet/dashboard/` |
+|---|---|
+| Shell | `index.html`, `static/app.js`, `static/app.css`, `static/core/` |
+| Board | `static/views/board.js`, `static/views/agents.js` |
+| Mail | `static/views/mail.js` |
+| Machine | `static/views/machine.js` and `static/machine.css`; its Hosting, Models and Projects sections in `static/views/hosting.js`, `models.js` and `projects.js`, each with its own stylesheet |
+| Server | `server.py`, `github_access.py` |
+| Stub and checks | `test_stub_server.py`, `stub_github.py`, `stub_models.py`, `test_ui.mjs`, `test_browser.sh` (which runs every `test_hostile*.mjs` and `test_screens*.mjs`), `test_server.py`, `test_github_access.py` |
 
-## 11. Models, not Engines (owner review 2026-09-22, evening)
+A section with a file of its own keeps its code there. `machine.js` exports the few helpers the
+section files share (`sectionHead`, `stepHead`, `commandRow`, `copyCommand`, `detailRow`,
+`farmAlias`, `readOnlyLine`, `blocked`), so two people can change two sections without editing
+the same file.
 
-The owner: "not Engines but Models; make adding popular services and models understandable so
-everything can be done there; right now nothing is clear and it is a visual mess." Decisions:
+## 11. Models
 
-**The word.** The section and every label say "Models". A row is a model the agents can be
-spawned with. "Engine" survives only as the internal launcher kind (claude, codex, generic) and
-never on screen.
+The Machine tab's Models section lists providers. A provider is an agent CLI and the way it is
+paid for, and the models it offers are switched on in its drawer.
+[`models-providers.md`](models-providers.md) section 2 describes the table and the drawer. This
+section covers adding and removing a provider.
 
-**The table.** One row per catalog entry, six columns, nothing else: Model (label, id under it
-in mono, provider glyph from `color`), Runs as (the command, or "not installed" with the pill),
-Access (how it is paid for: "your Claude subscription", "your ChatGPT subscription", "API key",
-read from the catalog's `access` field, falling back to a sentence derived from `auth_env` and
-`tos`), Status (one pill: On, Off, Needs a key, Not installed, Failing; the health detail as the
-pill's title and as a muted line under it when failing), Last test (age), Actions (Switch on or
-off when installed and keyed, Test, Remove for a model the operator added; nothing for a
-shipped one that is not installed except the install hint in the Runs as cell). The role and the
-quality notes leave the table: they are in the row's detail drawer, opened by clicking the name.
-No dated notes, no "PREPARED, do not enable" copy: the shipped catalog carries none, and a
-farm's own catalog is the operator's to write.
+The shipped example catalog carries no dated notes. A note about what a plan is doing today
+belongs in the farm's own catalog.
 
-**Adding.** A button "Add a model" opens a dialog in the drawer with numbered steps:
-1. Pick a service from presets (cards: Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code,
-   OpenCode, Aider, Ollama local, Custom command). Each card says in one line how it is paid
-   for and whether it is safe to run headless (from `tos`). A preset already in the catalog is
-   shown as "already added" and not choosable.
-2. Name it (an id, prefilled from the preset, editable for Custom) and pick the model variant
-   where the preset lists any (for example gemini-2.5-pro).
-3. Access. Subscription presets: the login command to run in a terminal (as accounts do). Key
-   presets: the exact command `fleet models auth <id>` with "paste the key when it asks", and
-   the sentence that a key never goes through this page. Local presets: the install and pull
-   commands.
-4. Register: POST /api/models/add writes the entry to the farm's catalog (creating
-   `~/.config/fleet/models.toml` from the example on first write), then the dialog runs Test and
-   shows the result, then Switch on. The dialog polls the row until the test answers.
-Remove: only for entries the operator added (a `source = "added"` field); shipped entries can
-only be switched off. Remove asks, then deletes the entry and its stored key.
+**Adding.** "Add a provider" opens a dialog in the drawer, with numbered steps:
 
-**Presets** live in the server (`fleet/lib/model_presets.py`), one dict per service with id,
-label, colour, kind (subscription | key | local), bin, install_hint, auth_env, run template,
-health prompt, tos sentence, variants, docs URL. GET /api/models/presets serves them. The
-shipped example catalog keeps claude and codex only; the rest are presets a person adds.
+1. **Pick a service** from the presets. murmur ships two, Claude Code and Codex. Each card says in
+   one line how it is paid for, with a pill for whether running it headless is permitted (read
+   from its `tos` sentence). A service already in the catalog shows "already added" and cannot be
+   picked. When every shipped preset is already there, the dialog says so: another engine is a
+   contribution.
+2. **Name it**: an id for the catalog, filled in from the preset. A "Which model" select appears
+   when the preset lists variants.
+3. **Access.** A subscription preset shows the login command to run in a terminal on your own
+   machine, with its steps (Codex logs in through an SSH tunnel to port 1455). A key preset shows
+   `fleet models auth <id>` and "Paste the key when it asks", and says that a key never goes
+   through this page. A local preset shows its install and pull commands.
+4. **Register it.** `POST /api/models/add` writes the entry to the farm's catalog, creating
+   `~/.config/fleet/models.toml` from the shipped example on the first write. The dialog then
+   runs Test itself when the row can be tested, watches for the answer, and offers Switch on.
 
-**Routes.** GET /api/models/presets; POST /api/models/add {preset, id, variant?, bin?, run?,
-auth_env?} (Custom needs bin and run); POST /api/models/remove {id}; POST /api/models
-{action: enable|disable|test, id} as today. All writes behind the token and the cross-site
-refusal; the catalog is rewritten through a guarded TOML writer that escapes values; a key
-never arrives in a request body (a body carrying `key` is refused with the sentence).
+**Removing.** Only an entry this farm added (`source = "added"`) can be removed. A shipped entry
+can only be switched off. Remove asks first, then deletes the entry, its runtime state and its
+stored key.
 
-**GET /api/engines** keeps its route for one release with the same fields plus `access`,
-`status`, `source`, `variant`; the page reads it as the models table. `/api/models` (the bare
-listing) stays.
+**Presets** live in `fleet/lib/model_presets.py`, one dict per service. Every preset has the same
+fields: id, label, color, kind (subscription, key or local), engine, bin, install_hint, pull_hint,
+auth_env, run (a command template), health (the test prompt), tos, access, variants and docs.
+`GET /api/models/presets` serves them, each with `added` set when the catalog already has it.
+Adding an engine means adding one dict there; [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) says
+which fields and which test to extend.
+
+**Routes.**
+
+- `GET /api/models/presets`
+- `POST /api/models/add {preset, id, variant?, bin?, run?, auth_env?, label?}`
+- `POST /api/models/remove {id}`
+- `POST /api/models {action, id}`, where the action is `enable`, `disable` or `test`
+
+Every write is behind the token and the cross-site refusal. The catalog is written by a guarded
+TOML writer that escapes values. A key never arrives in a request body. A body with a field named
+like a key, secret, token, credential or password is refused, and so is a command line with a key
+written into it. Both refusals name `fleet models auth <id>`.
+
+`GET /api/engines` is what the page reads as the models table: the catalog, with each row's
+`access`, `status` (`on`, `off`, `needs_key`, `not_installed` or `failing`), `source`, `variant`,
+and whether its command is installed. `GET /api/models` is the catalog alone.
