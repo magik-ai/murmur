@@ -3,6 +3,7 @@ import datetime
 import glob
 import http.client
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -1225,6 +1226,68 @@ class AccountsRefreshTest(unittest.TestCase):
             self.assertEqual(self.wake.wakes, 1)
             self.assertEqual(fetch_json(base, "/api/accounts/refresh", token="s3cret",
                                         method="POST")[0], 429)
+
+
+class AccountFolderTest(unittest.TestCase):
+    """An added Claude account's name is also its folder. Joined to the accounts folder, "." is
+    that folder itself, and removing it used to move every account's login away at once."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = pathlib.Path(self.tmp.name)
+        self.extra = self.home / ".fleet" / "claude-accounts"
+        for name in ("alice", "bob"):
+            (self.extra / name).mkdir(parents=True)
+            (self.extra / name / ".credentials.json").write_text("{}")
+        for target, value in (("HOME", str(self.home)), ("EXTRA_DIR", str(self.extra)),
+                              ("FARM_ALIAS", "farm")):
+            patcher = mock.patch.object(dashboard.CA, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for target, value in (("BIND", "127.0.0.1"), ("TOKEN", "s3cret")):
+            patcher = mock.patch.object(dashboard, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def folders(self):
+        return sorted(path.name for path in self.extra.iterdir())
+
+    def post(self, base, route, name):
+        return fetch_json(base, route, token="s3cret", method="POST", body={"name": name})
+
+    def test_removing_a_name_that_is_not_a_plain_name_moves_nothing(self):
+        with running_server() as base:
+            for name in (".", "..", ".alice", "-x", "./alice", "", "a" * 41):
+                status, payload = self.post(base, "/api/accounts/remove", name)
+                self.assertEqual(status, 400, (name, payload))
+            self.assertEqual(self.folders(), ["alice", "bob"])
+            self.assertFalse((self.home / ".fleet" / "dead-account-backups").exists())
+            status, payload = self.post(base, "/api/accounts/remove", "alice")
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(self.folders(), ["bob"])
+            # the login is kept in the backup folder, not deleted
+            self.assertTrue(os.path.isfile(os.path.join(payload["backup"], ".credentials.json")))
+
+    def test_adding_takes_the_same_rule(self):
+        with running_server() as base:
+            for name in (".", "..", ".hidden", "-x", "a b", "default", "auto"):
+                status, payload = self.post(base, "/api/accounts/add", name)
+                self.assertEqual(status, 400, (name, payload))
+            self.assertEqual(self.folders(), ["alice", "bob"])
+            status, payload = self.post(base, "/api/accounts/add", "carol")
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(self.folders(), ["alice", "bob", "carol"])
+
+    def test_the_cli_takes_the_same_rule(self):
+        for name in (".", "..", ".hidden", "-x", "a b", "a/b", "default", "auto", ""):
+            with contextlib.redirect_stderr(io.StringIO()) as said:
+                self.assertEqual(dashboard.CA.cmd_add(name), 1, name)
+            self.assertIn("plain name", said.getvalue())
+        self.assertEqual(self.folders(), ["alice", "bob"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(dashboard.CA.cmd_add("carol"), 0)
+        self.assertEqual(self.folders(), ["alice", "bob", "carol"])
 
 
 class AccountEngineTest(unittest.TestCase):

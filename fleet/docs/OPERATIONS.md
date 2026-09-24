@@ -598,6 +598,8 @@ fleet accounts balance         # the next engine and account, taking turns over 
 fleet accounts keepalive       # refresh any login token that is close to expiry
 ```
 
+- An account name starts with a letter or digit, then letters, digits, `.`, `_` or `-`, at most
+  40 characters. `auto` and `default` are taken.
 - When you log in a new account, check that the browser is signed in to the right Claude account.
   Use a private window if another one is signed in. Otherwise the new folder quietly uses the same
   subscription.

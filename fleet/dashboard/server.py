@@ -4137,7 +4137,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                   "Click Refresh here"]}))
                     return
                 name = (body.get("name") or "").strip()
-                if not re.match(r"^[A-Za-z0-9._-]{1,40}$", name) or name == "default":
+                if not CA.ACCOUNT_NAME.fullmatch(name) or name in ("default", "auto"):
                     self._send(400, json.dumps({"error": "invalid account name"})); return
                 path = os.path.join(CA.EXTRA_DIR, name)
                 if os.path.isdir(path) and os.path.exists(os.path.join(path, ".credentials.json")):
@@ -4157,7 +4157,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                               "Type /exit, then click Refresh here"]}))
             elif self.path.startswith("/api/accounts/remove"):
                 name = (body.get("name") or "").strip()
-                if not re.match(r"^[A-Za-z0-9._-]{1,40}$", name) or name in ("default", "codex"):
+                # The rule refuses "." and "..": joined to EXTRA_DIR they name the folder that
+                # holds every account, and the move below would take all of them at once.
+                if not CA.ACCOUNT_NAME.fullmatch(name) or name in ("default", "codex"):
                     self._send(400, json.dumps({"error": "cannot remove this account"})); return
                 path = os.path.join(CA.EXTRA_DIR, name)
                 if not os.path.isdir(path):

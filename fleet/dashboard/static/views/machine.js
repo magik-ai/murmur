@@ -514,8 +514,9 @@ async function startAdd(context) {
     context.paint();
     return;
   }
-  if (local.addEngine !== "codex" && !/^[A-Za-z0-9._-]{1,40}$/.test(name)) {
-    local.addError = "A name is letters, digits, dots, dashes or underscores, up to forty of them.";
+  if (local.addEngine !== "codex" && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/.test(name)) {
+    local.addError = "A name starts with a letter or digit, then letters, digits, dots, dashes or "
+      + "underscores, up to forty in all.";
     context.paint();
     return;
   }

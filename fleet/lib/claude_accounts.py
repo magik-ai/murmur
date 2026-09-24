@@ -29,6 +29,7 @@ CLI:
 
 import json
 import os
+import re
 import socket
 import time
 import subprocess
@@ -43,6 +44,10 @@ HOME = os.path.expanduser("~")
 # hostname is the honest default, and is right whenever you are already on the box.
 FARM_ALIAS = os.environ.get("FLEET_FARM_ALIAS", "").strip() or socket.gethostname()
 EXTRA_DIR = os.path.join(HOME, ".fleet", "claude-accounts")
+# The name of an added account, which is also its folder in EXTRA_DIR: a letter or digit first,
+# then letters, digits, '.', '_' or '-', at most 40 characters. The first character rules out '.'
+# and '..', which name EXTRA_DIR itself and its parent, and anything that reads as an option.
+ACCOUNT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
 # An account at or past this share of a window is not a candidate: a lane spawned into it would
@@ -502,8 +507,11 @@ def cmd_dir(name: str) -> int:
 
 
 def cmd_add(name: str) -> int:
-    if not name or "/" in name or name == "auto":
-        print("fleet accounts: pick a plain name (not 'auto')", file=sys.stderr)
+    # `default` is ~/.claude, and a folder of that name would take its place in account_dirs().
+    if not ACCOUNT_NAME.fullmatch(name or "") or name in ("auto", "default"):
+        print("fleet accounts: pick a plain name: a letter or digit first, then letters, digits, "
+              "'.', '_' or '-', at most 40 characters, and not 'auto' or 'default'",
+              file=sys.stderr)
         return 1
     path = os.path.join(EXTRA_DIR, name)
     os.makedirs(path, exist_ok=True)
