@@ -74,6 +74,10 @@ Never spawn without an explicit go from the user.
        --by <codename> --task "<brief>"          # --account defaults to auto
    ```
 
+   Name the lane with letters, digits, `.`, `_` and `-` only, starting with a
+   letter or digit. The project and your code name follow the same rule, and
+   `fleet spawn` refuses any other name.
+
    Use `--issue <N>` instead of `--task` to have the agent start from a
    GitHub issue. For a long brief, or one full of quotes, write it to a file
    on the farm and pass `--brief-file`:
