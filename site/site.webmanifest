@@ -1,7 +1,7 @@
 {
   "name": "murmur",
   "short_name": "murmur",
-  "description": "Claude Code and Codex, run as one team on a machine you own.",
+  "description": "Open-source orchestrator for coding agents. Run Claude Code and Codex agents as a team on a machine you own.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F7EEDC",

@@ -1,3 +1,12 @@
+# Draws the murmur mark: the lamp-lit bird in the middle and the seven it watches, on an even
+# ring around it.
+#
+# Run it from this folder: python3 draw_mark.py. It writes murmur-mark.svg (Lamplight colours),
+# murmur-mark-dusk.svg (Dusk colours) and final7.html, a page that shows the mark and the
+# wordmark at several sizes on the light paper, on white and on the dark ground.
+#
+# It takes the bird glyph and fit() from birds.py: the part of that file before its catalogue
+# of candidates.
 import math, random
 src=open("birds.py").read().split("V={}")[0]
 ns={}; exec(src, ns)

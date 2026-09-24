@@ -1,5 +1,9 @@
 # Gather
 
-The mark in motion: the wait of a second or more.
+The loader: the mark in motion, for waits of a second or more.
 
-The lamp-lit bird holds the middle and the seven it watches wheel round it in 2.8 s, the way a flock circles overhead, seen a little from the side, so the circle is an ellipse. A bird never turns over: only its place moves, and it grows darker and larger as it comes round the front, paler and smaller behind. Show it only when a wait will last a second or longer, beside words that say what is being waited for ("Asking the farm"); a shorter wait shows nothing. Under reduced motion the seven rest on the ellipse round the lit one, which is the mark itself.
+`mm-gather` holds seven empty `<i>` elements, one per bird. The lamp-lit bird stays in the middle, and the seven circle around it every 2.8 s on an ellipse, like a flock circling overhead seen a little from the side. A bird never turns over: only its position moves. It grows larger and darker as it comes round the front, and smaller and paler behind.
+
+Show it only when a wait will last a second or longer, and always beside words that say what is being waited for ("Asking the farm"). A shorter wait shows nothing. Give it `role="status"` and an `aria-label`.
+
+Under reduced motion, the seven birds rest on the ellipse around the lit one, which is the mark itself.

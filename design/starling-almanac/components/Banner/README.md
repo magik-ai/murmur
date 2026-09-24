@@ -1,5 +1,7 @@
 # Banner
 
-The one strip on a page that explains why things are switched off.
+A strip at the top of the content that says why controls are switched off.
 
-Butter field, `ink` text, the reason in the server's words. At most one banner on a screen, at the top of the content; it is not for news, tips or marketing.
+Use `mm-banner`. It sits on `field-butter` with `ink` text. Start with a short bold phrase in a `<b>` (drawn in `warning`), then give the reason in the server's own words.
+
+Show at most one banner on a screen, at the top of the content. It is not for news, tips or marketing.

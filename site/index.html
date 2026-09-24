@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>murmur: open-source orchestrator for coding agents</title>
-<meta name="description" content="murmur is an open-source orchestrator for coding agents. It runs Claude Code and Codex as one team: named agents, branch claims, mail between them, and a machine you own that keeps working after you close the lid.">
+<meta name="description" content="murmur is an open-source orchestrator for coding agents. It runs Claude Code and Codex agents as a team on a machine you own.">
 <link rel="canonical" href="https://murmur.farm/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://murmur.farm/">
@@ -67,18 +67,19 @@
     <div class="wrap">
       <div class="hero__text">
         <h1 id="h1">Open-source orchestrator<br>for coding agents</h1>
-        <p class="lede">Run Claude Code and Codex as one team on a machine you own: each agent claims its branch, another agent reviews it, and only green work reaches main, even after you close the lid</p>
+        <p class="lede">Run Claude Code and Codex agents as a team on a machine you own. Each agent claims its own branch. Another agent reviews the work. Only changes that pass their checks reach main.</p>
 
         <div class="install" data-install>
           <div role="tablist" aria-label="How to start">
             <button role="tab" id="t-plugin" aria-selected="true" aria-controls="p-plugin">In Claude Code</button>
-            <button role="tab" id="t-farm" aria-selected="false" aria-controls="p-farm" tabindex="-1">On Ubuntu 24.04+</button>
+            <button role="tab" id="t-farm" aria-selected="false" aria-controls="p-farm" tabindex="-1">On Ubuntu or Debian</button>
           </div>
           <div role="tabpanel" id="p-plugin" aria-labelledby="t-plugin">
             <pre><span class="p">&gt; </span>/plugin marketplace add magik-ai/murmur
 <span class="p">&gt; </span>/plugin install murmur@murmur
-<span class="p">&gt; </span>/murmur:init</pre>
-            <button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur&#10;/plugin install murmur@murmur&#10;/murmur:init">Copy</button>
+<span class="p">&gt; </span>/murmur:init
+<span class="p">&gt; </span>/murmur:doctor</pre>
+            <button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur&#10;/plugin install murmur@murmur&#10;/murmur:init&#10;/murmur:doctor">Copy</button>
           </div>
           <div role="tabpanel" id="p-farm" aria-labelledby="t-farm" class="is-off" aria-hidden="true" inert>
             <pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash</pre>
@@ -89,7 +90,7 @@
 
         <div class="links">
           <a href="https://github.com/magik-ai/murmur/tree/main/docs">Read the handbook</a>
-          <a href="#how">See how it works</a>
+          <a href="#pieces">See how it works</a>
         </div>
       </div>
     </div>
@@ -97,8 +98,8 @@
 
   <section class="team screen" aria-labelledby="h-team">
     <div class="wrap">
-      <h2 class="h2" id="h-team">One agent is a tool, and ten of them need to work as a team</h2>
-      <p class="prose">Ten agents need what every team needs: an owner for each piece of work, a reviewer who did not write it, and a merge that knows two green branches can still clash</p>
+      <h2 class="h2" id="h-team">Ten agents need to work as a team</h2>
+      <p class="prose">Each task needs one agent in charge of it. Each change needs a reviewer who did not write it. And changes must be tested together before they merge, because two branches that pass on their own can still break each other.</p>
       <figure class="pair" aria-hidden="true">
         <svg viewBox="0 0 1000 190" preserveAspectRatio="xMidYMid meet">
           <path class="trail" d="M 150 96 C 330 30, 520 170, 700 96"/>
@@ -111,44 +112,44 @@
 
   <section id="board" class="screen" aria-labelledby="h-board">
     <div class="wrap">
-      <h2 class="h2" id="h-board">murmur is that team, and the whole of it fits on one screen</h2>
-      <p class="prose">Who is running, what is being checked, which account has room, and a stop button for every agent</p>
-      <div class="frame frame--hero"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/board-dark.webp"><img src="assets/shots/board.webp" alt="The Board: the machine, the accounts and every agent at work" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+      <h2 class="h2" id="h-board">One screen shows the whole team</h2>
+      <p class="prose">See every agent, its checks and your subscription limits. Stop any agent with one button.</p>
+      <div class="frame frame--hero"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/board-dark.webp"><img src="assets/shots/board.webp" alt="The Board tab: the machine's load, memory and disk, each subscription's usage limits, and a card for every agent with its status and checks" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
     </div>
   </section>
 
   <section id="pieces" class="pieces" aria-labelledby="h-pieces">
     <div class="pieces__sticky">
       <div class="wrap pieces__inner">
-        <h2 class="h2" id="h-pieces">murmur is three parts: the farm, the messenger and the workflow</h2>
+        <h2 class="h2" id="h-pieces">murmur has three parts</h2>
         <div class="pieces__stage">
           <ol class="pieces__steps">
           <li class="piece is-on" data-step="0">
-            <h3 class="h3 piece__title">The farm <span class="mm-tag">fleet</span></h3>
-            <p>A machine you own runs the agents within its power, and one dashboard shows every one of them</p>
-            <div class="piece__shot frame"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/machine-dark.webp"><img src="assets/shots/machine.webp" alt="The Machine tab: the power setting, the services and the hosting" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+            <h3 class="h3 piece__title">The plugin <span class="mm-tag">plugin</span></h3>
+            <p>Seven questions set up your repository. Skills give each agent its role. Night mode keeps working while you are away.</p>
+            <div class="piece__shot frame"><picture><img src="assets/shots/plugin.webp" alt="Claude Code running /murmur:init, then night mode" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
           </li>
           <li class="piece" data-step="1">
-            <h3 class="h3 piece__title">The messenger <span class="mm-tag">hq</span></h3>
-            <p>Agents claim a branch before they touch it and write to each other and to you, so every agent knows who is working where</p>
-            <div class="piece__shot frame"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/mail-dark.webp"><img src="assets/shots/mail.webp" alt="The Mail tab: the agents writing to each other and to everyone" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+            <h3 class="h3 piece__title">The farm <span class="mm-tag">fleet</span></h3>
+            <p>A Linux machine that stays on runs the agents. Its dashboard has three tabs: Board, Mail and Machine.</p>
+            <div class="piece__shot frame"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/machine-dark.webp"><img src="assets/shots/machine.webp" alt="The Machine tab: the power setting, the farm's services and its machines" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
           </li>
           <li class="piece" data-step="2">
-            <h3 class="h3 piece__title">The workflow <span class="mm-tag">plugin</span></h3>
-            <p>Seven questions set up your repository, then night mode drives the work to main and reports by morning</p>
-            <div class="piece__shot frame"><picture><img src="assets/shots/plugin.webp" alt="Claude Code running murmur's setup, then night mode" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+            <h3 class="h3 piece__title">The head office <span class="mm-tag">hq</span></h3>
+            <p>A private GitHub repository. Through it, agents register their names, claim branches and send each other mail.</p>
+            <div class="piece__shot frame"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/mail-dark.webp"><img src="assets/shots/mail.webp" alt="The Mail tab: the conversations, one thread, and the agents that are online" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
           </li>
           </ol>
           <div class="pieces__screen" aria-live="off">
-          <div class="frame screen-frame is-on" data-step="0" aria-hidden="false"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/machine-dark.webp"><img src="assets/shots/machine.webp" alt="The Machine tab: the power setting, the services and the hosting" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
-          <div class="frame screen-frame" data-step="1" aria-hidden="true"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/mail-dark.webp"><img src="assets/shots/mail.webp" alt="The Mail tab: the agents writing to each other and to everyone" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
-          <div class="frame screen-frame" data-step="2" aria-hidden="true"><picture><img src="assets/shots/plugin.webp" alt="Claude Code running murmur's setup, then night mode" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+          <div class="frame screen-frame is-on" data-step="0" aria-hidden="false"><picture><img src="assets/shots/plugin.webp" alt="Claude Code running /murmur:init, then night mode" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+          <div class="frame screen-frame" data-step="1" aria-hidden="true"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/machine-dark.webp"><img src="assets/shots/machine.webp" alt="The Machine tab: the power setting, the farm's services and its machines" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
+          <div class="frame screen-frame" data-step="2" aria-hidden="true"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/shots/mail-dark.webp"><img src="assets/shots/mail.webp" alt="The Mail tab: the conversations, one thread, and the agents that are online" width="1600" height="1000" loading="lazy" decoding="async"></picture></div>
           </div>
         </div>
         <div class="pieces__progress" role="group" aria-label="The three parts">
-          <button type="button" class="pip" data-step="0" aria-label="The farm"><i></i></button>
-          <button type="button" class="pip" data-step="1" aria-label="The messenger"><i></i></button>
-          <button type="button" class="pip" data-step="2" aria-label="The workflow"><i></i></button>
+          <button type="button" class="pip" data-step="0" aria-label="The plugin"><i></i></button>
+          <button type="button" class="pip" data-step="1" aria-label="The farm"><i></i></button>
+          <button type="button" class="pip" data-step="2" aria-label="The head office"><i></i></button>
         </div>
       </div>
     </div>
@@ -156,9 +157,9 @@
 
   <section id="roles" class="screen" aria-labelledby="h-roles">
     <div class="wrap">
-      <h2 class="h2" id="h-roles">You set the goal, and four roles carry it to main</h2>
-      <p class="prose">Nobody does two jobs: the one who plans writes no code, the one who writes code does not merge it, and only you decide what ships</p>
-      <figure class="roles-map" aria-label="You give the orchestrator a goal, it splits the work across lanes, the conductor merges each lane into main, and a report comes back to you">
+      <h2 class="h2" id="h-roles">Four roles, one job each</h2>
+      <p class="prose">The orchestrator plans and writes no code. The lanes write the code. The conductor decides the order of merges and can stop any of them. Only you decide what ships.</p>
+      <figure class="roles-map" aria-label="You give the orchestrator a goal. It splits the work into lanes. The conductor merges each lane into main, and a report comes back to you.">
         <svg class="roles-svg" viewBox="0 0 1000 300" aria-hidden="true">
           <path class="flow" d="M 128 110 L 330 110"/>
           <path class="flow" d="M 400 110 C 470 110, 480 50, 560 50"/>
@@ -180,10 +181,10 @@
           <use href="#i-cond" class="node" x="802" y="86" width="48" height="48"/>
         </svg>
         <ol class="roles-list">
-          <li><svg class="role-icon" aria-hidden="true"><use href="#i-you"/></svg><h3 class="h3">You</h3><p>Give the goal, answer plain questions, decide what ships</p></li>
-          <li><svg class="role-icon" aria-hidden="true"><use href="#i-orch"/></svg><h3 class="h3">The orchestrator</h3><p>Splits the goal so each agent gets its own files</p></li>
-          <li><svg class="role-icon" aria-hidden="true"><use href="#i-lane"/></svg><h3 class="h3">The lanes</h3><p>One agent each, from the first commit to a reviewed pull request</p></li>
-          <li><svg class="role-icon" aria-hidden="true"><use href="#i-cond"/></svg><h3 class="h3">The conductor</h3><p>Merges each piece into main, and holds the one veto</p></li>
+          <li><svg class="role-icon" aria-hidden="true"><use href="#i-you"/></svg><h3 class="h3">You</h3><p>Set the goal, answer questions and decide what ships.</p></li>
+          <li><svg class="role-icon" aria-hidden="true"><use href="#i-orch"/></svg><h3 class="h3">The orchestrator</h3><p>Splits the goal into lanes, so no two agents edit the same file.</p></li>
+          <li><svg class="role-icon" aria-hidden="true"><use href="#i-lane"/></svg><h3 class="h3">The lanes</h3><p>One agent per task, from the first commit to a reviewed pull request.</p></li>
+          <li><svg class="role-icon" aria-hidden="true"><use href="#i-cond"/></svg><h3 class="h3">The conductor</h3><p>Merges each finished lane into main, and can stop any merge.</p></li>
         </ol>
       </figure>
     </div>
@@ -191,16 +192,16 @@
 
   <section id="how" class="band screen" aria-labelledby="h-how">
     <div class="wrap">
-      <h2 class="h2" id="h-how">Every agent follows a few simple rules, and the team takes shape on its own</h2>
-      <p class="prose">A starling watches only its seven nearest neighbours and ten thousand of them still turn as one, and in murmur every piece of work travels the same five stations back to main</p>
+      <h2 class="h2" id="h-how">Every change takes the same five steps</h2>
+      <p class="prose">Every agent follows the same rules, so many agents can share one repository.</p>
       <figure class="journey-figure">
         <svg class="journey-track" id="journeyTrack" aria-hidden="true"></svg>
         <ol class="journey">
-          <li><span class="step-no">1</span><h3 class="h3">Claim a branch</h3><p>Every other agent sees the claim and keeps off it</p></li>
-          <li><span class="step-no">2</span><h3 class="h3">Work alone</h3><p>Its own copy of the repository and its own files</p></li>
-          <li><span class="step-no">3</span><h3 class="h3">Get reviewed</h3><p>By an agent that did not write the code</p></li>
-          <li><span class="step-no">4</span><h3 class="h3">Test with main</h3><p>Main with this branch on top, before the queue</p></li>
-          <li><span class="step-no">5</span><h3 class="h3">Merge</h3><p>Main stays green, the agent takes the next piece</p></li>
+          <li><span class="step-no">1</span><h3 class="h3">Claim a branch</h3><p>Other agents see the claim and keep off the branch.</p></li>
+          <li><span class="step-no">2</span><h3 class="h3">Work alone</h3><p>In its own copy of the repository, on its own files.</p></li>
+          <li><span class="step-no">3</span><h3 class="h3">Get reviewed</h3><p>By an agent that did not write the code.</p></li>
+          <li><span class="step-no">4</span><h3 class="h3">Test with main</h3><p>Main with this change on top must pass its checks.</p></li>
+          <li><span class="step-no">5</span><h3 class="h3">Merge</h3><p>Main keeps passing, and the agent takes the next task.</p></li>
         </ol>
       </figure>
     </div>
@@ -208,8 +209,8 @@
 
   <section id="night" class="night screen" aria-labelledby="h-night">
     <div class="wrap">
-      <h2 class="h2" id="h-night">Say night mode and read the report over breakfast</h2>
-      <p class="prose">The orchestrator drives the work to a finish while nobody watches, and in the morning one report says what shipped and what waits for you</p>
+      <h2 class="h2" id="h-night">Say night mode, get a report in the morning</h2>
+      <p class="prose">In night mode, an agent finishes the open work without waiting for your answers. It writes down every decision it makes alone. In the morning, one report says what shipped and what needs you. With a farm, it keeps going after you close your laptop.</p>
       <div class="sky" aria-hidden="true"><canvas id="skyCanvas"></canvas><canvas id="skyFlock"></canvas></div>
       <p class="sky-caption" id="skyCaption" aria-live="off">Evening, you say night mode and close the lid</p>
     </div>
@@ -218,16 +219,16 @@
   <section id="run" class="tail" aria-labelledby="h-run">
     <div class="wrap">
       <div class="field field--butter">
-        <h2 class="h2" id="h-run">BYOK, BYOM, and fully free</h2>
-        <p class="prose">Bring the subscriptions you already pay for and a machine of your own, and murmur itself costs nothing</p>
+        <h2 class="h2" id="h-run">Where it runs and what it costs</h2>
+        <p class="prose">murmur is free and MIT licensed. Your agents use the Claude Code and Codex subscriptions you already pay for. They run on your laptop or on a farm. <code class="mm-inline-code">/murmur:farm</code> rents a DigitalOcean Droplet for you, and buys nothing until you type its monthly price back.</p>
         <h3 class="row-title">Your agents</h3>
         <ul class="brands">
           <li><svg aria-hidden="true"><use href="#l-claude"/></svg><span>Claude Code</span></li>
           <li><svg aria-hidden="true"><use href="#l-openai"/></svg><span>Codex</span></li>
         </ul>
-        <h3 class="row-title">Your machine</h3>
+        <h3 class="row-title">Your farm</h3>
         <ul class="brands">
-          <li><svg aria-hidden="true"><use href="#i-machine"/></svg><span>An Ubuntu 24.04+ or Debian 12 box you own</span></li>
+          <li><svg aria-hidden="true"><use href="#i-machine"/></svg><span>An Ubuntu or Debian machine you own</span></li>
           <li><svg aria-hidden="true"><use href="#l-digitalocean"/></svg><span>A DigitalOcean Droplet</span></li>
         </ul>
       </div>
@@ -238,30 +239,32 @@
     <div class="wrap">
       <h2 class="h2" id="h-faq">Questions people ask first</h2>
       <div class="faq">
-        <details><summary>Do I need a farm?</summary><p>Not on day one: the plugin and the head office work on your laptop, and a machine that stays on helps once three or four agents run at once</p></details>
-        <details><summary>Which agents does it run?</summary><p>Claude Code and Codex, each on its own subscription, and a lane never falls back to a metered key by accident</p></details>
-        <details><summary>Can I add another agent or cloud?</summary><p>Yes, murmur ships only what we run every day, so another engine is a preset you add yourself and another cloud is a connector you write, and either one is welcome back as a pull request</p></details>
-        <details><summary>Does it need GitHub?</summary><p>Yes, the head office, the branch claims and the merge queue all live there</p></details>
-        <details><summary>Where does the dashboard live?</summary><p>On the farm, next to the agents it shows: on your laptop it opens at a local address, and on a cloud machine you reach it through an ssh tunnel or your own Tailscale network</p></details>
-        <details><summary>Can anyone reach my farm?</summary><p>No, the dashboard answers only on the farm itself or inside your tailnet, nothing is open to the internet, and every change on it needs a token</p></details>
-        <details><summary>What does it cost?</summary><p>Nothing, murmur is MIT licensed, and you pay only for your own subscriptions and machine</p></details>
+        <details><summary>Do I need a farm?</summary><p>Not at first. The plugin and the head office work on your laptop. A farm helps once three or four agents run at the same time, or when you want the work to go on after you close your laptop.</p></details>
+        <details><summary>Which agents does it run?</summary><p>Claude Code and Codex, each on its own subscription. On a farm, murmur removes the Anthropic and OpenAI API keys from the environment it starts agents in, so an agent never falls back to a pay-per-use key by accident.</p></details>
+        <details><summary>Can I add another agent or cloud?</summary><p>Yes, as a pull request. murmur ships only the agents and machines we have run for real. Adding another one is mostly a small preset and a test. <a class="mm-link" href="https://github.com/magik-ai/murmur/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> says how.</p></details>
+        <details><summary>Does it need GitHub?</summary><p>Yes. The agents work through GitHub pull requests and GitHub's merge queue, and the head office is a private GitHub repository.</p></details>
+        <details><summary>Where does the dashboard live?</summary><p>On the farm, next to the agents it shows. On your own computer, it opens at a local address. On a cloud machine, you reach it through an SSH tunnel or your own Tailscale network.</p></details>
+        <details><summary>Can anyone reach my farm?</summary><p>By default, the dashboard listens only on the farm itself. The installer can open it to your Tailscale network instead. murmur never opens it to the internet, and every change made on it needs the dashboard token.</p></details>
+        <details><summary>What does it cost?</summary><p>murmur is free and MIT licensed. You pay only for your own subscriptions, and for the machine if you rent one.</p></details>
       </div>
     </div>
   </section>
 
   <section class="final tail" aria-labelledby="h-final">
     <div class="wrap">
-      <h2 class="h2" id="h-final">Start with one repository and one law file</h2>
+      <h2 class="h2" id="h-final">Start with one repository</h2>
+      <p class="prose">Open Claude Code in the repository you want to set up. <code class="mm-inline-code">/murmur:init</code> asks seven questions and never overwrites your files. <code class="mm-inline-code">/murmur:doctor</code> then checks the setup.</p>
       <div class="install" data-install>
         <div role="tablist" aria-label="How to start">
           <button role="tab" id="t2-plugin" aria-selected="true" aria-controls="p2-plugin">In Claude Code</button>
-          <button role="tab" id="t2-farm" aria-selected="false" aria-controls="p2-farm" tabindex="-1">On Ubuntu 24.04+</button>
+          <button role="tab" id="t2-farm" aria-selected="false" aria-controls="p2-farm" tabindex="-1">On Ubuntu or Debian</button>
         </div>
         <div role="tabpanel" id="p2-plugin" aria-labelledby="t2-plugin">
           <pre><span class="p">&gt; </span>/plugin marketplace add magik-ai/murmur
 <span class="p">&gt; </span>/plugin install murmur@murmur
-<span class="p">&gt; </span>/murmur:init</pre>
-          <button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur&#10;/plugin install murmur@murmur&#10;/murmur:init">Copy</button>
+<span class="p">&gt; </span>/murmur:init
+<span class="p">&gt; </span>/murmur:doctor</pre>
+          <button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur&#10;/plugin install murmur@murmur&#10;/murmur:init&#10;/murmur:doctor">Copy</button>
         </div>
         <div role="tabpanel" id="p2-farm" aria-labelledby="t2-farm" class="is-off" aria-hidden="true" inert>
           <pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash</pre>
@@ -280,7 +283,7 @@
         <img class="mark-dark" src="assets/murmur-mark-dusk.svg" alt="">
         <span>murmur</span>
       </a>
-      <p class="footer__line">Ten thousand starlings turn as one because each of them watches only its seven nearest neighbours, and murmur asks the same small discipline of your agents</p>
+      <p class="footer__line">The name comes from a murmuration: thousands of starlings that fly as one, each bird following only its seven nearest neighbours. murmur works the same way. Every agent follows a few simple rules.</p>
       <p class="fine">Free and open source under the MIT license</p>
     </div>
     <nav class="footer__cols" aria-label="Footer">
@@ -288,18 +291,14 @@
         <h2>Read</h2>
         <a href="https://github.com/magik-ai/murmur/tree/main/docs">Handbook</a>
         <a href="https://github.com/magik-ai/murmur/blob/main/CHANGELOG.md">Changelog</a>
-        <a href="#how">How it works</a>
+        <a href="#pieces">How it works</a>
       </div>
       <div>
         <h2>Project</h2>
         <a href="https://github.com/magik-ai/murmur">GitHub</a>
+        <a href="https://github.com/magik-ai/murmur/blob/main/CONTRIBUTING.md">Contributing</a>
         <a href="https://github.com/magik-ai/murmur/blob/main/SECURITY.md">Security</a>
         <a href="https://github.com/magik-ai/murmur/blob/main/LICENSE">MIT license</a>
-      </div>
-      <div class="footer__by">
-        <h2>Delivered by</h2>
-        <a class="footer__name" href="https://github.com/magik-ai">magik-ai</a>
-        <a href="https://github.com/magik-ai">GitHub</a>
       </div>
     </nav>
   </div>

@@ -1,5 +1,7 @@
 # Drawer
 
-The sidebar a row opens into: the detail the table left out, and its actions.
+The panel a row opens: the details the table left out, and their actions.
 
-A floating sheet on `paper-raised`, inset `space-3` from the edge, `radius-md` on all four corners and a `line` border: no shadow. Its title is Instrument Sans at 18 (never the serif inside the app), then a one-line subtitle and a Close button. It enters in 200 ms (ease-out) and leaves the same way; nothing else animates inside it.
+`mm-drawer` is a floating sheet on `paper-raised`, `space-3` in from the edge of the window, with `radius-md` on all four corners and a `line` border. It has no shadow. Its head (`mm-drawer__head`) holds the title (`mm-drawer__title`, Instrument Sans at 18 px, never the serif), a one-line subtitle (`mm-drawer__sub`) and a Close button. The content goes in `mm-drawer__body`.
+
+Animate it in over 200 ms with ease-out, and out the same way. Nothing else inside it animates. The CSS does not animate it for you.

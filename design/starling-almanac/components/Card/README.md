@@ -1,7 +1,14 @@
 # Card
 
-One lane of work: a bird in the flock.
+One lane: one agent working on one task on its own branch.
 
-A card carries the lane's name (one line, cut), one `Status`, a meta line in mono (project, branch, model), at most two lines of what it is doing, and a footer of figures. `paper-raised` with a `line` border and `radius-md`: no coloured rail, no shadow; the status carries the state.
+A card (`mm-card`) shows:
 
-Cards sit in a grid that fills its row; a card never stretches over empty space and never stands alone in a row it could share.
+- a head (`mm-card__head`): the lane's name (`mm-card__title`, one line, cut with an ellipsis), then `mm-spacer` and one `Status`;
+- a meta line in mono (`mm-card__meta`): project, branch, model;
+- at most two lines about what the agent is doing (`mm-card__body`);
+- a footer of figures, as a second `mm-card__meta`.
+
+The card is `paper-raised` with a `line` border and `radius-md`. It has no coloured rail and no shadow: the status shows the state.
+
+Cards sit in a grid that fills its row. A card never stretches over empty space, and never stands alone in a row it could share.

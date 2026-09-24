@@ -23,7 +23,7 @@ img, svg, canvas { max-width: 100%; }
 
 /* ---------------------------------------------------------------- header */
 /* The header lies over the first screen, so that screen is exactly the window and its content
-   sits in the window's middle (owner, 2026-09-24). */
+   sits in the window's middle. */
 .top { position: absolute; top: 0; left: 0; right: 0; z-index: 2; }
 .top .wrap { display: flex; align-items: center; gap: 28px; padding-block: 20px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; }
@@ -39,8 +39,8 @@ img, svg, canvas { max-width: 100%; }
 .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
 .hero .wrap { position: relative; z-index: 1; width: min(1120px, 100%); padding-block: 96px 72px; }
 .hero__text { max-width: 760px; }
-/* The headline is two lines on purpose, broken where the meaning breaks, so it never wraps
-   on its own at a width in between. */
+/* The headline has a fixed line break where the meaning breaks. From 900px up it does not
+   wrap anywhere else. */
 @media (min-width: 900px) { .hero h1 { white-space: nowrap; } }
 .hero h1 {
   margin: 0 0 24px;
@@ -83,7 +83,7 @@ img, svg, canvas { max-width: 100%; }
 .install [role="tab"][aria-selected="true"] { background: var(--paper-raised); border-color: var(--line); color: var(--ink); }
 .install [role="tab"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* The two panels share one cell, so the box keeps the height of the taller one whichever is
-   chosen, and switching tabs moves nothing around it (owner, 2026-09-24). */
+   chosen, and switching tabs moves nothing around it. */
 .install { display: grid; grid-template-columns: minmax(0, 1fr); }
 .install [role="tabpanel"] { grid-row: 2; grid-column: 1; display: flex; align-items: flex-start; gap: 12px; padding: 14px 14px 14px 16px; }
 .install [role="tabpanel"].is-off { visibility: hidden; }
@@ -98,9 +98,9 @@ img, svg, canvas { max-width: 100%; }
 .install pre .p { color: var(--ink-muted); user-select: none; }
 
 /* --------------------------------------------------------------- sections */
-/* One block per screen of a Mac (owner, 2026-09-24): every block of the story is at least the
-   window's height with its content in the middle, so a screen never ends halfway through the
-   next heading. The padding only keeps the content off the edges. */
+/* One block per screen: every block of the story is at least the window's height with its
+   content in the middle, so a screen never ends halfway through the next heading. The padding
+   only keeps the content off the edges. */
 section { padding-block: clamp(48px, 6vh, 64px); }
 @media (max-width: 720px) { section { padding-block: 56px; } }
 .screen { min-height: 100svh; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; }
@@ -129,7 +129,7 @@ section { padding-block: clamp(48px, 6vh, 64px); }
 @media (max-width: 640px) { .grid-2, .grid-4 { grid-template-columns: 1fr; } }
 
 
-/* The journey: one piece of work travelling five stations, a bird flying the track above them. */
+/* The journey: one change going through the five steps, with a bird flying the track above them. */
 .journey-figure { margin: 48px 0 64px; }
 .journey-track { display: block; width: 100%; height: 72px; overflow: visible; }
 .journey-track .track { fill: none; stroke: var(--line-strong); stroke-width: 1.4; stroke-dasharray: 1 7; stroke-linecap: round; }
@@ -180,10 +180,6 @@ section { padding-block: clamp(48px, 6vh, 64px); }
 @media (max-width: 640px) { .sky { height: 280px; } }
 
 
-/* Machine sizes. */
-
-
-
 /* FAQ. */
 .faq { margin-top: 28px; border-top: 1px solid var(--line); }
 .faq details { border-bottom: 1px solid var(--line); }
@@ -216,16 +212,15 @@ section { padding-block: clamp(48px, 6vh, 64px); }
 .final .install { margin-top: 28px; }
 
 /* ---------------------------------------------------------------- footer */
-/* The footer is the header's brand again, one sentence about the idea, and two short columns of
-   links: the mark at the header's size, not a poster. */
+/* The footer repeats the header's brand at the header's size, says where the name comes from,
+   and ends with two short columns of links. */
 footer { padding-block: 56px 64px; border-top: 1px solid var(--line); }
 .footer__grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px 64px; align-items: start; }
 .footer__brand { display: grid; gap: 14px; justify-items: start; }
 .footer__line { margin: 0; font-size: 17px; line-height: 28px; color: var(--ink); }
 footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
-.footer__cols { display: grid; grid-template-columns: repeat(3, auto); gap: 0 56px; }
-.footer__name { font-weight: 550; }
-@media (max-width: 720px) { .footer__cols { grid-template-columns: repeat(2, auto); gap: 28px 48px; } .footer__by { grid-column: 1 / -1; } }
+.footer__cols { display: grid; grid-template-columns: repeat(2, auto); gap: 0 56px; }
+@media (max-width: 720px) { .footer__cols { gap: 28px 48px; } }
 .footer__cols div { display: grid; gap: 10px; align-content: start; }
 .footer__cols h2 { margin: 0 0 4px; font: 550 13px/16px var(--font-sans); color: var(--ink-muted); }
 .footer__cols a { font-size: 15px; line-height: 22px; color: var(--ink); text-decoration: none; }
@@ -243,14 +238,15 @@ footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
 /* A product screen in its frame: a hairline and rounded corners, never a shadow. */
 .frame { border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--paper-raised); }
 .frame img { display: block; width: 100%; height: auto; }
-/* The Board screenshot is as wide as a Mac screen lets the whole block fit in one window: the
-   heading and its line take about 330px of it, the picture the rest, at its own 16 by 10. */
+/* The Board screenshot is as wide as it can be while the whole block still fits in one window:
+   the heading and its line take about 330px of the height, the picture the rest, at its own
+   16 by 10. */
 .frame--hero { margin: 40px auto 0; width: min(100%, calc((100svh - 330px) * 1.6)); }
 
-/* The three parts: the stage holds still while you scroll, and the scroll decides which part is
-   lit and which screen shows (a scroll-driven product tour). */
-/* A whole window of scrolling for each of the three parts, plus the window the stage stands in
-   (owner, 2026-09-24: four parts on half a window each went by in an instant). */
+/* The three parts, as a scroll-driven tour: the stage stays pinned while you scroll, and how far
+   you have scrolled decides which part is lit and which screen shows. */
+/* A whole window of scrolling for each of the three parts, plus the window the stage stands in.
+   With less, the parts go by too fast to read. */
 .pieces { position: relative; height: 400vh; padding-block: 0; }
 .pieces__sticky { position: sticky; top: 0; height: 100svh; display: flex; align-items: center; overflow: hidden; }
 .pieces__inner { display: flex; flex-direction: column; gap: clamp(20px, 4vh, 44px); }
@@ -259,8 +255,8 @@ footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
 .pieces__steps { display: grid; gap: clamp(16px, 3vh, 30px); margin: 0; padding: 0; list-style: none; }
 .piece { opacity: 0.34; transition: opacity 320ms ease-out; }
 .piece.is-on { opacity: 1; }
-/* The name and its command share one line, and the sentence under them is three lines at most,
-   so the column of four stays as tall as the screen beside it (owner, 2026-09-24). */
+/* The name and its tag share one line, and the text under them is three lines at most, so the
+   column of three stays as tall as the screen beside it. */
 .piece__title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 6px; }
 .piece__title .mm-tag { margin: 0; }
 .piece p { margin: 0; font-size: 16px; line-height: 26px; color: var(--ink-muted); }
@@ -268,13 +264,13 @@ footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
 .pieces__screen { position: relative; aspect-ratio: 16 / 10; max-width: 100%; }
 .screen-frame { position: absolute; inset: 0; opacity: 0; transition: opacity 420ms ease-out; }
 .screen-frame.is-on { opacity: 1; }
-/* The four bars sit in the middle of the page, above its bottom edge, wherever the text is. */
+/* The three bars sit in the middle of the page, above its bottom edge, wherever the text is. */
 .pieces__progress { position: absolute; left: 50%; bottom: clamp(24px, 5vh, 48px); transform: translateX(-50%); display: flex; gap: 10px; }
 .pip { position: relative; width: 44px; height: 4px; padding: 0; border: 0; border-radius: 999px; background: var(--line); overflow: hidden; cursor: pointer; }
 .pip i { position: absolute; inset: 0; background: var(--accent); transform-origin: left; transform: scaleX(0); }
 .pip:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 @media (prefers-reduced-motion: reduce) { .piece, .screen-frame { transition: none; } }
-/* A narrow or short window gets the pieces as a plain path, each with its screen under it. */
+/* A narrow or short window gets the parts as a plain list, each with its screen under it. */
 @media (max-width: 1024px), (max-height: 560px) {
   .pieces { height: auto; padding-block: 56px; }
   .pieces__sticky { position: static; height: auto; overflow: visible; }

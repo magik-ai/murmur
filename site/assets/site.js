@@ -6,10 +6,9 @@
   var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var narrow = window.matchMedia && window.matchMedia("(max-width: 720px)").matches;
 
-  /* One switch for every moving thing on the page (WCAG 2.2.2). There is no pause button, the
-     owner asked for none: each animation is its own control, and a click, a tap, Enter or Space
-     on any of them pauses them all, until the reader asks again. Coming back into view does not
-     undo it. */
+  /* One switch for every moving thing on the page (WCAG 2.2.2). There is no separate pause
+     button: each animation is its own control. A click, a tap, Enter or Space on any of them
+     pauses them all, until the reader asks again. Coming back into view does not undo it. */
   var motion = {
     paused: false,
     parts: [],
@@ -99,9 +98,9 @@
   }
 
   /* ---------------------------------------------------------------- journey */
-  /* One piece of work travels the five stations: a lamp bird flies the dotted track, rests at
-     each station while its column lights up, and flies on. Under reduced motion it rests at the
-     first station. */
+  /* One change goes through the five steps: a lamp bird flies the dotted track, rests at each
+     step while its column lights up, and flies on. Under reduced motion it rests at the first
+     step. */
   (function journey() {
     var svg = document.getElementById("journeyTrack");
     var list = document.querySelector(".journey");
@@ -172,9 +171,9 @@
   })();
 
   /* ----------------------------------------------------------------- pieces */
-  /* The four pieces, told by the scroll: the section is several screens tall and its stage
-     holds still, so how far the reader has scrolled through it picks the piece that is lit and
-     the screen that shows. A narrow or short window gets a plain path instead (CSS), and this
+  /* The three parts, told by the scroll: the section is several screens tall and its stage
+     holds still, so how far the reader has scrolled through it picks the part that is lit and
+     the screen that shows. A narrow or short window gets a plain list instead (CSS), and this
      leaves it alone. */
   (function pieces() {
     var section = document.getElementById("pieces");
@@ -243,7 +242,7 @@
     [0.00, "Morning, and the report is waiting over breakfast"],
     [0.12, "Day, you pick the work and the lanes take it"],
     [0.40, "Evening, you say night mode and close the lid"],
-    [0.58, "Night, the farm works through the queue while you sleep"],
+    [0.58, "Night, the farm keeps working while you sleep"],
     [0.94, "Morning, and the report is waiting over breakfast"]
   ];
 
@@ -450,10 +449,10 @@
     var readout = document.getElementById("readout");
     var restingText = readout ? readout.textContent : "";
     if (hero) {
-      /* No pause button on the first screen (owner, 2026-09-24), but motion that runs past five
-         seconds needs a way to stop it (WCAG 2.2.2): the flock itself is the control. A click, a
-         tap, Enter or Space pauses it and plays it again. It also stops by itself off screen, and
-         a reader who asks the system for less motion gets one still frame. */
+      /* There is no pause button on the first screen, but motion that runs past five seconds
+         needs a way to stop it (WCAG 2.2.2), so the flock itself is the control. A click, a tap,
+         Enter or Space pauses it and plays it again. It also stops by itself off screen, and a
+         reader who asks the system for less motion gets one still frame. */
       var flock = window.Murmur.flock(hero, {
         count: narrow ? 260 : 600,
         speed: 0.75,

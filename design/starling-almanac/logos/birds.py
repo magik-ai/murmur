@@ -1,6 +1,18 @@
+# The bird glyph and the layout helpers behind the murmur mark, followed by ten candidate
+# designs for the mark.
+#
+# draw_mark.py runs only the part of this file above the line that starts the catalogue of
+# candidates (the empty dict named V): bird(), inside(), edge_dist(), resample(), fill(), fit(),
+# to_svg() and nearest(). Keep that line as it is.
+#
+# Run this file on its own, from this folder, to draw the ten candidates: python3 birds.py.
+# It writes i1.svg to i10.svg, a -dark twin of each, index.json, and sheet.html, a page that
+# shows every candidate at several sizes. The colours are the Lamplight and Dusk ink and lamp.
 import math, random
 INK="#2B1F2E"; LAMP="#C8912F"; DINK="#EDE6D9"; DLAMP="#F0C27A"
 
+# One bird: two crescent wings meeting at a small body, centred on (x, y), s wide on each side,
+# turned by rot radians. Returns an SVG path.
 def bird(x,y,s,rot=0.0,lift=0.44,thick=0.48):
     c,sn=math.cos(rot),math.sin(rot)
     T=lambda px,py:(x+(px*c-py*sn)*s, y+(px*sn+py*c)*s)

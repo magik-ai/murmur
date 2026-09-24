@@ -1,5 +1,5 @@
 # Segmented
 
-One of a few settings that sit side by side and take effect at once: the power mode, the Cards or Table view.
+Choose one of a few settings that sit side by side and take effect at once, such as the power setting or the Cards and Table views.
 
-A `paper-sunk` rail with the chosen button raised onto `paper-raised`. Two to five short words. If the choice needs a sentence to explain, it is a `ChoiceCard`.
+`mm-segmented` is a `paper-sunk` rail of buttons with `aria-pressed`. The chosen button is raised onto `paper-raised`. Use two to five short words. If a choice needs a sentence to explain it, use a `ChoiceCard`.

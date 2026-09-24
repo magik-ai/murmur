@@ -1,5 +1,5 @@
 # Nav
 
-The four tabs: Board, Mail, Queue, Machine.
+The app's three main tabs: Board, Mail and Machine.
 
-The current tab sits on the lilac `accent-field` in `accent` ink, `radius-sm`. A count is mono and muted, and only appears when there is something a person should look at. Icons are 16 px line drawings, except Board, which is four birds: the flock.
+`mm-nav` holds one link per tab. The current tab has `aria-current="page"` and sits on the lilac `accent-field` in `accent` text, with `radius-sm`. A count (`mm-count`) is mono and muted, and appears only when there is something to look at. Icons are 16 px line drawings, except Board, which is four birds.
