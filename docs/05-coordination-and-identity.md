@@ -2,145 +2,189 @@
 
 ## The problem
 
-Most fleets run on one credential. Every agent pushes as the same account, so
-from the outside they are indistinguishable. That produces two failures that
-look unrelated and are one problem.
+Most setups run every agent under one GitHub login, so from the outside all the
+agents look the same. That causes two failures that look unrelated but share
+one cause.
 
 The first is overwriting. Two agents work on one branch, or one reaches into
 another's branch to help, and work is lost under a push nobody can attribute.
 
-The second is mistaken identity. An agent signs a message, files a claim, or
-commits under a name belonging to another session. The board is now wrong, and
-mail about one agent's work reaches another's mailbox.
+The second is mistaken identity. An agent signs a message, claims a branch or
+commits under a name that belongs to another session. The board is now wrong,
+and mail about one agent's work reaches another.
 
-The fix is a small shared layer, the head office: a registry of who is
-running, claims on branches, and mail between agents.
+The fix is a small shared layer, the head office: a private GitHub repository
+that records who is running, who holds which branch, and the messages between
+agents. murmur's `hq` command reads and writes it; see
+[`hq/README.md`](../hq/README.md) for setup. Without it, follow the same rules
+in any channel your team agrees on.
+
+Two more words from [the glossary](00-start-here.md#words-this-handbook-uses)
+appear below. A lane is one agent doing one task on its own branch. A farm is
+an always-on machine that runs agents with murmur's `fleet` tool.
 
 ## Naming agents
 
-**The owner assigns the name.** An agent never invents one and never borrows
-one. A code name found in project memory, in a document, or in an old
-transcript belongs to another session, because memory is shared and names are
-not. An agent with no name asks for one. Asking is the handshake: it shows the
-owner this session knows the protocol.
+**You assign the name.** An agent never invents a name and never borrows one. A
+code name found in project memory, a document or an old transcript belongs to
+another session: memory is shared, names are not. An agent without a name asks
+you for one. Asking is the handshake that shows the session knows the protocol.
 
-**The incident behind it:** on a team's first day, a fresh session read a
-code name out of shared project memory and adopted it. Two agents then
-answered to one name, and mail for either could reach the wrong one.
+**What goes wrong without it.** A new session reads a code name from shared
+project memory and adopts it. Now two agents answer to one name, and mail for
+either can reach the wrong one. `hq hello <name>` warns when a session with the
+same name was active in the last three hours.
 
-One name gets one mark. Pick an emoji and an accent colour with the name,
-confirm both, and pass all three on every spawn. A board of twelve identical
-grey rows is not readable at a glance.
+**One name, one mark.** Pick an emoji and an accent colour with the name,
+confirm both, and pass all three on every spawn. A board of identical grey rows
+cannot be read at a glance. On a farm, a name's mark is recorded the first time
+it is spawned and stays fixed. To change it, run
+`fleet identity <name> --icon <emoji> --color <hex>`.
 
-## Identity belongs to a session, not a machine
+## A name belongs to a session, not a machine
 
-If the name is stored per machine, the second agent to start there renames
-the first. The first keeps working, unaware, signing everything with somebody
-else's name.
+If the name is stored per machine, the second agent to start there renames the
+first, which keeps working and signs everything with somebody else's name.
 
-**The incident behind it:** a message arrived with a header naming one agent
-and a body that opened "I am a different agent". Both ran on one machine, and
-the most recent registration had won. One rule follows, useful even before the
+**What goes wrong without it.** A message arrives with a header naming one
+agent and a body that begins "I am a different agent". Both ran on one machine,
+and the latest registration won. One rule follows, useful even before your
 tooling is fixed: **when a header and a body disagree, believe the body, and
-say so out loud.** That mismatch means a session somewhere is unregistered.
+say so.** The mismatch means a session somewhere is unregistered.
 
-Store the name keyed by the session, so a neighbour cannot rename you. A tool
-that refuses to sign because the stored name belongs to another session is
-right. Re-register in this session instead.
+`hq hello <name>` stores the name keyed by the session, so a neighbour cannot
+rename you. `hq whoami` prints the name hq would sign with and where it came
+from, and exits with an error when that name is not this session's own. Run it
+before anything that acts under a name. When hq refuses to act because the
+stored name belongs to another session, it is right: run `hq hello <name>` in
+this session.
 
 ## Branch claims
 
-Claim a work branch before creating or pushing it. A claim is a small file in
-the head office repository, one per branch. Plain git makes it safe. Two
-agents cannot both win the same claim, because each of them writes the file
-and pushes it, and the second push is rejected for being behind. The loser
-reads the winner's name and picks another branch.
+Claim a work branch before you create or push it, and release it when the pull
+request merges:
 
-The **claims guard** enforces the claim in every working copy. It is a
-pre-push hook that refuses a push to a branch somebody else holds, and it
-ships with the head office tool. It fails open with a loud warning when the
-head office is unreachable, so an outage never blocks hands-on work, and fails
-closed when the pusher's identity cannot be resolved, because signing the
-wrong name is worse than not pushing.
+```bash
+hq claim <branch>     # before you create or push the branch
+hq claims             # list the active claims
+hq release <branch>   # after the pull request merges
+```
 
-Do not confuse it with the **manifest guard**, which is a different check with
-a different job: it confirms that a lane touched only the paths it was given.
-In version one that one is a convention, not a hook. The orchestrator reads
-the diff before assembling the work. The claims guard answers who owns a
-branch, the manifest guard answers which files a lane may touch.
+A claim is a small file in the head office repository. If another agent holds a
+live claim on the branch, `hq claim` refuses, names the holder and shows the
+command to message them. Plain git keeps this safe without a lock server. When
+two agents claim the same branch at once, the second push is rejected, hq
+re-reads the claims, finds the first claim and refuses. A claim lasts 24 hours
+unless you pass `--ttl <hours>`.
 
-**A refused claim means write to whoever holds it.** It never means finding
-another route to that branch. No merges into it, no rebases of it, no
-pushes. That branch is somebody's live work, and working around the claim is
-the exact failure the claim prevents.
+**A refused claim means: write to whoever holds it.** It never means finding
+another route to that branch: no merges into it, no rebases of it, no pushes to
+it. That branch is somebody's live work, and working around the claim is the
+exact failure claims prevent.
 
-Release the claim on merge.
+The **claims guard** is a pre-push hook that refuses a push to a branch someone
+else holds. Install it in each worktree with `hq hook <dir>`. On a farm,
+`fleet spawn` installs it in every lane when `hq` is installed. It behaves like
+this:
+
+- When the head office cannot be reached, it checks the claims it already has
+  on disk. A claim it knows about still blocks the push. Otherwise the push goes
+  through with a warning, so an outage never blocks your work.
+- When it cannot tell who is pushing, it treats the pusher as a stranger, so
+  any live claim on the branch blocks the push.
+- The owner named in hq's settings (`hq init --owner <name>`) is told about the
+  claim but not blocked. Leave that setting empty for a team.
+
+Do not confuse it with the **manifest guard**, which checks that a lane changed
+only the paths it was given. For lanes a farm runs as a group
+(`fleet group start`), a pre-push hook enforces it. Everywhere else, the
+orchestrator (the agent coordinating the lanes) compares each lane's diff with
+its paths before assembly.
 
 ## Commit authorship
 
-Set the git author in each working copy to that agent's name, with a tagged
-address marking it as an agent. Branch history then shows whose slice each
-commit is, which is what makes assembly and review possible.
+Set the git author in each worktree to the agent's name, with an address that
+marks it as an agent. The branch history then shows whose slice each commit is,
+which makes assembly and review possible. Set it for the worktree only, because
+plain `git config` changes every worktree of the clone:
 
-Squash-merge keeps the other end tidy: the main branch carries the change
-author, so the project log stays under the owner while the branch work below
-stays attributable.
+```bash
+git config extensions.worktreeConfig true
+git config --worktree user.name "<name> (agent)"
+git config --worktree user.email "<name>@agents.local"
+```
 
-## Mail, and the cursor law
+On a farm, `fleet spawn` does this for every lane, with those shapes as the
+defaults; the `[identity]` table in `~/.config/fleet/policy.toml` changes them.
+Squash-merge then keeps `main` tidy: each pull request lands as one commit, and
+the per-agent commits stay visible in the pull request.
 
-Agents talk without routing every sentence through the owner. Mail does that:
-a message to one agent or a broadcast to all, and an inbox each agent reads.
+## Mail, and why reading it consumes it
 
-The trap is the read cursor. **Reading consumes.** The marker moves per name
-per machine, so mail printed once is gone from every later read by a process
-signing as that name there. Four rules follow.
+Agents talk to each other without routing every sentence through you:
 
-- A watcher or a script never reads the inbox normally. It peeks, or reads the
-  underlying store with a timestamp filter.
+```bash
+hq msg <name> "<text>"   # to one agent
+hq msg all "<text>"      # to every agent
+hq inbox                 # your unread mail
+```
+
+The trap is the read cursor. **Reading consumes.** `hq inbox` moves a marker
+that is kept per name, per machine. Mail it has printed once is gone from every
+later read by any process signing as that name on that machine. Four rules
+follow:
+
+- A watcher or a script never reads the inbox normally. It uses
+  `hq inbox --peek`, which shows unread mail without moving the cursor.
 - Never read the inbox twice in one step. The second read says "empty", and
-  that emptiness is not information.
-- When a teammate says you have gone silent, re-show recent mail without
-  moving the cursor before anything else.
+  that tells you nothing.
+- When a teammate says you have gone quiet, first re-show recent mail without
+  moving the cursor: `hq inbox --recent 6` shows the last six hours.
 - A local subagent must not register under its parent's name on the parent's
   machine, or it eats its parent's mail.
 
-**The incident behind it:** a watcher polled the inbox every minute and threw
-the output away, because it was looking for one word. An afternoon of
-coordination mail was consumed and never read by anyone.
+**What goes wrong without it.** A watcher polls the inbox every minute and
+throws the output away, because it is looking for one word. An afternoon of
+coordination mail is consumed, and nobody reads it.
 
 ## The head office lives in a repository
 
 Keep the coordination state in a repository, not on a machine. It then
-survives a laptop closing and <FARM> going down, and it is reachable anywhere
-the owner can authenticate, including a phone.
+survives your laptop closing and the farm going down, and you can reach it
+wherever you can sign in to GitHub, including on a phone.
 
-Two consequences matter. If the head office repository is public, every
-message in it is public, so write mail accordingly. And if the hosting service
-is down, coordination is down with it: agents commit locally and wait rather
-than inventing a side channel.
+Two consequences follow. A public head office makes every message public, so
+keep it private. And if GitHub is down, coordination is down too: agents commit
+locally and wait, rather than inventing a side channel.
 
-## Finish loudly, because a janitor is coming
+## Finish loudly, because the sweep is coming
 
-A team of agents accumulates dead working copies and stale board entries, so
-something sweeps them. Assume that sweeper runs on a timer.
+A team of agents leaves dead worktrees and stale board entries behind, so
+something sweeps them away on a timer. On a farm, `fleet sweep` runs every ten
+minutes by default.
 
-Only **committed and pushed** work is safe. An open change for review protects
-its working copy indefinitely. Tracked but uncommitted edits buy a delay.
-**Untracked scratch protects nothing**, and scratch is where an agent tends to
-leave its findings.
+Only **committed and pushed** work is safe. The sweep never touches a running
+lane, and it keeps a worktree while its pull request is open. Once a lane has
+finished, its worktree is removed, unless it holds uncommitted changes. Those
+keep it only until someone runs `fleet sweep --force`, which saves a snapshot
+and then removes it.
 
-So finish loudly. Durable output goes to the change, the issue, or the report,
-never only to a working copy. Before trusting that last night's work is
-there, ask the sweeper what its next pass would take.
+So finish loudly: put lasting output in the pull request, the issue or the
+report, never only in a worktree. Before you trust that last night's work is
+still there, ask what the next pass would remove with `fleet sweep --dry-run`.
+The full rules are in [`fleet/docs/SWEEP.md`](../fleet/docs/SWEEP.md).
 
 ## Adopt it in a day
 
-1. Give every running agent a name from you, and make an identity check the
-   first thing each session does.
-2. Put claims on branches, even if version one is a file agents append to by
-   hand.
-3. Install the claims guard if you run the head office tool, so a script
-   enforces the claim rather than everyone remembering it. Otherwise write the
-   claim as the first line of the pull request body, where anyone can see it.
-4. Set the per-agent git author in every working copy, and confirm
-   squash-merge is on.
+1. Give every running agent a name yourself, and make an identity check
+   (`hq whoami`) the first thing each session does.
+2. Put claims on branches, even if the first version is a file that agents
+   append to by hand.
+3. With the head office, install the claims guard (`hq hook <dir>`), so a
+   script enforces claims instead of everyone remembering them. Without it,
+   write the claim as the first line of the pull request body, where everyone
+   can see it.
+4. Set the per-agent git author in every worktree, and confirm squash-merge is
+   turned on.
+5. For the rules your agents follow in every repository, start from
+   [`templates/personal-CLAUDE.md`](../templates/personal-CLAUDE.md).

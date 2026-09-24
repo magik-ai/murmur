@@ -1,147 +1,168 @@
 # Repo law
 
-## One file that says how work happens
+Every repository that uses this method has one file that says how work happens.
+This handbook calls it the law file. It sits at the repository root and is the
+first thing every agent reads. Name it `CLAUDE.md`: Claude Code reads that file
+at the start of every session.
 
-Every repository running this method has exactly one file that says how work
-happens. Call it the law file. It sits at the repository root, and it is the
-first thing every agent reads.
+The law file does not document the code. It says what a change must be before it
+may land: what it contains, who checks it, and what is forbidden. A complete
+example to copy is [`templates/CLAUDE.md`](../templates/CLAUDE.md). This chapter
+explains the choices in it.
 
-The law file is not documentation of the code. It says what a change must be
-before it is allowed to land: what it contains, who checks it, what is
-forbidden outright.
+## Keep the reading list short
 
-A complete example to copy is [`templates/CLAUDE.md`](../templates/CLAUDE.md).
-This chapter explains the choices inside it.
+The template opens with a numbered list of what to read at the start of every
+task, and nothing else. It calls this the boot contract. Keep it to five
+entries or fewer, each with one line saying what it is for:
 
-## The boot contract
+1. the law file itself;
+2. the architecture as it is deployed;
+3. a product briefing;
+4. an index to everything else;
+5. one or two documents for the kind of work that keeps going wrong.
 
-Open the law file with a numbered read order, and nothing else. Four or five
-documents, each with one line saying what it is for: the law
-itself, the architecture as it is actually deployed, a product briefing, an
-index that routes to everything else, and at most one subject document covering
-the work that keeps going wrong.
+Only the law file is required. Delete any line whose document you do not keep:
+an agent that cannot find item 2 stops trusting items 3 to 5. Then say plainly
+that everything else is read only when needed, through the index. Old plans and
+archived design records are never read at the start.
 
-Then state the rule explicitly. Anything not on that list is loaded on demand
-through the index. Historical plans and archived design records are never
-loaded at the start of a task.
+**What goes wrong without it.** A reading list that grows stops being read.
+Once it runs past a screen, agents skim it, and the rules near the bottom stop
+being followed. To add a document, take another one off.
 
-**The incident behind it.** A boot list that grows stops being read. Once the
-opening instruction runs past a screen, agents skim it, and the rules near the
-bottom become rules nobody follows. If you want a new document read at boot,
-something else comes off the list.
+## Write each rule once
 
-## Law lives here, everything else links
+Write each rule once, in the law file, and link to it from everywhere else. A
+rule copied into two places drifts, and somebody follows the stale copy by
+accident. If you catch yourself writing "as the law file says" and then a
+paraphrase, keep only the link.
 
-Write each rule exactly once, in the law file, and have every other document
-link to it.
+So the law file holds rules, not explanations. Reasons and detail live in
+linked documents that people read when they need them.
 
-A rule copied into two places will drift, and the copy that goes stale is the
-one somebody follows by accident. If you catch yourself writing "as the law
-file already says" followed by a paraphrase, keep only the link.
-
-This is also why the law file should be shorter than you expect. It holds
-rules, not explanations. Reasoning and per-subject detail live in linked
-documents nobody reads until they need them.
+One exception: the template repeats the writing rules from
+[writing for humans](09-writing-for-humans.md), because an agent reads the law
+file before it follows any link.
 
 ## The core contract
 
-Put it at the top of the process section, as a sentence an agent can check
-itself against. One batch, one worktree, one branch, commits per reviewable
-slice, one pull request, green checks, a squash merge through the queue, then
-the worktree is removed.
+Put this at the top of the process section, as sentences an agent can check
+itself against:
 
-Nothing lands on `main` directly.
+- One batch of work, one worktree (a separate working copy), one branch, a
+  commit per reviewable slice, one pull request, green checks, a squash merge
+  through the merge queue, then the worktree is removed.
+- Nothing lands on `main` directly.
+- The lane (the agent doing the task) drives the batch from start to end. It
+  stops for three things only: a real blocker, a check failing for a reason
+  its own change did not cause, and an action that needs explicit approval.
+- The `hold` label is the veto: a pull request with it never merges, however
+  green its checks. Anyone may add the label. Only the owner removes it.
 
-The lane drives the batch end to end. It stops for exactly three things: a real
-blocker, a check failing for a reason its own change did not cause, and an
-action that needs explicit approval.
-
-Then the veto. A `hold` label on a pull request always blocks the merge, no
-matter how green everything looks. Anyone may add the hold label. Only the
-owner removes it. The automation treats it as absolute rather than as a
-warning.
+GitHub does not stop a merge because of a label, so enforce the veto with a
+small required check that fails while the label is present. See
+[CI and merge](06-ci-and-merge.md#the-hold-label-is-the-veto).
 
 ## Commits
 
-Fix a grammar and state it in one line: `Type: subject`, imperative,
-capitalized type, no full stop at the end. A short closed list of types is
-enough (`Feat`, `Fix`, `Docs`, `Build`, `Review`, `Cleanup`).
+State one commit format in one line: `Type: subject`, with a capitalized type,
+an imperative subject and no full stop at the end. A short, fixed list of types
+is enough: `Feat`, `Fix`, `Docs`, `Build`, `Review`, `Cleanup`.
 
-Then add the check that matters more. Before every commit and every push, print
-the current branch and the short status.
+The check that matters more: before every commit and every push, print the
+current branch and the short status.
 
-**The incident behind it.** Work has landed on the wrong branch for want of a
-two second check. An agent running for an hour holds a stale idea of where it
-is, especially after a merge or a move between worktrees. Reading the branch
-name back catches a mistake that is painful to unwind.
+```bash
+git branch --show-current
+git status --short
+```
+
+**What goes wrong without it.** After an hour of work, especially after a merge
+or a move between worktrees, an agent has an old idea of where it is. Its next
+commit lands on the wrong branch. Reading the branch name back takes two
+seconds. Undoing the mistake takes much longer.
 
 ## Hard rules worth copying
 
-These transfer to almost any stack:
+These work in almost any stack:
 
-- Everything committed is in one language. Name the single exception if you
-  have one.
+- Everything committed is in one language. Name the single exception, if any.
 - Never commit build artifacts or plaintext secrets. Never print a secret
   value: compare hashes instead.
 - Shared logic has one authoritative implementation. A second one lands only in
-  the change that deletes the first, or with a dated ticket to kill it.
-- A missing key disables a capability, it never prevents the system starting.
+  the change that deletes the first, or with a dated ticket to remove it.
+- A missing key turns off one capability. It never stops the system starting.
 - Every bug-fix change carries the test that fails without the fix, and states
   the root cause in words.
-- Never switch off a shipped user-facing capability as a "fix". Removing a
-  feature is a product decision, and it needs the `<OWNER>`'s approval.
-- Screenshots are evidence, never measurement. A golden-image test is the
-  measuring instrument.
-- The twice rule: the second time the same mistake happens, the correction
-  enters the law file or the lessons file in the change that fixes it.
-- Destructive actions and paid provisioning need approval scoped to the action.
-  When a safety mechanism blocks you, assume it is right until proved wrong.
+- Never switch off a shipped, user-facing capability as a "fix". Removing a
+  feature is a product decision, and it needs the owner's approval.
+- Screenshots are evidence, never measurement. A golden-image test, which
+  compares the screen with a stored reference image, does the measuring.
+- The twice rule: the second time the same mistake happens, the correction goes
+  into the law file or the lessons file (`docs/GOTCHAS.md`), in the change that
+  fixes it.
+- Destructive actions and paid provisioning need approval for that exact
+  action. When a safety mechanism blocks you, assume it is right until you have
+  proved otherwise.
 
-## Hard rules to replace with your own
+## Rules to replace with your own
 
-The template closes its rules section with a marked block for stack-specific
-law. Replace that block wholesale. Typical entries: the allowed direction of dependency between layers, enforced
-by a linter rather than by review; the single sanctioned way to build interface
-surfaces, and what ships with every visual change; what may change about
-prices, keys, and payment paths, and whose approval it needs.
+The template ends its rules with a marked block for your stack. Replace it
+entirely. Typical entries:
 
-Each one passes the same test: can a machine check it? A rule nobody can check
+- which layers may depend on which, enforced by a linter rather than by review;
+- the only allowed way to build the user interface, and what ships with every
+  visual change;
+- what may change about prices, keys and payments, and whose approval that
+  needs.
+
+Each rule must pass one test: can a machine check it? A rule nobody can check
 is a preference, and preferences do not belong in a law file.
 
 ## Don'ts
 
-One short paragraph of flat prohibitions, phrased so they can be quoted back.
-Do not commit to `main`, reuse a merged branch, merge red checks, force-push
-shared work, skip the commit hooks, bundle an unrelated refactor into a fix, or
-leave a pull request you own unfinished.
+Close with one short paragraph of flat prohibitions that can be quoted back.
+For example: do not commit to `main`, reuse a merged branch, merge red checks,
+force-push shared work, skip the commit hooks, bundle an unrelated refactor into
+a fix, or leave a pull request you own unfinished.
 
-The list repeats rules stated above, deliberately. It is what an agent scans
-in the second before doing something risky.
+This repeats rules from above, and that is intended: it is what an agent scans
+in the second before it does something risky.
 
 ## Freeze state
 
-Put a line in the law file saying whether a feature freeze is on. Write it even
-when the answer is no: no freeze is active unless the `<OWNER>` declares one
-here, in this file. Freezes get announced in chat or in a plan document, and
-then agents infer one from a stale note weeks later and quietly stop shipping.
-The state of the freeze is only true where the law is.
+Add a line saying whether a feature freeze is on, even when the answer is no:
+"No feature freeze is active unless the owner declares one here, in this file."
+
+**What goes wrong without it.** A freeze is announced in chat or in a plan.
+Weeks later an agent finds the stale note, assumes the freeze still holds, and
+quietly stops shipping. Only the law file decides whether a freeze is on.
 
 ## Naming
 
-Two or three lines are enough. Numbered records get a fixed pattern, standard
-documents keep their uppercase names, content files and directories are
-kebab-case, code follows its language. Link out for anything longer.
+Two or three lines are enough. Numbered records follow a fixed pattern (the
+template uses `NNNN-type-kebab-title.md` for decision records). Standard
+documents keep their usual uppercase names, other files and directories are
+kebab-case, and code follows its language. Link out for anything longer.
 
 ## Adopt it in a day
 
-1. Copy [`templates/CLAUDE.md`](../templates/CLAUDE.md) to your repository root
-   and replace every placeholder.
-2. Cut the boot read order to five entries, and write the sentence saying
-   everything else is loaded on demand.
-3. Delete every rule you are not willing to enforce. A law nobody enforces
+1. Start from the template. Without the plugin, copy
+   [`templates/CLAUDE.md`](../templates/CLAUDE.md) to your repository root.
+   With the murmur plugin, run `/murmur:init`. It writes `.murmur/contract.md`
+   with the template's core sections (core contract, the ten gates, commits,
+   don'ts) filled in from your answers. If you have no `CLAUDE.md`, it also
+   writes one from the template. If you have one, it adds a four-line pointer
+   to the contract at its end. It adds the same pointer to `AGENTS.md`, if you
+   keep one. If a rule now appears in two files, keep it in one.
+2. Replace every placeholder that is left.
+3. Cut the reading list to five entries or fewer, and add the sentence saying
+   everything else is read on demand.
+4. Delete every rule you are not willing to enforce. A law nobody enforces
    teaches agents that laws are optional.
-4. Optional, when you already have a pile of documents: grep them for rules
-   that repeat the law file, and replace each copy with a link.
+5. Optional, if you already have many documents: search them for rules that
+   repeat the law file, and replace each copy with a link.
 
-The stack-specific block can wait for week two. Getting one honest law file in
-place matters more than finishing it.
+The stack-specific block can wait for week two. A short law file you enforce
+matters more than a complete one.

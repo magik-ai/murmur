@@ -1,141 +1,172 @@
 # Parallel lanes
 
-## The one failure everything here prevents
+A lane is one agent doing one task on its own branch, in its own worktree (a
+separate working copy of the repository). This chapter is about running several
+lanes at once in one repository without losing work. The orchestrator is the
+agent that coordinates them.
+
+## The failure this chapter prevents
 
 Two lanes editing the same file is the failure that costs a rebuild. In its
-worst form it produces no conflict at all: the merge is clean, the checks are
-green, and one lane's work is quietly gone. Every rule in this chapter follows
-from that fact, because careful reading does not catch it.
+worst form there is no conflict at all: the merge is clean, the checks are
+green, and one lane's work is quietly gone. Careful reading does not catch it,
+so every rule here prevents it by structure.
 
-## Manifests: a lane owns paths, not a topic
+## A lane owns paths, not a topic
 
 Before a lane starts, write down the paths it may touch. That list is its
-manifest, and it belongs in the brief.
+manifest, and it goes in the lane's brief
+([`templates/briefs/lane.md`](../templates/briefs/lane.md)).
 
-Keep the manifests in one registry the orchestrator owns. Per-lane copies
-drift; the registry does not. Read it, not a lane's recollection, when deciding
-whether a path is free.
+Keep every manifest in one registry that the orchestrator owns. Copies kept per
+lane drift; the registry does not. To decide whether a path is free, read the
+registry, not a lane's memory of it.
 
-Allocating a lane that overlaps a live lane is a refusal, not a warning. If the
-harness offers an override, treat using it as an incident.
+A lane whose paths overlap a live lane is refused, not warned about. If your
+tooling offers an override, treat using it as an incident. On a farm (an
+always-on machine that runs agents with murmur's `fleet` tool),
+`fleet group start` refuses a group of lanes with overlapping paths before any
+agent starts.
 
 **A path outside the manifest is a blocker, not an invitation.** A lane that
-needs a file it does not own stops and reports. It does not "fix it while
-here". Before opening the pull request, it diffs every changed path against the
-manifest, and an extra path is something to explain.
+needs a file it does not own stops and reports. Before opening the pull
+request, it compares every changed path with its manifest and explains any
+extra one.
 
-## Spine files are hand-sequenced
+## Spine files get one lane at a time
 
-Some files every lane wants to touch. They are the spine of the repository, and
-they are never worked in parallel: composition roots where everything is wired
-together, generated surfaces (a schema, a client, an inventory), shared
-registries, and append-only inventories. One lane at a time in each, in an
-order the orchestrator sets.
+Some files every lane wants to touch: the place where the application is wired
+together, generated interfaces (a schema, a client, an inventory), shared
+registries and lists that only grow. They are the spine of the repository.
+Never work on them in parallel. One lane holds each, in an order the
+orchestrator sets.
 
-**The incident behind it.** Two lanes each appended a block to one large shared
-file. The blocks were similar in shape, so the merge spliced them cleanly with
-no conflict marker, the build passed, and one lane's block was simply not
-there. Nobody noticed until a feature that had been "merged" turned out not to
-exist. A spine file is made safe by one lane holding it at a time, not by
-careful review.
+**What goes wrong without it.** Two lanes each add a block to one large shared
+file. The blocks look alike, so git combines them with no conflict marker, and
+the build passes. One lane's block is simply missing, and nobody notices until
+a "merged" feature turns out not to exist. Review does not make a spine file
+safe. One lane at a time does.
 
 ## Never hand-resolve a generated file
 
 A generated file is an output. Merging two outputs line by line produces a
-third that no generator would emit.
+third that no generator would write.
 
-**The incident behind it.** A lane resolved a conflict in a generated inventory
-by hand. The numbers looked plausible, so the change passed review. Every later
-merge of `main` conflicted in the same file again, and the pull request sat
-unmergeable for days while its counters encoded a stale base.
+**What goes wrong without it.** A lane resolves a conflict in a generated
+inventory by hand. The numbers look plausible and pass review. From then on,
+every merge of `main` conflicts in that file again, and the pull request cannot
+merge for days, because its counters describe an old base.
 
-The fix is mechanical. Take the version from `main`, rerun the generator on
-your branch, and commit what it produces. Mark generated paths so the tooling
-stops offering a line-level merge, and add a guard that refuses a direct edit
-and prints the generate command instead. Fix the generator too if it emits
-repository-wide counters: per-domain rows mean unrelated work touches unrelated
-lines.
+The fix is mechanical: take the version from `main`, rerun the generator on
+your branch, and commit what it produces. To stop it happening again:
+
+- Mark generated paths in `.gitattributes` (for example with `-merge`), so git
+  does not attempt a line-by-line merge.
+- Add a guard that refuses a direct edit and prints the command that
+  regenerates the file. The murmur plugin's guard reads
+  `.claude/generated-files.txt`; see [safety hooks](11-safety-hooks.md).
+- If the generator writes counters for the whole repository, make it write one
+  row per domain, so unrelated work touches unrelated lines.
 
 ## Reserve numbers across every open pull request
 
-Anything numbered sequentially (decision records, schema migrations) collides
-when lanes run in parallel. Reserving a number by looking at `main` is not enough. The number another lane
-claimed an hour ago sits in an open pull request, invisible to your tree. So
-the reservation script scans `main` and every open pull request by default,
-and each lane reserves at batch start. There is a `--main-only` flag for the
-case where the host cannot be reached, and it prints a warning saying an
-in-flight claim can be missed.
+Anything numbered in sequence, such as decision records and migrations,
+collides when lanes run in parallel. Checking `main` is not enough: the number
+another lane took an hour ago sits in an open pull request, invisible to your
+tree. So each lane reserves its numbers at the start of its batch with
+[`templates/scripts/next_number.sh`](../templates/scripts/next_number.sh),
+which scans `main` and every open pull request by default:
 
-**The incident behind it.** A lane renumbered a migration to dodge a collision,
-which is a rename plus an edit inside the file. The rename was staged carrying
-the original contents while the edit stayed in the working tree, so the commit
-shipped the new filename with the old identifier. Every local check passed,
-because local tools read the tree, and every job went red once it ran from the
-commit. After a rename plus an edit, verify from the commit, not the tree.
+```bash
+scripts/next_number.sh              # every kind: main plus open pull requests
+scripts/next_number.sh adr          # one kind only
+scripts/next_number.sh --main-only  # skip the pull request scan
+```
+
+Run `git fetch origin` first, so the `main` you scan is current. The pull
+request scan needs `gh`, signed in. If `gh` is missing or cannot list pull
+requests, the script scans `main` only and prints a note saying so. Use
+`--main-only` only when you are offline, and expect to renumber.
+
+**What goes wrong without it.** A lane renumbers a migration to dodge a
+collision: a rename plus an edit inside the file. The rename is staged with the
+old contents while the edit stays unstaged, so the commit has the new file name
+with the old identifier inside. Local checks pass, because they read the
+working tree. CI fails, because it reads the commit. After a rename plus an
+edit, check the commit (`git show HEAD:<path>`), not the tree.
 
 ## One file per change, never a shared list
 
-Anywhere lanes must record something (release notes, an inventory, a list of
-known issues), give each change its own file in a directory instead of a line
-in one shared document.
-
-The cost is a directory a script assembles later. The benefit is that the
-most-touched path in the repository stops producing conflicts entirely. Split
-an append-only file before parallel work starts, not after the first
-collision.
+Wherever lanes must record something (release notes, an inventory, known
+issues), give each change its own file in a directory instead of a line in a
+shared document. The cost is a directory a script assembles later. The benefit
+is that the most-touched file in the repository stops producing conflicts.
+Split an append-only file before parallel work starts, not after the first
+collision. The release notes template,
+[`templates/RELEASE_NOTES.d/README.md`](../templates/RELEASE_NOTES.d/README.md),
+shows the pattern.
 
 ## Grouped lanes assemble into one pull request
 
-When several lanes build one coherent feature, they do not merge separately.
-They assemble onto one integration branch, and that branch opens a single pull
-request.
+When several lanes build one feature, they do not merge separately. Each lane
+pushes its own branch and opens no pull request. The orchestrator merges the
+lane branches into one integration branch and opens a single pull request.
 
-A conflict at assembly is the collision detector doing its job. Two lanes
-touched the same ground, and you want that before the work reaches `main`.
+A conflict during assembly is the collision detector doing its job: two lanes
+touched the same ground, and you want to know before the work reaches `main`.
+Never let an automatic resolver settle it. Take it back to the two lanes,
+decide which change is correct, and have one of them redo its part.
 
-Never let an automated resolver settle such a conflict. Take it back to the two
-lanes, decide which change is correct, and have one redo its part.
+On a farm, `fleet group assemble <name>` does the assembly. It stops at the
+first conflict, names the files and lanes, and never resolves anything itself.
+Run it with `--dry-run` first to see the merge order and each lane's files.
 
 ## A clean merge can still lose work
 
-When two parents touched one file, diff the merge result against **both**
-parents and confirm each named change survived. Do this before believing a
+When two parents touched one file, compare the merge result with **both**
+parents and confirm that each named change survived. Do it before you trust a
 green check: the checks ran on what the merge produced, and cannot know what it
-should have contained. Confirm by identifier (this function, this key, this
-row), because a line count tells you nothing.
+should have contained.
+
+```bash
+git diff HEAD^1 HEAD -- <file>   # what came in from the other branch
+git diff HEAD^2 HEAD -- <file>   # what your own branch contributes
+```
+
+Confirm by identifier (this function, this key, this row). A line count tells
+you nothing.
 
 ## Environment traps
 
 These cost lanes whole days, and none of them looks like an environment problem
 at first.
 
-- **One environment per worktree.** Installs that point at a source directory
-  are pinned to a path, so a shared environment makes a test import a different
-  checkout than the one under test.
-- **An activated environment outranks the working directory.** A variable
-  exported in a shell profile wins over where you are standing, so an install
-  run inside one worktree can land in another's environment. Unset it and pass
-  an explicit interpreter path.
+- **One environment per worktree.** An install that points at a source
+  directory is pinned to that path, so with a shared environment a test can
+  import a different checkout from the one under test.
+- **An activated environment beats the working directory.** A variable exported
+  in a shell profile wins over where you are standing, so an install in one
+  worktree can land in another's environment. Unset it and pass an explicit
+  interpreter path.
 - **Never run another worktree's scripts.** Their first line pins that
   checkout.
-- **Absolute dates in fixtures are time bombs.** A test pinned to a specific
-  day passes until the calendar walks past it, and then every branch goes red
-  at once on unrelated code. When many lanes fail together, suspect the
-  calendar before the code.
-- **Trust the fresh database in CI over the local one.** A local database
-  drifts from the migration history. When database-backed tests fail locally
-  and pass in CI, believe CI rather than spending a day repairing one
-  machine.
+- **Fixed dates in fixtures are time bombs.** A test pinned to one day passes
+  until the calendar moves past it, and then every branch goes red at once on
+  unrelated code. When many lanes fail together, suspect the calendar first.
+- **Trust the fresh database in CI over your local one.** A local database
+  drifts from the migration history. When database tests fail locally but pass
+  in CI, believe CI instead of spending a day repairing one machine.
 
 ## Adopt it in a day
 
 1. Write a path manifest for every lane running now, in one file the
    orchestrator owns.
-2. List your spine files by name, and mark them one-lane-at-a-time in the law
-   file (see [`templates/CLAUDE.md`](../templates/CLAUDE.md), worktrees).
+2. List your spine files by name and mark them one-lane-at-a-time in the law
+   file (the worktrees section of
+   [`templates/CLAUDE.md`](../templates/CLAUDE.md)).
 3. Convert your most conflict-prone shared list into one file per change.
 4. Copy [`templates/scripts/next_number.sh`](../templates/scripts/next_number.sh),
-   which scans open pull requests as well as `main`, and point it at your own
-   numbered paths.
-5. Next time two lanes touch one file, diff the merge against both parents by
-   identifier before looking at the checks.
+   point its `KINDS` list at your own numbered paths, and run it at the start
+   of every batch.
+5. The next time two lanes touch one file, compare the merge with both parents,
+   by identifier, before you look at the checks.

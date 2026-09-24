@@ -1,139 +1,146 @@
 # Orchestration
 
-## What the role is for
+Once more than two agents work in one repository, someone has to hold the whole
+picture. That is the orchestrator: an agent that splits a batch of work into
+lanes (one agent, one task, one branch each), starts them, checks what they
+report and assembles the result. It is a coordination role, not a
+senior-engineer role. Its value is knowing what every lane is touching, not
+writing the best code in the room.
 
-Once more than two agents work in one repository, somebody has to hold the
-whole picture. That somebody is the orchestrator. It is a coordination role,
-not a senior-engineer role: its value is knowing what every lane is touching,
-not writing the best code in the room.
+The procedure an agent follows is the plugin's `orchestrate` skill,
+[`plugin/skills/orchestrate/SKILL.md`](../plugin/skills/orchestrate/SKILL.md).
+This chapter explains why the role works the way it does.
 
-This chapter explains why the role is shaped the way it is. The procedure
-lives in the `orchestrate` skill (`plugin/skills/orchestrate/SKILL.md`), which
-is the manual an agent actually loads.
+## Four jobs, in priority order
 
-## The four jobs, in priority order
+1. **Guard scope.** Nothing else matters if two lanes edit the same file. Every
+   lane declares its paths before it starts, and no two lanes may declare the
+   same path. An overlap is refused, not warned about, because in a busy
+   session nobody reads a warning.
+2. **Order the shared files.** A few files, the spine of the repository, are
+   wanted by everyone: where the application is wired together, generated
+   interfaces, shared registries, lists that only grow. The orchestrator alone
+   sets their order, one lane at a time. See
+   [parallel lanes](03-parallel-lanes.md).
+3. **Verify before reporting.** The orchestrator is the last check between a
+   worker's claim and the owner's decision. An unverified claim that reaches
+   the owner is worse than none, because the owner will act on it.
+4. **Keep the record accurate.** The lane registry and the tracker are the
+   only lasting memory in the system. The orchestrator's context ends with its
+   session.
 
-**One, guard scope.** Nothing else matters if two lanes edit the same file.
-Every lane declares the paths it owns before it starts, and no two lanes may
-declare the same path. An overlap is refused, not warned about, because a
-warning in a busy session is a warning nobody reads.
+## It never writes product code
 
-**Two, serialize the spine.** A few files in every project are wanted by
-everyone: the place where the application is wired together, generated
-interface files, shared registries, any list that only ever grows. These are
-the orchestrator's alone to sequence. One lane touches a spine file at a time,
-in an order the orchestrator picks.
+An orchestrator editing product code means one of two things. Either the task
+was small enough to do directly and never needed a team. Or the role has
+drifted, and the map of who owns what is now kept by an agent that is busy
+debugging. Both are reasons to stop.
 
-**Three, verify before reporting.** The orchestrator is the last checkpoint
-between a worker's claim and <OWNER>'s decision. A claim that reaches the
-owner unverified is worse than no claim, because the owner will act on it.
+## Working with lanes
 
-**Four, keep the board honest.** The lane registry and <TRACKER> are the only
-durable memory in the system. An orchestrator's own context is not memory: it
-ends when the session ends.
+**Resume, never relaunch.** Workers die on network hiccups. A resumed session
+comes back with its full context. A fresh launch on the same task starts again
+from a summary, which is slower and less accurate. Work committed before a
+crash survives it.
 
-## The one thing it never does
+**Never message a lane in the middle of a turn.** Wait until it is idle. A
+message that arrives during a turn can start a second turn in the same working
+copy.
 
-It does not implement. An orchestrator editing product code means one of two
-things. Either the task was small enough to do directly and never needed a
-team of agents, or the role has drifted and the scope map is now kept by an
-agent that is also busy debugging. Both are worth stopping for.
+**What goes wrong without it.** Two turns run at once in one checkout. Both
+write files and neither knows about the other. Because it is the same process
+writing to the same tree, git shows no conflict marker. The damage looks like a
+clean commit.
 
-## Talking to lanes
+**Launch detached.** A worker started in the foreground dies when the tool call
+that started it times out, and on a long task it always does. On a farm (an
+always-on machine that runs agents with murmur's `fleet` tool), `fleet spawn`
+starts every worker as a background service.
 
-Four habits, each learned the same way.
+**Stop a lane only after its change has merged**, not when it opens the pull
+request. Review feedback has to reach the worker that wrote the code while its
+context is still loaded. Otherwise the fix is made by a stranger reading a
+diff.
 
-**Resume, never relaunch.** Worker processes die on network hiccups. A resumed
-thread comes back with its full context intact. A fresh launch on the same task
-throws that away and starts again from a summary, which is both slower and less
-accurate. In every observed crash, work that was committed before the death
-survived.
+## Subagents, and the verification contract
 
-**Never message a lane mid-turn.** Wait until it is idle. A message landing
-during a turn can start a second turn in the same working copy.
+Sending work to many subagents at once is where an orchestrator saves the most
+time, and it is only useful if their output can be trusted. So every
+investigation prompt carries the same contract, and a report that misses it
+goes back. For each finding, the report gives:
 
-**The incident behind it:** two turns ran concurrently in one checkout. Both
-were writing files, neither knew about the other, and because they were the
-same process writing to the same tree, git produced no conflict marker at all.
-The damage looked like a clean commit.
+- its severity;
+- the file and line;
+- a concrete failure scenario, with concrete inputs;
+- whether it is **confirmed** (the code path was traced) or **plausible** (it
+  still needs proof at runtime).
 
-**Launch detached.** A worker started in the foreground dies when the launching
-tool call times out, which for a long task is always.
-
-**Kill a lane only after its change is merged.** Not when it opens the change
-for review. Review feedback needs to reach the same worker that wrote the code,
-with its context still loaded, otherwise the fix is made by a stranger reading
-a diff.
-
-## Running subagents, and the verification contract
-
-Fan-out is the orchestrator's real leverage, and it is only worth anything if
-the output can be trusted. So every investigation prompt carries the same
-contract, and a report that does not meet it is sent back.
-
-Each finding must state its severity, the file and line, and a concrete failure
-scenario with concrete inputs. Each finding must be marked **confirmed** (the
-code path was actually traced) or **plausible** (it still needs runtime proof).
-And the report must also say what was checked and found correct, because a
-report that is all defects is usually a report that stopped reading halfway,
-and the owner needs the assurance as much as the defect list.
+It also says what was checked and found correct. A report that lists only
+defects has usually stopped reading halfway, and the owner needs to know what
+is sound as much as what is broken.
 
 Then the orchestrator does its own part.
 
-**Never read a worker's raw transcript.** It is the entire message log. Reading
-one will consume the context the orchestrator needs for everything else, in
-exchange for information the completion summary already carried.
+**Never read a worker's raw transcript.** It is the whole message log. It uses
+up the context the orchestrator needs for everything else, and the completion
+summary already carries the information.
 
-**Verify load-bearing claims against the artifact, not against more code.**
-Read the installed dependency. Query the live system. Run the test rather than
-forwarding the claim that it passes.
+**Check the claims a decision depends on against the real thing, not against
+more code.** Read the installed dependency, query the live system, and run the
+test instead of repeating that it passes.
 
-**The incident behind it:** two investigation reports arrived with identical
-confidence and identical tone. One claimed a syntax error that was in fact
-valid on the language version the project runs. The other claimed a library
-treats an empty allowlist as "skip the check entirely", which was exactly
-right and a real security hole. Nothing in either report distinguished them.
-Opening the installed library settled both in about a minute each.
+**What goes wrong without it.** Two investigation reports arrive with the same
+confidence and tone. One claims a syntax error that is valid in the language
+version the project runs. The other claims a library treats an empty allowlist
+as "skip the check entirely", which is right, and a real security hole. Nothing
+in the reports tells them apart. Opening the installed library settles each in
+about a minute.
 
-## The model heuristic
+## Choosing a model
 
-Three tiers, split by judgement rather than difficulty. The **strongest
-model** takes ambiguous, architectural, or risky work, and always reviews
-another agent's change, because catching one bad merge is worth many cheap
-runs. A **mid model** is the default and covers most lanes. The **cheapest
-model** does mechanical work: renames, repetitive fixes, documentation
-sweeps.
+Split by how much judgement the work needs, not by how hard it looks:
 
-## Capacity and quota, before anything is spawned
+- The **strongest model** takes ambiguous, architectural or risky work, and
+  always reviews another agent's change. Catching one bad merge is worth many
+  cheap runs.
+- A **mid model** is the default and covers most lanes.
+- The **cheapest model** does mechanical work: renames, repetitive fixes,
+  routine documentation edits.
 
-Check two things before spawning, every time.
+## Check quota and capacity before you spawn
 
-**Account headroom.** Workers spend the same allowance the owner works in.
+**Account headroom.** Workers use the same subscription allowance you work in.
 Spread lanes across accounts and prefer the one with the most left. A worker
-started on an exhausted account dies on its first step having done nothing,
-and must then be started clean rather than resumed.
+started on an exhausted account dies on its first step, having done nothing,
+and must then start clean instead of resuming. On a farm, `fleet accounts`
+shows each account's session and weekly use. For Claude lanes, `fleet spawn`
+picks an account with headroom unless you name one with `--account`.
 
-**Machine capacity.** Check load, memory, and running worker count on <FARM>
-right before spawning, not at the start of the session. If the check says
-wait, spawn fewer or wait.
+**Machine capacity.** Check the machine right before you spawn, not at the
+start of the session, and spawn fewer or wait if it says so. On a farm,
+`fleet capacity` checks free memory, free disk, temperatures and the number of
+running agents, and prints `OK` or `BLOCK` with its reasons.
 
 ## Never spawn without an explicit go
 
-Propose the lanes, the worker count, the model each lane gets, and what lands
-at the end. Then stop.
+Propose the lanes, the number of workers, the model for each lane and what
+lands at the end. Then stop and wait.
 
 **Refining a proposal is not approval.** If the owner amends the plan, asks
-about a lane, or trims the scope, that is a conversation about the plan, not an
-instruction to run it. Read-only exploration is always safe. Spawning is not.
+about a lane or trims the scope, that is a conversation about the plan, not an
+instruction to run it. Read-only exploration is always safe; spawning is not.
 Never act on an implied yes.
 
 ## Adopt it in a day
 
 1. Name the role out loud before your next multi-agent batch, and write down
-   which session is holding it.
-2. Add the verification contract to your standard investigation prompt, all
-   five parts, including what was checked and found correct.
-3. Write your three model tiers into your law file so lane assignment stops
-   being a per-session judgement call.
-4. Adopt one sentence as a habit: a proposal is not approved until the owner
-   says a word that means go.
+   which session holds it.
+2. Add the verification contract, all five parts, to your standard
+   investigation prompt.
+3. Write your three model tiers into your law file, so choosing a model stops
+   being a new decision in every session.
+4. Make one sentence a habit: a proposal is not approved until the owner says a
+   word that means go.
+5. Give every lane a short brief with its task, acceptance criteria and path
+   manifest, starting from
+   [`templates/briefs/lane.md`](../templates/briefs/lane.md).
