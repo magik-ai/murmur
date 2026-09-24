@@ -1,16 +1,47 @@
-// murmur, Starling Almanac. Most of the system is CSS classes (bundle.css, prefix mm-);
+// murmur, Starling Almanac. Most of the system is CSS classes (murmur.css, prefix mm-);
 // two pieces move and live on window.Murmur.
 
+/** A box in fractions of the canvas, from 0 to 1. */
+export interface FlockBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 export interface FlockOptions {
-  /** Birds to draw, 40 to 1400. Default 420; the hero takes 900 at most. */
+  /** Birds to draw, 40 to 1400. Default 420. */
   count?: number;
-  /** 1 is the natural pace; 0.5 for a quiet empty state. */
+  /** 1 is the natural pace; 0.5 is calmer. Default 1. */
   speed?: number;
-  /** Same seed, same first frame. */
+  /** The same seed gives the same first frame. Default 7. */
   seed?: number;
+  /** 1 is a dense winter flock, 2 an airy one. Default 1. */
+  spacing?: number;
+  /** Bird size; about 1.5 for a hero seen up close. Default 1. */
+  birdScale?: number;
+  /** Centre of the area the flock circles, as a fraction of the canvas width. Default 0.5. */
+  roostX?: number;
+  /** Centre of the area the flock circles, as a fraction of the canvas height. Default 0.5. */
+  roostY?: number;
+  /** Horizontal radius of that area, as a fraction of the canvas width. Default 0.3. */
+  roostReach?: number;
+  /** How tightly the flock keeps to that area: 0.3 circles wide, 2 stays close. Default 0.3. */
+  hold?: number;
+  /** A box, or a list of boxes, that the flock flies around, such as a headline. */
+  avoid?: FlockBox | FlockBox[];
+  /** Point at a bird to see lines to the seven birds it watches. Default off. */
+  inspect?: boolean;
+  /** Called with true when the pointer finds a bird and false when it leaves. */
+  onInspect?: (found: boolean) => void;
 }
 
 export interface FlockHandle {
+  /** Stop until play() is called, even when the canvas scrolls back into view. */
+  pause(): void;
+  play(): void;
+  running(): boolean;
+  /** Stop, and stop watching whether the canvas is on screen. */
   stop(): void;
   birds(): number;
   /** Always 7: the topological rule measured on starlings. */
@@ -20,7 +51,9 @@ export interface FlockHandle {
 export interface MurmurNamespace {
   /** Draw a murmuration on a canvas; colours from --ink and --lamp. */
   flock(canvas: HTMLCanvasElement, options?: FlockOptions): FlockHandle;
-  /** Start every canvas[data-mm-flock] under root (data-count, data-speed, data-seed). */
+  /** Start every canvas[data-mm-flock] under root (the whole document by default). Reads
+      data-count, data-speed, data-seed, data-spacing, data-bird-scale, data-roost-x,
+      data-roost-y, data-roost-reach and data-inspect. */
   mount(root?: ParentNode): FlockHandle[];
   NEIGHBOURS: 7;
   version: string;
