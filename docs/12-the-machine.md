@@ -22,28 +22,42 @@ If neither is true yet, skip this chapter and come back when it is.
 
 | It needs | Why |
 | --- | --- |
-| Linux with systemd: Ubuntu 22.04 or newer, or Debian 12 | The agent runner, the sweep and the dashboard run as systemd user services |
+| Linux with systemd: Ubuntu 22.04 or newer, or Debian 12 or newer | The agent runner, the sweep and the dashboard run as systemd user services |
 | Python 3.11 or newer | murmur's tools need it |
 | CPU and memory, not a graphics card | Agents read, write and run tests; nothing here trains a model |
 | Always on, and reachable over ssh | You drive it from your laptop |
-| Your own GitHub login and your own agent subscription | Agents push and open pull requests as you; Claude and Codex agents run on your subscription, never on an API key |
+| Your own GitHub login and your own agent subscription | Agents push and open pull requests as you, and run on your subscription (see [the two logins](#the-two-logins)) |
 
-Ubuntu 24.04 and Debian 12 come with Python 3.11 or newer. Ubuntu 22.04 comes with 3.10: the
-installer stops there and prints one line to paste that adds 3.11. The same line is in step 1 of
-[the quickstart](../fleet/docs/QUICKSTART.md).
+Ubuntu 24.04 and newer, and Debian 12 and newer, come with Python 3.11 or newer. Ubuntu 22.04
+comes with 3.10: the installer stops there and prints one line to paste that adds 3.11. The same
+line is in step 1 of [the quickstart](../fleet/docs/QUICKSTART.md).
 
 The subscription is a Claude plan, plus a ChatGPT login if you also run Codex agents.
 
 Windows works through WSL2: run `wsl --install`, then do everything below inside the Ubuntu it
-installs. macOS is not supported as a farm, because it has no systemd. Use a Mac to drive a
-Linux machine over ssh.
+installs. By default, WSL shuts Ubuntu down about 15 seconds after its last terminal closes, and
+the farm's systemd services do not keep it running. To keep the farm on, add these lines to
+`%UserProfile%\.wslconfig` on Windows (the second setting needs Windows 11):
+
+```ini
+[general]
+instanceIdleTimeout=-1
+
+[wsl2]
+vmIdleTimeout=-1
+```
+
+Then run `wsl --shutdown` once in PowerShell, and open Ubuntu again.
+
+macOS is not supported as a farm, because it has no systemd. Use a Mac to drive a Linux machine
+over ssh.
 
 ## Three ways to get one
 
 ### 1. A computer you already own
 
 A desktop PC at home works, even one you also use for games. Install Ubuntu on it, or use WSL2
-on Windows as described above. It costs only electricity. Then run
+on Windows with the settings described above. It costs only electricity. Then run
 [the install command](#set-it-up-with-one-command) on it.
 
 The farm can share the machine with you. `fleet mode` caps the share of the processor that the
@@ -193,8 +207,10 @@ your GitHub login. That is why the head office exists: it tells the agents apart
 cannot.
 
 The Claude login must be a subscription, not an API key. The fleet removes `ANTHROPIC_API_KEY`
-and `OPENAI_API_KEY` from the environment whenever it starts an agent, so an agent without a
-subscription stops instead of spending money on a key.
+and `OPENAI_API_KEY` from the environment whenever it starts an agent, so an agent does not
+switch to paid API use by accident. Do not set up any other API credentials on the farm, such as
+`ANTHROPIC_AUTH_TOKEN`, an `apiKeyHelper` in Claude Code's settings, `CODEX_API_KEY`, or a Codex
+login made with an API key.
 
 Next, register a project and start the first agent. The installer prints the commands, and
 [the quickstart](../fleet/docs/QUICKSTART.md) explains each one.

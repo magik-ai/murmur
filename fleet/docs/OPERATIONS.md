@@ -67,7 +67,7 @@ Contents:
 | the **cpu** and **memory** controllers delegated to your user manager | the power modes cap the agents' CPU and memory without root | `cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers` lists `cpu` and `memory` |
 | **Python 3.11** or newer | fleet reads its config files with `tomllib`. Ubuntu 22.04 ships 3.10: see [quickstart step 1](QUICKSTART.md#1-get-a-box-with-systemd) | `python3 -V` |
 | **git** | each lane works in its own git worktree | `git --version` |
-| **gh**, logged in | lanes open pull requests, and the sweep asks GitHub whether a branch merged | `gh auth status` |
+| **gh** 2.40 or newer, logged in | lanes open pull requests, the sweep asks GitHub whether a branch merged, and the dashboard checks the login with `gh auth status --active` (install it as in [quickstart step 3](QUICKSTART.md#3-install-githubs-cli-and-log-in)) | `gh --version`, `gh auth status` |
 | **claude** and/or **codex**, logged in on a subscription | the engines the lanes run | `claude --version`, `codex --version` |
 | **tmux** | runs the dashboard until you install it as a user unit | `tmux -V` |
 
@@ -84,7 +84,9 @@ sudo systemctl daemon-reload
 ### Logins
 
 - Log in on a **subscription**, not an API key. fleet removes `ANTHROPIC_API_KEY` and
-  `OPENAI_API_KEY` from every lane, so a lane cannot bill an API account by accident. The limit
+  `OPENAI_API_KEY` from every lane, so a lane does not switch to paid API use by accident. Do not
+  set up any other API credentials on the farm, such as `ANTHROPIC_AUTH_TOKEN`, an `apiKeyHelper`
+  in Claude Code's settings, `CODEX_API_KEY`, or a Codex login made with an API key. The limit
   that matters is the subscription's own usage windows, and your interactive sessions share them.
 - Logging in is interactive. Do it once over ssh with a terminal: `ssh -t <FARM_HOST> claude`,
   then type `/login`. For Codex, tunnel the login callback back to the farm:
@@ -96,8 +98,21 @@ sudo systemctl daemon-reload
 ### Where it runs
 
 - Any Linux with systemd runs fleet. The one-command installer knows Ubuntu 22.04 or newer and
-  Debian 12, because it installs packages with apt.
-- On Windows, use WSL2 with Ubuntu, with systemd running inside it.
+  Debian 12 or newer, because it installs packages with apt.
+- On Windows, use WSL2 with Ubuntu, with systemd running inside it. By default, WSL stops the
+  distribution about 15 seconds after its last terminal closes, and systemd services do not keep
+  it running. To keep the farm on, add these lines to `%UserProfile%\.wslconfig` on Windows (the
+  second setting needs Windows 11):
+
+  ```ini
+  [general]
+  instanceIdleTimeout=-1
+
+  [wsl2]
+  vmIdleTimeout=-1
+  ```
+
+  Then run `wsl --shutdown` once in PowerShell, and open Ubuntu again.
 - macOS cannot be a farm, because it has no systemd. Use a Mac to drive a Linux farm over ssh.
 - Optional, and worth it for a remote farm: a private network between your laptop and the farm
   (a tailnet or a VPN), so the dashboard and ssh are not open to the internet.
@@ -263,7 +278,8 @@ lanes look alike. `fleet identity` shows the marks, and this changes one:
 - `--engine codex` runs one model (`FLEET_CODEX_MODEL`, default `gpt-5.6-sol`), and `--effort`
   picks the tier: `low`, `medium` (the default), `high` or `xhigh`. `--model` picks another
   Codex model.
-- `--effort` works on Claude lanes too.
+- `--effort` works on Claude lanes too, but the levels a Claude model supports depend on the
+  model: not every model has every level.
 - `--account NAME|auto` picks the Claude subscription (see
   [section 8](#8-subscription-accounts)). Codex refuses it.
 - A model name must start with a letter or digit, contain only letters, digits and
@@ -799,7 +815,8 @@ Each entry starts with what you see, then says what to do.
 
 **The sweep, the daemon or the lanes stop when you log out.** Linger is off. Run
 `loginctl enable-linger "$USER"` (with `sudo` if it asks), then check it with
-`loginctl show-user "$USER" -p Linger --value`.
+`loginctl show-user "$USER" -p Linger --value`. On WSL2, WSL also stops the distribution soon
+after its last terminal closes: set the idle timeouts in [where it runs](#where-it-runs).
 
 **`install.sh` says autosweep "could not enable".** No systemd user manager answered. Check
 `systemctl --user is-system-running`. On WSL2, make sure systemd is running inside the

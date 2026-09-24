@@ -33,6 +33,27 @@ repository you want to set up:
 /murmur:doctor
 ```
 
+## Updating
+
+Claude Code installs a new version of the plugin only when its version
+number, in `.claude-plugin/plugin.json`, changes.
+
+Auto-update is off for this marketplace unless you turn it on: run `/plugin`,
+open **Marketplaces**, choose `murmur` and select **Enable auto-update**. To
+update by hand, refresh the marketplace inside Claude Code:
+
+```text
+/plugin marketplace update murmur
+```
+
+Then update the plugin from its page in `/plugin`, or in your terminal:
+
+```bash
+claude plugin update murmur@murmur
+```
+
+Start a new session afterwards, so the new version loads.
+
 ## Commands
 
 | Command | What it does |
@@ -41,9 +62,14 @@ repository you want to set up:
 | `/murmur:doctor` | Checks the setup. It prints a table and one word for where the setup stands: `current`, `warnings`, `setup-required` or `repaired`. It names the optional pieces that are not set up yet: a head office (a private GitHub repository the agents use for names, branch claims and messages) and a separate machine for agents. `--fix` repairs two safe things only: it makes the plugin's hook scripts executable, and it creates `.murmur/config.toml` from the defaults when there is none. |
 | `/murmur:farm` | Gets you a farm on DigitalOcean from your laptop. It checks doctl, your ssh key and GitHub, asks a few questions, and shows the plan and the monthly price. It buys the droplet only after you type the price back. Then it installs murmur on it and opens the farm's dashboard through an ssh tunnel or Tailscale. Every login is a command you run in your own terminal. What a farm is and what it costs: [the machine](../docs/12-the-machine.md). |
 
-Each command uses the skill of the same name (`init`, `doctor`, `farm`). The
+Each command runs the skill of the same name (`init`, `doctor`, `farm`). The
 skills also load by themselves when you ask for the same thing in your own
 words, for example "set up murmur" or "check my setup".
+
+The plugin also ships a command file for each of the three, in `commands/`.
+Each is a short entry point that hands over to its skill, for older versions
+of Claude Code. Current versions run the skill when a skill and a command
+share a name, so every instruction lives in the skill.
 
 ## Role skills
 
@@ -71,9 +97,10 @@ the rules at the start of every session. The full text is the handbook in
 ### `block-generated-edits.sh` (before every edit)
 
 This hook blocks edits to generated files, and tells the agent which command
-regenerates the file instead. It runs before `Edit`, `Write`, `MultiEdit` and
-`NotebookEdit`. When the target path matches, it exits with code 2, which
-blocks the edit, and prints the reason.
+regenerates the file instead. It runs before each call to Claude Code's
+editing tools: `Edit`, `Write` and `NotebookEdit` (and `MultiEdit`, which older
+versions have). It does not see shell commands. When the target path matches,
+it exits with code 2, which blocks the edit, and prints the reason.
 
 It is off until the repository has `.claude/generated-files.txt`, with one
 glob per line:
@@ -97,8 +124,9 @@ alone never blocks an edit.
 
 ### `session-context.sh` (session start)
 
-At startup, on resume, after `/clear` and after compaction, this hook adds the
-short version of the team's rules to the session: one batch, one branch, one
+At startup, on resume, in a forked session, after `/clear` and after
+compaction, this hook adds the short version of the team's rules to the
+session: one batch, one branch, one
 pull request; nothing lands on the main branch directly; claim a branch before
 you touch it; your name belongs to this session; never bypass a required check
 with admin rights; never merge red; never switch off a shipped feature as a
@@ -139,9 +167,9 @@ read both and keep one.
 
 ```text
 .claude-plugin/plugin.json   name, description, version
-commands/init.md             the /murmur:init command
-commands/doctor.md           the /murmur:doctor command
-commands/farm.md             the /murmur:farm command
+commands/init.md             entry point to skills/init, for older Claude Code
+commands/doctor.md           entry point to skills/doctor, for older Claude Code
+commands/farm.md             entry point to skills/farm, for older Claude Code
 skills/init/SKILL.md
 skills/doctor/SKILL.md
 skills/farm/SKILL.md

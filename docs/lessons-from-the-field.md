@@ -13,14 +13,17 @@ But the main branch did not have the newest commit, and it failed the very
 test that commit fixed. The pull request said "merged", so the loss looked like
 success. It showed only when someone read the merged file on main.
 
-**Why.** The merge queue had taken a snapshot of the head commit when the pull
-request joined the queue, and it merged that snapshot. The later push did not
-remove the entry or update it. So nobody tested the new commit, nobody merged
-it, and it was left on a branch that was finished once the pull request closed.
+**Why.** The merge queue tests a temporary branch built from the pull request
+as it was when it entered the queue. A later push is not part of that test.
+Depending on the queue, such a push is left out of the merge, as it was here,
+or merged without its own checks. So nobody tested the new commit, nobody
+merged it, and it was left on a branch that was finished once the pull request
+closed.
 
-**What to do.** Never push to a pull request that is in the merge queue. Open
-a new pull request from current main instead. Or take the entry out of the
-queue, push, and queue it again, so the snapshot is taken again. After any
+**What to do.** Do not push to a pull request that is in the merge queue.
+Before you push, check whether the pull request is queued or already merged.
+If it is queued, take it out of the queue first, then push and queue it again.
+If it has merged, open a follow-up branch from the current main. After any
 merge where a push raced the queue, compare main with the branch tip before you
 believe the merge.
 

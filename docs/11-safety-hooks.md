@@ -53,8 +53,9 @@ hand-merged generated file matches neither of its sources.
 
 The script is
 [`plugin/hooks/block-generated-edits.sh`](../plugin/hooks/block-generated-edits.sh).
-The plugin runs it before every `Edit`, `Write`, `MultiEdit` and
-`NotebookEdit` call in Claude Code.
+The plugin runs it before every call to Claude Code's editing tools: `Edit`,
+`Write` and `NotebookEdit` (and `MultiEdit`, which older versions have). It
+does not see shell commands.
 
 The script holds no paths. It reads `.claude/generated-files.txt` in your
 repository, one protected path per line:
@@ -87,8 +88,10 @@ guard is on for the example's paths. Edit the list to name your own generated
 files, or empty it to switch the guard off.
 
 The hook does not block the generator itself. The generator runs as a shell
-command, which this check never sees. So the correct route stays open, and it
-is the only open one.
+command, which this check never sees, so the correct route stays open. For the
+same reason, a shell command that writes the file directly, such as `sed -i`,
+gets past the hook. The hook stops the common mistake, not every way around
+it.
 
 A repository that does not use the plugin can use the same script from
 [`templates/hooks/`](../templates/hooks/). Copy
@@ -101,11 +104,11 @@ there are never two copies that drift apart.
 
 The plugin's other hook is
 [`session-context.sh`](../plugin/hooks/session-context.sh). It runs when a
-session starts, resumes, is cleared or is compacted. It puts a short version
-of the team's rules in front of the agent before it acts. Then it adds what
-this repository answered at `/murmur:init`: the repository, the branch that
-work merges into, the tracker, whether there is a farm, and where branch
-claims live.
+session starts, resumes, is forked, is cleared or is compacted. It puts a
+short version of the team's rules in front of the agent before it acts. Then
+it adds what this repository answered at `/murmur:init`: the repository, the
+branch that work merges into, the tracker, whether there is a farm, and where
+branch claims live.
 
 To use your own short version of the rules, write it to
 `.claude/team-laws.md`. The hook then uses that file, word for word, instead.

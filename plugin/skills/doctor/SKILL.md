@@ -7,6 +7,8 @@ description: Check that this repository is set up to run agents as a team. Trigg
 
 You are checking a setup, not changing a repository. Run the script, explain
 the table in plain words, and offer a repair only where a repair is safe.
+Never push, delete or rename a branch, and never change a file the person
+wrote.
 
 ## 1. Run it
 

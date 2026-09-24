@@ -153,7 +153,10 @@ When several lanes build ONE coherent change, do not put them on a shared
 branch, and do not let each open its own pull request. Two agents on one
 branch under one identity push and revert each other's work with no record of
 who did what. A lane that pushes into a pull request someone else is driving
-removes it from the merge queue and restarts all of its checks.
+can also race the merge queue. A push to a queued pull request is not part of
+the queue's test: depending on the queue, it is left out of the merge or merged
+without its own checks. Never push to a queued pull request, yours or anyone
+else's; take it out of the queue first.
 
 The contract: **each lane works on its own branch, inside its declared
 territory, and no lane opens a pull request.** You assemble the lane branches

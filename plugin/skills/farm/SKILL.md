@@ -237,8 +237,9 @@ Tell the person, in plain words:
 - where the dashboard is, and that `open` reopens it;
 - what the farm costs a month, and that only destroying the droplet stops the
   cost. The command, run from this laptop, is
-  `python3 ${CLAUDE_PLUGIN_ROOT}/lib/machines.py destroy <name> --confirm <name>`.
-  Run it only when the person asks for it by name;
+  `uv run --no-project --python 3.11 ${CLAUDE_PLUGIN_ROOT}/lib/machines.py destroy <name> --confirm <name>`.
+  It needs Python 3.11 or newer, which uv provides; a Mac's own `python3` is
+  older. Run it only when the person asks for it by name;
 - the next steps: register a project on the farm
   (`ssh <name> /home/farm/.local/bin/fleet add-project --name myproj --repo owner/name`)
   and spawn the first lane.

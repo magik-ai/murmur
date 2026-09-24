@@ -13,8 +13,9 @@ Three rules hold for the whole run.
 - **Never invent an answer.** Every question goes to the person, with its
   default shown. Silence is not consent, but pressing Enter is: an empty reply
   means the default.
-- **Never write a file yourself.** The script writes. You ask, store and
-  explain. That is what makes a second run safe.
+- **Never write a file yourself, and never change one that exists.** The
+  script writes. You ask, store and explain. That is what makes a second run
+  safe.
 - **Stop on an error.** If a command exits with an error, show the person its
   message and stop. Never edit `.murmur/config.toml` to get past it.
 

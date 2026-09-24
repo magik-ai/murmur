@@ -21,4 +21,6 @@ Flags:
 - `--remote`: this machine is driven from your laptop. The dashboard's address is left as it is (loopback by default), Tailscale is not offered, and the last lines print the ssh tunnel that reaches the dashboard.
 - `-h`, `--help`: print the usage text.
 
-The farm needs systemd, because the dashboard, the sweep timer and the supervisor daemon run as systemd user services. A plain container is not a farm: in a fresh `ubuntu:24.04` container, `--yes` stops at step 1/5 with `stop: no systemd here`, before it changes anything. Run it on a machine or virtual machine that boots systemd; WSL2 works.
+The farm needs systemd, because the dashboard, the sweep timer and the supervisor daemon run as systemd user services. A plain container is not a farm: in a fresh `ubuntu:24.04` container, `--yes` stops at step 1/5 with `stop: no systemd here`, before it changes anything. Run it on a machine or virtual machine that boots systemd.
+
+WSL2 works, with two settings. By default, WSL stops a distribution about 15 seconds after its last terminal closes, and systemd services do not keep it running. In `%UserProfile%\.wslconfig` on Windows, set `instanceIdleTimeout=-1` under `[general]` and `vmIdleTimeout=-1` under `[wsl2]` (the second one needs Windows 11). Then run `wsl --shutdown` once in PowerShell, and open Ubuntu again. [The machine](../docs/12-the-machine.md#what-the-machine-must-be) shows the whole file.

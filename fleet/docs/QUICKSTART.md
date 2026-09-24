@@ -22,25 +22,40 @@ Droplet. Anything else is a contribution: see [`CONTRIBUTING.md`](../../CONTRIBU
 
 ### 1. Get a box with systemd
 
-Use Ubuntu 22.04 or newer, Debian 12, or another Linux with systemd. It can be a spare PC, a
-virtual machine, or a DigitalOcean Droplet. The `/murmur:farm` command of the murmur Claude Code
-plugin can create a Droplet from your laptop and install murmur on it. On Windows, use WSL2 with
-Ubuntu, with systemd running inside it. The farm needs CPU and memory, not a GPU. fleet runs as an
-ordinary user and never needs root; only installing packages uses `sudo`.
+Use Ubuntu 22.04 or newer, Debian 12 or newer, or another Linux with systemd. It can be a spare
+PC, a virtual machine, or a DigitalOcean Droplet. The `/murmur:farm` command of the murmur Claude
+Code plugin can create a Droplet from your laptop and install murmur on it. The farm needs CPU and
+memory, not a GPU. fleet runs as an ordinary user and never needs root; only installing packages
+uses `sudo`.
 
 ```bash
 sudo apt update && sudo apt install -y git tmux python3 curl
 python3 -V          # must be 3.11 or newer
 ```
 
-Ubuntu 24.04 and newer, and Debian 12, ship Python 3.11 or newer. Ubuntu 22.04 ships 3.10. There,
-add 3.11 from the deadsnakes PPA and put it first on `PATH`. The system's own `/usr/bin/python3`
-stays 3.10, because apt needs it. Then check again:
+Ubuntu 24.04 and newer, and Debian 12 and newer, ship Python 3.11 or newer. Ubuntu 22.04 ships
+3.10. There, add 3.11 from the deadsnakes PPA and put it first on `PATH`. The system's own
+`/usr/bin/python3` stays 3.10, because apt needs it. Then check again:
 
 ```bash
 sudo apt-get install -y software-properties-common && sudo add-apt-repository -y ppa:deadsnakes/ppa && sudo apt-get install -y python3.11 python3.11-venv && sudo ln -sf /usr/bin/python3.11 /usr/local/bin/python3 && hash -r
 python3 -V          # Python 3.11.x
 ```
+
+On Windows, use WSL2 with Ubuntu, with systemd running inside it. By default, WSL stops Ubuntu
+about 15 seconds after its last terminal closes, and systemd services do not keep it running. To
+keep the farm on, add these lines to `%UserProfile%\.wslconfig` on Windows (the second setting
+needs Windows 11):
+
+```ini
+[general]
+instanceIdleTimeout=-1
+
+[wsl2]
+vmIdleTimeout=-1
+```
+
+Then run `wsl --shutdown` once in PowerShell, and open Ubuntu again.
 
 ### 2. Let user services run when nobody is logged in
 
@@ -56,8 +71,18 @@ last ssh session closes. This is the most common setup mistake.
 
 ### 3. Install GitHub's CLI and log in
 
+murmur needs gh 2.40 or newer: the dashboard checks the login with `gh auth status --active`.
+The gh in Ubuntu 22.04's and Debian 12's own package lists is older, so install it from GitHub's
+own apt repository, as murmur's installer does:
+
 ```bash
-sudo apt install -y gh        # or GitHub's own apt repository, for a newer version
+sudo mkdir -p -m 755 /etc/apt/keyrings
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+sudo apt-get update && sudo apt-get install -y gh
+gh --version                  # 2.40 or newer
 gh auth login                 # choose HTTPS, and let it set up git credentials
 gh auth status
 ```
@@ -84,8 +109,10 @@ ssh -L 1455:localhost:1455 -t <FARM_HOST> codex login   # the tunnel carries the
 ```
 
 If you are already on the farm, leave out the `ssh` part. Log in on a **subscription**, not an API
-key. fleet removes `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from every lane, so a lane cannot bill
-an API account by accident.
+key. fleet removes `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from every lane, so a lane does not
+switch to paid API use by accident. Do not set up any other API credentials on the farm, such as
+`ANTHROPIC_AUTH_TOKEN`, an `apiKeyHelper` in Claude Code's settings, `CODEX_API_KEY`, or a Codex
+login made with an API key.
 
 ### 5. Install the fleet
 
@@ -228,9 +255,10 @@ fleet clean --project <PROJECT>      # after the merges
 | one subscription is running hot | the other engine at the same tier: it is a separate pool |
 
 Claude Code is the default engine, and `--model` sets its tier. For Codex, `--effort` sets the
-tier on one model. `--effort low|medium|high|xhigh` works on both engines. Claude lanes use
-`--account auto` unless you name an account: it spreads lanes across the subscriptions that still
-have room. `fleet accounts balance` names the next engine and account to use.
+tier on one model. fleet accepts `--effort low|medium|high|xhigh` on both engines, but the levels
+a model supports depend on the model: on Claude, not every model has every level. Claude lanes
+use `--account auto` unless you name an account: it spreads lanes across the subscriptions that
+still have room. `fleet accounts balance` names the next engine and account to use.
 
 ## Head office is optional
 

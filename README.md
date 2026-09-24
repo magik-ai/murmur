@@ -85,6 +85,10 @@ and a [one-command installer](farm) for the farm.
 
 ### 1. Set up a repository
 
+On your laptop you need Claude Code, git, the GitHub CLI (`gh`) and
+[uv](https://docs.astral.sh/uv/). The plugin's commands run their scripts with
+`uv run`.
+
 Open Claude Code inside the repository you want to set up, then run:
 
 ```text
@@ -153,8 +157,8 @@ Every change goes through the same five steps:
 | | What murmur supports today |
 | --- | --- |
 | Agents | Claude Code and Codex, each signed in with its own subscription |
-| Your laptop | Claude Code, git and the GitHub CLI (`gh`) |
-| The farm (optional) | Ubuntu 22.04 or newer, or Debian 12, with systemd. Your own machine or a DigitalOcean Droplet |
+| Your laptop | Claude Code, git, the GitHub CLI (`gh`) and [uv](https://docs.astral.sh/uv/) |
+| The farm (optional) | Ubuntu 22.04 or newer, or Debian 12 or newer, with systemd. Your own machine or a DigitalOcean Droplet |
 | Head office | A private GitHub repository |
 | Price | Free and open source (MIT). You pay only for your subscriptions and your machine |
 
@@ -186,8 +190,9 @@ continue after you close the laptop.
 <summary><b>Which agents does it run?</b></summary>
 <br>
 Claude Code and Codex. Each one uses its own subscription. The farm removes
-API keys from the agent's environment, so an agent cannot switch to paid API
-usage by accident.
+<code>ANTHROPIC_API_KEY</code> and <code>OPENAI_API_KEY</code> from each
+agent's environment, so an agent does not switch to paid API use by accident.
+Do not set up any other API credentials on the farm.
 </details>
 
 <details>
