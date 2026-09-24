@@ -181,9 +181,9 @@ def hosts_file():
 
 
 def two_identities():
-    """Where `GH_TOKEN` or `GITHUB_TOKEN` is set in fleet's env file, or None. The daemon, the
-    sweep and the queue runner load that file and the dashboard and the lanes do not, so the
-    farm would act as two accounts. The value itself is never read into anything kept."""
+    """Where `GH_TOKEN` or `GITHUB_TOKEN` is set in fleet's env file, or None. The daemon and
+    the sweep load that file and the lanes do not, so the farm would act as two accounts. The
+    value itself is never read into anything kept."""
     path = os.path.join(fleet_config(), "env")
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:

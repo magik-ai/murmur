@@ -103,9 +103,9 @@ export function list(value) {
 }
 
 /* A request that never comes back is not a wait, it is a panel stuck on a skeleton for the life
-   of the page: the resource below only ever leaves "loading" when a request settles. The farm's
-   queue route reads the forge inline on its first draw, which is exactly how a live dashboard
-   was left showing two grey bars with nothing to tell the reader. */
+   of the page: the resource below only ever leaves "loading" when a request settles. A route
+   that waits on the network before it answers leaves two grey bars on screen with nothing to
+   tell the reader, so every request is given up after this long. */
 export const REQUEST_LIMIT_MS = 30000;
 
 async function fetchBounded(path, options) {
@@ -242,7 +242,6 @@ const PREFIX_INTERVALS = [
   ["/api/mail/feed", 15000],
   ["/api/mail/who", 15000],
   ["/api/agent/log", 10000],
-  ["/api/ci/log", 10000],
 ];
 
 function intervalFor(path) {

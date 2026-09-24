@@ -22,11 +22,12 @@ PORT=${PORT:-$(free_port)}
 python3 "$HERE/test_stub_server.py" "$PORT" & STUB=$!
 trap 'kill $STUB 2>/dev/null' EXIT
 sleep 2
-# chromium needs the unpacked system libs the CI sandbox binds for its tiers, or it exits 127 on
-# libnspr4 and the failure reads as a broken page.
+# chromium needs the system libraries Playwright's browsers ship without. A host with no
+# passwordless sudo keeps them unpacked under ~/.local/pwdeps, the path bin/fleet reads too;
+# without them chromium exits 127 on libnspr4 and the failure reads as a broken page.
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$HOME/.local/pwdeps/root/usr/lib/x86_64-linux-gnu"
 rc=0
-DASH_URL="http://127.0.0.1:$PORT" node "$HERE/test_verdict_colours.mjs" || rc=1
+DASH_URL="http://127.0.0.1:$PORT" node "$HERE/test_status_colours.mjs" || rc=1
 DASH_URL="http://127.0.0.1:$PORT" node "$HERE/test_render_defer.mjs" || rc=1
 # A free port of its own for each, so two lanes' checks can never collide on one socket.
 for check in "$HERE"/test_hostile*.mjs "$HERE"/test_screens*.mjs; do

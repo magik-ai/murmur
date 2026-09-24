@@ -40,9 +40,7 @@ ok("the page is a shell, not an application", () => {
   assert.ok(scripts[0][1].split("\n").length < 12, "the inline script stays a handful of lines");
   assert.match(html, /<script type="module" src="\/static\/app\.js">/);
   assert.match(html, /<link rel="stylesheet" href="\/static\/app\.css">/);
-  // The queue and the machine tabs are written in their own lane, and their stylesheets are
-  // linked from here from the start, so neither lane has to edit the other's file to land.
-  assert.match(html, /<link rel="stylesheet" href="\/static\/queue\.css">/);
+  // The Machine tab's own stylesheet is linked from the page, next to app.css.
   assert.match(html, /<link rel="stylesheet" href="\/static\/machine\.css">/);
 });
 
@@ -82,7 +80,6 @@ const REQUIRED_FILES = [
   "static/app.css", "static/app.js",
   "static/core/api.js", "static/core/ui.js", "static/core/fmt.js", "static/core/identity.js",
   "static/views/board.js", "static/views/agents.js", "static/views/mail.js",
-  "static/views/queue.js",
 ];
 
 /* The machine tab is written in another lane. It is checked like every other view once its
@@ -245,9 +242,6 @@ ok("status has five meanings and only five", () => {
   assert.equal(ui.agentMeaning("state_unreadable"), "fail");
   assert.equal(ui.agentMeaning("done"), "done");
   assert.equal(ui.agentMeaning("held"), "pause");
-  for (const state of ["passed", "failed", "queued", "running", "conflict", "blocked", "anything"]) {
-    assert.ok(ui.MEANINGS[ui.queueMeaning(state)], `${state} lands outside the five meanings`);
-  }
 });
 
 ok("only a real web address is rendered as a link", () => {
@@ -363,13 +357,13 @@ ok("layout lives in the stylesheet and no route writes a style attribute", () =>
 
 ok("an answer that is not an object is a failure, not data", () => {
   for (const payload of [null, undefined, "a proxy said hello", 42, true]) {
-    assert.throws(() => api.shaped(payload, "/api/ci"), api.ApiError,
+    assert.throws(() => api.shaped(payload, "/api/fleet"), api.ApiError,
       `${JSON.stringify(payload)} must not reach a view as data`);
   }
   for (const payload of [{}, [], { unavailable: "no office", fix: "hq init" }]) {
-    assert.equal(api.shaped(payload, "/api/ci"), payload);
+    assert.equal(api.shaped(payload, "/api/fleet"), payload);
   }
-  const shaped = api.normaliseError(new api.ApiError(200, { error: api.UNREADABLE }, "/api/ci"), "/api/ci");
+  const shaped = api.normaliseError(new api.ApiError(200, { error: api.UNREADABLE }, "/api/fleet"), "/api/fleet");
   assert.match(shaped.title, /could not be read/);
   assert.ok(shaped.command.length > 0);
   assert.deepEqual(api.list(["one"]), ["one"]);
@@ -384,7 +378,7 @@ ok("a failure is turned into a sentence and a command, never a trace", () => {
   assert.match(missing.body, /\/api\/projects/);
   const refused = api.normaliseError(new api.ApiError(403, { error: "no token" }, "/api/projects"));
   assert.match(refused.title, /cannot read/);
-  const tool = api.normaliseError(new api.ApiError(500, { error: "gh is not installed" }, "/api/ci"));
+  const tool = api.normaliseError(new api.ApiError(500, { error: "gh is not installed" }, "/api/fleet"));
   assert.equal(tool.command, "sudo apt install gh");
   for (const shaped of [offline, missing, refused, tool]) {
     assert.ok(!/ at |Error:|\.js:\d/.test(shaped.body), "an error body must not carry a stack trace");
@@ -427,7 +421,7 @@ ok("a refusal carries the server's own sentence to whoever has to act on it", ()
   }
 });
 
-const TABS = ["board", "mail", "queue", ...(hasMachine ? ["machine"] : [])];
+const TABS = ["board", "mail", ...(hasMachine ? ["machine"] : [])];
 const VIEWS = await Promise.all(
   TABS.map((name) => import(`./static/views/${name}.js`).then((module) => module.default)),
 );
@@ -491,10 +485,6 @@ ok("the Board is the four things the amendment names", () => {
   assert.match(board, /machineStrip/, "no machine strip");
   assert.match(board, /accountsStrip/, "no accounts strip");
   assert.match(board, /agentsPane/, "the agents pane is not on the Board");
-  // The queue lives on its own tab (owner ruling 2026-09-22): nothing of it on the Board.
-  assert.ok(!/queuePane|role: "separator"|murmur\.board\.split/.test(board),
-    "the Board still carries the queue pane or the splitter");
-  assert.ok(!/"\/api\/ci"/.test(board), "the Board still reads the queue route");
   // The checklist has no dismiss: the only way to put it away is to fix what it names, so
   // the thing it draws carries no control at all.
   const checklist = board.slice(board.indexOf("function setupChecklist"));
@@ -525,7 +515,7 @@ await okAsync("the first option of a filter select clears the filter, it does no
   const rows = [
     { slug: "one", spawned_by: "winston", status: "running", project: "murmur", lane: "board" },
     { slug: "two", spawned_by: "winston", status: "pr_open", project: "murmur", lane: "mail" },
-    { slug: "three", spawned_by: "rubicon", status: "failed", project: "other", lane: "queue" },
+    { slug: "three", spawned_by: "rubicon", status: "failed", project: "other", lane: "search" },
   ];
   assert.equal(filterAgents(rows, {}).length, 3, "a pane with no filter hides a lane");
   assert.equal(filterAgents(rows, { spawner: "" }).length, 3, "Anyone is not a name to filter by");
@@ -533,7 +523,7 @@ await okAsync("the first option of a filter select clears the filter, it does no
   assert.equal(filterAgents(rows, { spawner: "winston" }).length, 2);
   assert.equal(filterAgents(rows, { status: "run" }).length, 1);
   assert.equal(filterAgents(rows, { project: "murmur" }).length, 2);
-  assert.equal(filterAgents(rows, { search: "QUEUE" }).length, 1, "the search is not case sensitive");
+  assert.equal(filterAgents(rows, { search: "SEARCH" }).length, 1, "the search is not case sensitive");
   // A status the five meanings do not have is not a filter: it came from somewhere it should
   // not have, and the honest answer is every lane, not none.
   assert.equal(filterAgents(rows, { status: "Any status (3)" }).length, 3,
@@ -645,13 +635,13 @@ ok("the status vocabulary is written down once", () => {
   }
 });
 
-ok("the page and the shell agree on the four entries, exactly", () => {
+ok("the page and the shell agree on the three entries, exactly", () => {
   const registry = read("static/app.js");
   const icons = registry.match(/const ICONS = \{([\s\S]*?)\n\};/);
   assert.ok(icons, "the shell has no icon table");
   const named = [...icons[1].matchAll(/^\s{2}([a-z]+):/gm)].map((found) => found[1]);
-  assert.deepEqual(named, ["board", "mail", "queue", "machine"],
-    "the icons and the tabs are not the same four, in the same order");
+  assert.deepEqual(named, ["board", "mail", "machine"],
+    "the icons and the tabs are not the same three, in the same order");
   for (const icon of icons[1].match(/'[^']*'/g) || []) {
     assert.match(icon, /^'<(path|circle)/, "an icon is not drawn by this page");
   }
@@ -695,14 +685,13 @@ await okAsync("the settings the page needs before it can draw", async () => {
   const { body } = await get("/api/config");
   assert.equal(typeof body.title, "string");
   assert.equal(typeof body.version, "string");
-  for (const flag of ["hq", "slice", "gpu", "cpu_temp", "ci_daemon", "forge"]) {
+  for (const flag of ["hq", "slice", "gpu", "cpu_temp", "forge"]) {
     assert.equal(typeof body.features[flag], "boolean", `features.${flag} must be a boolean`);
   }
   assert.ok("pending" in body, "/api/config does not say whether its first pass has run");
   const waking = (await get("/api/config", "loading")).body;
   assert.ok(waking.pending, "a config read before the first pass says so");
   assert.equal(waking.features.slice, false, "a control with no reading behind it stays off");
-  assert.equal(waking.features.ci_daemon, false);
 });
 
 await okAsync("a snapshot that has never been taken says so instead of answering empty", async () => {
@@ -721,7 +710,7 @@ await okAsync("the prerequisites come back in the order the record fixes", async
   assert.match(body.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, "a snapshot time is ISO in UTC");
   assert.deepEqual(body.checks.map((check) => check.id), [
     "gh", "tmux", "systemd_user", "linger", "hq", "claude", "codex",
-    "gpu_sensor", "cpu_temp_sensor", "ci_daemon", "sweep_timer", "office",
+    "gpu_sensor", "cpu_temp_sensor", "sweep_timer", "office",
   ]);
   for (const check of body.checks) {
     assert.ok(["ok", "missing", "error", "off"].includes(check.state), `${check.id} has state ${check.state}`);
@@ -786,7 +775,8 @@ await okAsync("a service row carries when it changed, what it does and what fixe
     }
   }
   const ids = body.services.map((row) => row.id);
-  assert.ok(ids.includes("ci_runner"), "the verification runner keeps the server's own id");
+  assert.ok(ids.includes("agent_runner"),
+    "the agent runner keeps the server's own id, which the header looks it up by");
 });
 
 await okAsync("a login row carries the sentence that says what to do about it", async () => {
@@ -925,8 +915,6 @@ await okAsync("the state flag flips the whole dataset", async () => {
   assert.deepEqual((await get("/api/fleet", "empty")).body, []);
   assert.equal((await get("/api/accounts", "empty")).body.accounts.length, 0);
   assert.deepEqual((await get("/api/models", "empty")).body, []);
-  assert.equal((await get("/api/ci", "empty")).body.recent.length, 0);
-  assert.equal((await get("/api/ci", "error")).status, 500);
   assert.equal((await get("/api/config", "error")).body.features.gpu, false);
   assert.equal((await get("/api/access", "error")).body.writable, false);
   assert.equal((await get("/api/metrics", "error")).body.gpu, null);
@@ -949,10 +937,6 @@ await okAsync("a limit window is labelled by its own name", async () => {
 });
 
 await okAsync("the quiet farm carries what the live farm showed and no other state does", async () => {
-  const queue = (await get("/api/ci", "quiet")).body;
-  assert.equal(queue.running.length, 0, "nothing is being verified");
-  assert.equal(queue.queued.length, 0, "and nothing is waiting for a runner");
-  assert.ok(queue.recent.length > 0, "but there are verdicts to read");
   const lanes = (await get("/api/fleet", "quiet")).body;
   assert.ok(lanes.some((row) => String(row.slug).length > 48), "a lane name wider than a card");
   const names = (await get("/api/mail/boxes", "quiet")).body.boxes.map((row) => row.name);

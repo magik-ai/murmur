@@ -228,30 +228,6 @@ export function agentMeaning(status) {
   return AGENT_MEANING[String(status || "").toLowerCase()] || "pause";
 }
 
-const QUEUE_MEANING = {
-  running: "run",
-  queued: "pause",
-  passed: "done",
-  passed_partial: "done",
-  failed: "fail",
-  conflict: "fail",
-  blocked: "wait",
-  ejected: "pause",
-  cancelled: "pause",
-  skipped: "pause",
-  pending: "pause",
-  pass: "done",
-  fail: "fail",
-  pend: "wait",
-  ok: "done",
-  missing: "wait",
-  off: "pause",
-};
-
-export function queueMeaning(state) {
-  return QUEUE_MEANING[String(state || "").toLowerCase()] || "pause";
-}
-
 export function pill(meaning, label, title) {
   return h("span", { class: `pill ${meaning}`, title: title || "" },
     h("span", { class: "dot" }),
@@ -301,25 +277,6 @@ export function skeletonStack(rows = 3, kind = "row") {
 export function widthStyle(percent) {
   const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
   return `width:${clamped}%`;
-}
-
-/* The second and last of them: where the reader dragged the splitter on the Board. The number
-   comes from a pointer and from this browser's own storage, never from a route, and it is
-   clamped to the range the layout can hold before it is written anywhere. */
-export const SPLIT_MIN = 25;
-export const SPLIT_MAX = 75;
-
-export function splitPercent(value, fallback = 62) {
-  // A browser with nothing stored hands back null, and Number(null) is zero, not nothing:
-  // read as a number it put the splitter hard against the left edge on a first visit.
-  if (value == null || value === "") return fallback;
-  const wanted = Number(value);
-  if (!Number.isFinite(wanted)) return fallback;
-  return Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, Math.round(wanted)));
-}
-
-export function splitStyle(percent) {
-  return `--split:${splitPercent(percent)}%`;
 }
 
 /**

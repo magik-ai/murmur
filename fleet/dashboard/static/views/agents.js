@@ -1,7 +1,7 @@
 /* The agents pane of the Board: who is running, on what, and how far. A card grid for
    looking, a table for counting, and a drawer for one lane. The drawer is a drawer and not a
    modal on purpose: the list stays on screen, so the reader never loses the place they came
-   from. This file is a pane, not a tab: the Board draws it next to the queue. */
+   from. This file is a pane, not a tab: the Board draws it under its two strips. */
 
 import {
   h, card, panel, pill, emptyState, skeletonStack, agentMeaning, MEANINGS,

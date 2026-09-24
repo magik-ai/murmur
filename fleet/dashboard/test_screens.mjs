@@ -1,7 +1,7 @@
 /* Every tab, in every state, at a desktop width and a phone width. The check is narrow on
-   purpose: nothing may throw, the page may never scroll sideways, and the two tabs this lane
-   owns must say the things the record fixed. The pictures are the point, so a person can look
-   at a tab they have never seen and say what it is for.
+   purpose: nothing may throw, the page may never scroll sideways, and the Board and the Mail tab
+   must say the things measured below. The pictures are the point, so a person can look at a tab
+   they have never seen and say what it is for.
    The pictures are written outside the repository and are never committed. */
 
 import { spawn } from "node:child_process";
@@ -13,22 +13,17 @@ import { loadPlaywright } from "./test_playwright.mjs";
 const OUT = process.env.SHOT_DIR || path.join(os.tmpdir(), "murmur-dash-shots");
 const PORT = Number(process.env.PORT || 7921);
 const STATES = ["ready", "empty", "error", "loading", "quiet"];
-const TABS = ["board", "mail", "queue", "machine"];
+const TABS = ["board", "mail", "machine"];
 const SIZES = [{ width: 1440, height: 900 }, { width: 390, height: 844 }];
 
-/* A failed request the state is meant to produce. The browser logs one console line for it;
-   that line is the fixture working, not the page breaking. */
-const EXPECTED_REQUEST_FAILURES = { error: ["/api/ci"] };
+/* The page asks Google Fonts for its three families. A machine that cannot reach them (offline,
+   or behind a proxy the browser does not trust) draws the page in its fallback fonts, which is
+   not a broken page, so a font that did not load is not counted as an error. */
+const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
 
-/* The queue and the machine tabs are written in their own lane, in their own files. Until
-   those files are on the farm the browser reports three 404s for them, which is this lane
-   waiting for that one and not a page that is broken. */
-const OTHER_LANE = ["/static/queue.css", "/static/machine.css", "/static/views/machine.js"];
-
-/* What the live farm showed and no fixture used to: names too long for a card, a queue with
-   nothing running, an office holding one name twice, and the two pages this lane rebuilt.
-   The pictures are taken either way; these are the things a person would otherwise have to
-   spot in them. */
+/* What a busy farm shows and a plain fixture does not: names too long for a card and an office
+   holding one name twice. The pictures are taken either way; these are the things a person
+   would otherwise have to spot in them. */
 async function measured(page, state, tab, size) {
   if (tab === "board" && state === "ready") {
     const seen = await page.evaluate(() => {
@@ -41,7 +36,6 @@ async function measured(page, state, tab, size) {
       return {
         strip: tiles.length,
         accounts: accounts.length,
-        queueOnBoard: Boolean(document.querySelector(".queue-pane, .splitter")),
         oneHeight: heights.length > 0 && Math.max(...heights) - Math.min(...heights) <= 1,
         oneRow: tops.length > 0 && Math.max(...tops) - Math.min(...tops) <= 1,
         agentsFull: Boolean(canvas && agents) && agents.getBoundingClientRect().width >= canvas.getBoundingClientRect().width - 2,
@@ -55,7 +49,6 @@ async function measured(page, state, tab, size) {
       ["puts the machine on one strip", seen.strip === 5, JSON.stringify(seen)],
       ["says when the sweep runs in the header", /^Sweep /.test(seen.sweep), seen.sweep],
       ["puts every subscription on the strip under it", seen.accounts >= 2, String(seen.accounts)],
-      ["keeps the queue off the Board", !seen.queueOnBoard, JSON.stringify(seen)],
       ["draws every machine tile at one height", seen.oneHeight, JSON.stringify(seen)],
       ["draws every subscription in one row", size.width === 390 ? true : seen.oneRow, JSON.stringify(seen)],
       ["gives the agents the full width", seen.agentsFull, JSON.stringify(seen)],
@@ -90,13 +83,11 @@ async function measured(page, state, tab, size) {
         cards: cards.length,
         squeezed: cards.filter((card) => cut(card.querySelector(".pill-text"))).map((card) => card.querySelector(".pill-text").textContent),
         longNames: cards.filter((card) => cut(card.querySelector(".name"))).length,
-        queueOnBoard: Boolean(document.querySelector(".queue-pane, .splitter")),
       };
     });
     return [
       ["never squeezes a status word", seen.cards > 0 && seen.squeezed.length === 0, seen.squeezed.join(", ")],
       ["cuts the long lane names instead", seen.longNames > 0, `${seen.longNames} cut`],
-      ["keeps the queue off the Board", !seen.queueOnBoard, JSON.stringify(seen)],
     ];
   }
   if (tab === "mail" && (state === "ready" || state === "quiet")) {
@@ -168,12 +159,11 @@ for (const state of STATES) {
     const context = await browser.newContext({ viewport: size, colorScheme: state === "ready" ? "light" : "dark" });
     const page = await context.newPage();
     const problems = [];
-    const allowed = [...(EXPECTED_REQUEST_FAILURES[state] || []), ...OTHER_LANE];
     page.on("pageerror", (error) => problems.push(`uncaught: ${error.message}`));
     page.on("console", (message) => {
       if (message.type() !== "error") return;
       const text = message.text();
-      if (text.includes("Failed to load resource") && allowed.some((route) => message.location().url.includes(route))) return;
+      if (text.includes("Failed to load resource") && FONT_HOSTS.some((host) => message.location().url.includes(host))) return;
       problems.push(text);
     });
     await page.goto(`http://127.0.0.1:${PORT}/?state=${state}#/board`, { waitUntil: "domcontentloaded" });

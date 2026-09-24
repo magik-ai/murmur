@@ -126,7 +126,7 @@ def variant_of(handler):
 def wants_long(handler):
     """`long=1` on the page adds one project whose every value is too long for its cell. Kept
     out of the stub's own quiet state: the header's project filter lists every project, and a
-    name that long is the Queue lane's layout to answer for, not this one's."""
+    name that long would be every other tab's layout to answer for, not this section's."""
     return _pick(handler, "long", ("1",), "STUB_GH_LONG", "") == "1"
 
 

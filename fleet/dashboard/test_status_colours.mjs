@@ -1,7 +1,7 @@
-/* The five status colours, measured in both themes, against a queue that carries every
-   verdict. The live queue rarely holds an ejected or a cancelled record, and "I could not find
-   one to look at" is not evidence that it renders correctly. A colour that reads strongly in
-   one theme and washes out in the other is the defect this check exists to catch. */
+/* The five status colours, measured in both themes, on the Machine tab of a stub farm that
+   carries every one of them: a running service, a login waiting for a person, an expired
+   login, a logged in account and a login nobody can read. A colour that reads strongly in one
+   theme and washes out in the other is the defect this check exists to catch. */
 
 import { loadPlaywright } from "./test_playwright.mjs";
 
@@ -47,19 +47,8 @@ for (const scheme of ["light", "dark"]) {
     viewport: { width: 1440, height: 1000 },
     colorScheme: scheme,
   })).newPage();
-  await page.goto(`${URL}/#/queue`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${URL}/#/machine`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1600);
-
-  /* The queue is one table with three bands, so every verdict is on the screen already: there
-     is nothing to expand before the colours can be read. What this check still wants from the
-     page is that all three bands are there, and that the recent one is not hiding the rows the
-     colours live in. */
-  const bands = await page.evaluate(() => [...document.querySelectorAll(".q-band")]
-    .map((node) => node.innerText.replace(/\s+/g, " ").trim()));
-  if (scheme === "light") {
-    check("the queue names its three bands", bands.length === 3, bands.join(" | "));
-    check("the recent band counts what finished", /Recent \(\d+\)/.test(bands[2] || ""), bands[2]);
-  }
 
   const measured = await page.evaluate(() => {
     const out = {};
@@ -72,25 +61,14 @@ for (const scheme of ["light", "dark"]) {
         text: getComputedStyle(pill).color,
       };
     }
-    /* The row's coloured edge is drawn by queue.css, which index.html links next to app.css.
-       A page served without it still has to read correctly, so the edge is measured when it is
-       there and the dot speaks for the row when it is not. */
-    for (const row of document.querySelectorAll(".q-row")) {
-      const meaning = ["run", "wait", "fail", "done", "pause"]
-        .find((name) => row.classList.contains(name));
-      const cell = row.querySelector("td");
-      const shadow = cell ? getComputedStyle(cell).boxShadow : "none";
-      if (meaning && out[meaning] && shadow && shadow !== "none") out[meaning].edge = shadow;
-    }
     return out;
   });
 
   for (const [meaning, want] of Object.entries(WANTED)) {
     const found = measured[meaning];
-    const seen = found ? [hue(found.dot), hue(found.edge || found.dot)] : null;
-    check(`${scheme}: ${meaning} reads ${want}`,
-      Boolean(found) && seen.every((value) => value === want),
-      found ? `dot=${found.dot} edge=${found.edge} -> ${seen}` : "no record in this state");
+    const seen = found ? hue(found.dot) : null;
+    check(`${scheme}: ${meaning} reads ${want}`, seen === want,
+      found ? `dot=${found.dot} -> ${seen}` : "no pill with this meaning on the Machine tab");
   }
   await page.close();
 }

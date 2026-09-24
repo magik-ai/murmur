@@ -1,11 +1,10 @@
-/* What Queue and Machine do when a route lies to them, when the page may not write, and when
-   an action fails halfway. Every case asks the same two questions: did anything throw, and was
-   the reader told. A control room that draws half a screen and keeps its buttons bright is
-   worse than one that says plainly it cannot do the thing.
+/* What Machine does when a route lies to it, when the page may not write, and when an action
+   fails halfway. Every case asks the same two questions: did anything throw, and was the reader
+   told. A control room that draws half a screen and keeps its buttons bright is worse than one
+   that says plainly it cannot do the thing.
 
-   The two views are opened through the stub's harness page, which is the same shell around the
-   same modules that index.html puts them in: the lane that owns index.html registers them
-   there, and this check does not wait for it to land. */
+   The view is opened through the stub's harness page, which is a small shell around the same
+   modules that index.html puts it in, so a check measures the view and nothing else. */
 
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -59,7 +58,7 @@ const { chromium } = await loadPlaywright();
 const browser = await chromium.launch();
 
 /** One harness page, with the routes named in `overrides` answered by this test. */
-async function open({ view = "queue", state = "ready", size = { width: 1440, height: 1000 },
+async function open({ view = "machine", state = "ready", size = { width: 1440, height: 1000 },
   overrides = {} } = {}) {
   const context = await browser.newContext({ viewport: size });
   const page = await context.newPage();
@@ -89,7 +88,7 @@ async function open({ view = "queue", state = "ready", size = { width: 1440, hei
 
 const text = (page) => page.evaluate(() => document.getElementById("view").innerText);
 
-const WRITE_CONTROLS = "[data-enqueue], [data-runner], [data-cancel], [data-power], [data-mode],"
+const WRITE_CONTROLS = "[data-power], [data-mode],"
   + " [data-service], [data-accounts-refresh], [data-add-account], [data-remove-account],"
   + " [data-model-switch], [data-model-test], [data-model-remove], [data-add-model],"
   + " [data-add-project], [data-remove-project]";
@@ -130,7 +129,8 @@ const READ_ONLY = JSON.stringify({
 
 /* ------------------------------------------------- a page that may not write */
 
-for (const view of ["queue", "machine"]) {
+{
+  const view = "machine";
   const { page, context, thrown } = await open({ view, overrides: { "/api/access": READ_ONLY } });
   const seen = await page.evaluate((selector) => {
     const nodes = [...document.querySelectorAll(`#view ${selector.split(", ").join(", #view ")}`)];
@@ -148,83 +148,7 @@ for (const view of ["queue", "machine"]) {
   await context.close();
 }
 
-/* Marking a card as a write marks everything in it. The queue's controls card holds two
-   filters and a help button, which only narrow what is already on screen, so the mark belongs
-   on the half that really writes: switching off a reader's only way back to the whole table is
-   not what "this page may not write" means. */
-{
-  const { page, context } = await open({ view: "queue", overrides: { "/api/access": READ_ONLY } });
-  const seen = await page.evaluate(() => {
-    const inWrite = (selector) => {
-      const node = document.querySelector(`#view ${selector}`);
-      return node ? Boolean(node.closest("[data-write]")) : null;
-    };
-    const live = (selector) => {
-      const node = document.querySelector(`#view ${selector}`);
-      return node ? !node.disabled : null;
-    };
-    return {
-      state: inWrite("select[aria-label='Filter by state']"),
-      project: inWrite("select[aria-label='Filter by project']"),
-      help: inWrite(".q-help"),
-      verify: inWrite("[data-enqueue]"),
-      runner: inWrite(".q-runner"),
-      stateLive: live("select[aria-label='Filter by state']"),
-      helpLive: live(".q-help"),
-    };
-  });
-  check("queue: the two filters and the help button are not marked as writes",
-    seen.state === false && seen.project === false && seen.help === false, JSON.stringify(seen));
-  check("queue: the controls that do write still are",
-    seen.verify === true && seen.runner === true, JSON.stringify(seen));
-  check("queue: and a read-only page can still narrow the table",
-    seen.stateLive === true && seen.helpLive === true, JSON.stringify(seen));
-  await context.close();
-}
-
 /* ----------------------------------------------- a route that is not the shape it claims */
-
-{
-  const { page, context, thrown } = await open({
-    view: "queue",
-    overrides: {
-      "/api/ci": (handler) => handler.fulfill({
-        status: 200, contentType: "application/json", body: "<html>a proxy said hello</html>",
-      }),
-    },
-  });
-  const body = await text(page);
-  check("queue: an answer that is not JSON is an error, not data", thrown.length === 0, thrown[0]);
-  check("queue: the reader is told the answer could not be read",
-    /could not be read|reported a problem|did not answer/i.test(body), body.slice(0, 80));
-  await context.close();
-}
-
-{
-  const { page, context, thrown } = await open({
-    view: "queue",
-    overrides: {
-      "/api/ci": JSON.stringify({ running: "nope", queued: null, recent: { one: 1 } }),
-    },
-  });
-  const body = await text(page);
-  check("queue: lists that are not lists leave the tab standing", thrown.length === 0, thrown[0]);
-  check("queue: it says the queue has never run", /never run/i.test(body), body.slice(0, 80));
-  await context.close();
-}
-
-{
-  const { page, context, thrown } = await open({
-    view: "queue",
-    overrides: { "/api/services": JSON.stringify({ at: "now", services: "not a list" }) },
-  });
-  const body = await text(page);
-  check("queue: a services answer without services does not break the runner control",
-    thrown.length === 0, thrown[0]);
-  check("queue: it says the runner cannot be switched from here",
-    /cannot be switched from here/.test(body), body.slice(0, 120));
-  await context.close();
-}
 
 {
   const { page, context, thrown } = await open({
@@ -239,329 +163,6 @@ for (const view of ["queue", "machine"]) {
   await context.close();
 }
 
-/* ------------------------------------------------------------ a job that fails */
-
-{
-  const { page, context, thrown, posted } = await open({ view: "queue" });
-  await page.selectOption("#view select[aria-label='Project']", "demo");
-  await page.fill("#view input[aria-label^='Number']", "999");
-  await page.click("[data-enqueue]");
-  await page.waitForTimeout(1200);
-  const during = await page.evaluate(() => ({
-    disabled: document.querySelector("[data-enqueue]").disabled,
-    label: document.querySelector("[data-enqueue]").textContent,
-  }));
-  check("queue: the verify button waits while its job runs", during.disabled && /Verifying/.test(during.label),
-    JSON.stringify(during));
-  await page.waitForTimeout(4000);
-  const body = await text(page);
-  const after = await page.evaluate(() => document.querySelector("[data-enqueue]").disabled);
-  check("queue: a job that fails is sent to the reader in words",
-    /refused this request|its log says why/.test(body), body.slice(0, 200));
-  check("queue: the button comes back after a failed job", after === false);
-  check("queue: it asked the enqueue route", posted.some((url) => url.endsWith("/api/ci/enqueue")));
-  check("queue: nothing threw while a job failed", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
-{
-  const { page, context, thrown } = await open({
-    view: "queue",
-    overrides: {
-      "/api/ci/enqueue": JSON.stringify({ ok: true, job: "job-missing" }),
-    },
-  });
-  await page.selectOption("#view select[aria-label='Project']", "demo");
-  await page.fill("#view input[aria-label^='Number']", "412");
-  await page.click("[data-enqueue]");
-  await page.waitForTimeout(2000);
-  const body = await text(page);
-  check("queue: a job id the server does not know does not hang the button",
-    thrown.length === 0, thrown[0]);
-  check("queue: the reader is told the job could not be read",
-    /no job with that id|reported a problem|could not be read/i.test(body), body.slice(0, 200));
-  await context.close();
-}
-
-{
-  const { page, context, posted } = await open({ view: "queue" });
-  await page.fill("#view input[aria-label^='Number']", "412");
-  await page.waitForTimeout(400);
-  const off = await page.evaluate(() => document.querySelector("[data-enqueue]").disabled);
-  await page.click("[data-enqueue]", { force: true });
-  await page.waitForTimeout(800);
-  const body = await text(page);
-  check("queue: verifying without a project cannot be pressed", off === true, String(off));
-  check("queue: verifying without a project is refused with what to do",
-    /Pick a project/.test(body), body.slice(0, 200));
-  check("queue: and nothing was sent to the runner",
-    !posted.some((url) => url.endsWith("/api/ci/enqueue")), posted.join(" "));
-  await context.close();
-}
-
-/* Picking a project and then picking the placeholder again is the shape that posted
-   {"project":"Pick a project"} to the runner, with no refusal shown anywhere. */
-{
-  const { page, context, posted } = await open({ view: "queue" });
-  const bodies = [];
-  page.on("request", (request) => {
-    if (request.method() === "POST") bodies.push(request.postData() || "");
-  });
-  await page.selectOption("#view select[aria-label='Project']", "demo");
-  await page.fill("#view input[aria-label^='Number']", "412");
-  await page.waitForTimeout(400);
-  const armed = await page.evaluate(() => document.querySelector("[data-enqueue]").disabled);
-  await page.selectOption("#view select[aria-label='Project']", { label: "Pick a project" });
-  await page.waitForTimeout(400);
-  const off = await page.evaluate(() => document.querySelector("[data-enqueue]").disabled);
-  await page.click("[data-enqueue]", { force: true });
-  await page.waitForTimeout(900);
-  check("queue: Verify is live only while a project and a number are both there",
-    armed === false && off === true, JSON.stringify({ armed, off }));
-  check("queue: the placeholder is never posted as a project",
-    !posted.some((url) => url.endsWith("/api/ci/enqueue"))
-    && !bodies.some((sent) => sent.includes("Pick a project")), bodies.join(" ").slice(0, 200));
-  await context.close();
-}
-
-{
-  const { page, context } = await open({ view: "queue" });
-  await page.selectOption("#view select[aria-label='Filter by state']", "failed");
-  await page.selectOption("#view select[aria-label='Filter by project']", "demo");
-  // Two ticks: a select whose options the tick rebuilds must still show what it is filtering by.
-  await page.waitForTimeout(7000);
-  const seen = await page.evaluate(() => {
-    const pick = (label) => {
-      const node = document.querySelector(`#view select[aria-label='${label}']`);
-      return { value: node.value, shown: node.options[node.selectedIndex].textContent };
-    };
-    return {
-      state: pick("Filter by state"),
-      project: pick("Filter by project"),
-      rows: [...document.querySelectorAll(".q-row")].length,
-      states: [...new Set([...document.querySelectorAll(".q-row .pill-text")].map((n) => n.textContent))],
-    };
-  });
-  check("queue: a filter still says what it is filtering by after a tick",
-    seen.state.value === "failed" && /Failed/.test(seen.state.shown)
-    && seen.project.value === "demo" && /demo/.test(seen.project.shown), JSON.stringify(seen));
-  check("queue: and the table shows only those runs",
-    seen.rows > 0 && seen.states.length === 1 && seen.states[0] === "Failed", JSON.stringify(seen));
-  await context.close();
-}
-
-/* A filter that cannot be undone is worse than no filter: the tab is its table, and the only
-   way back from "Any state" filtering for the words "Any state" is a reload. */
-{
-  const { page, context, thrown } = await open({ view: "queue" });
-  const count = () => page.evaluate(() => document.querySelectorAll(".q-row").length);
-  const all = await count();
-  await page.selectOption("#view select[aria-label='Filter by state']", "failed");
-  await page.waitForTimeout(500);
-  const narrowed = await count();
-  await page.selectOption("#view select[aria-label='Filter by state']", { label: "Any" });
-  await page.waitForTimeout(500);
-  const back = await count();
-  check("queue: Any state gives every run back", all > 0 && narrowed > 0 && narrowed < all
-    && back === all, JSON.stringify({ all, narrowed, back }));
-  await page.selectOption("#view select[aria-label='Filter by project']", "demo");
-  await page.waitForTimeout(500);
-  const oneProject = await count();
-  await page.selectOption("#view select[aria-label='Filter by project']", { label: "All" });
-  await page.waitForTimeout(500);
-  const bothProjects = await count();
-  check("queue: Every project gives every run back", oneProject > 0 && oneProject < all
-    && bothProjects === all, JSON.stringify({ all, oneProject, bothProjects }));
-  const body = await text(page);
-  check("queue: and a cleared filter leaves nothing filtered out",
-    !/finished runs are filtered out/.test(body), body.slice(0, 200));
-  check("queue: nothing threw while the filters were cleared", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
-/* The header filter narrows the whole page. A state select that goes on counting the project
-   the reader has already filtered away offers "Passed (17)" over a table of 21 rows. */
-{
-  const { page, context, thrown } = await open({ view: "queue" });
-  const all = await page.evaluate(() => document.querySelectorAll(".q-row").length);
-  await page.selectOption("#projectFilter", "demo");
-  await page.waitForTimeout(800);
-  const seen = await page.evaluate(() => {
-    const options = [...document.querySelectorAll("#view select[aria-label='Filter by state'] option")]
-      .slice(1).map((node) => node.textContent);
-    const shown = {};
-    for (const node of document.querySelectorAll(".q-row .pill-text")) {
-      shown[node.textContent] = (shown[node.textContent] || 0) + 1;
-    }
-    return { options, shown, rows: document.querySelectorAll(".q-row").length };
-  });
-  const wrong = seen.options.filter((label) => {
-    const parts = label.match(/^(.*) \((\d+)\)$/);
-    return !parts || Number(parts[2]) !== (seen.shown[parts[1]] || 0);
-  });
-  check("queue: the header filter narrows the table", seen.rows > 0 && seen.rows < all,
-    `${seen.rows} of ${all}`);
-  check("queue: and the state counts are of the runs it allows", wrong.length === 0,
-    JSON.stringify({ wrong, options: seen.options, shown: seen.shown }));
-  check("queue: nothing threw under the header filter", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
-/* ------------------------------------------------------------ cancel and runner */
-
-/* The runner row is looked up by the name the server gives it. A name this page invented
-   instead found nothing, and the tab told a farm with four services that it reports none. */
-{
-  const { page, context } = await open({ view: "queue" });
-  const seen = await page.evaluate(() => ({
-    button: Boolean(document.querySelector("[data-runner]")),
-    text: document.querySelector(".q-runner") ? document.querySelector(".q-runner").innerText : "",
-  }));
-  check("queue: the runner is found under the name the server gives it",
-    seen.button && /Runner/.test(seen.text) && !/cannot be switched from here/.test(seen.text),
-    JSON.stringify(seen));
-  await context.close();
-}
-
-{
-  const { page, context, posted } = await open({ view: "queue" });
-  await page.click("[data-cancel]");
-  await page.waitForTimeout(900);
-  check("queue: cancel asks the cancel route", posted.some((url) => url.endsWith("/api/ci/cancel")));
-  await page.click("[data-runner]");
-  await page.waitForTimeout(900);
-  check("queue: the runner control asks the services route",
-    posted.some((url) => url.endsWith("/api/services")));
-  await context.close();
-}
-
-{
-  const { page, context } = await open({
-    view: "queue",
-    overrides: {
-      "/api/ci": (handler) => handler.fetch().then(async (answer) => {
-        const payload = await answer.json();
-        payload.daemon_alive = false;
-        return handler.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
-      }),
-    },
-  });
-  const body = await text(page);
-  check("queue: a stopped runner is named by the command that starts it",
-    body.includes("fleet ci daemon start") && !body.includes("fleet daemon start"),
-    body.slice(0, 200));
-  await context.close();
-}
-
-/* A run ages out of `recent` while its panel is open. The panel has to go, and so has the
-   column it sat in, or the table is squeezed beside 420 px of page with no Close button in it. */
-{
-  let dropped = "";
-  const { page, context, thrown } = await open({
-    view: "queue",
-    overrides: {
-      "/api/ci": (handler) => handler.fetch().then(async (answer) => {
-        const payload = await answer.json();
-        for (const band of ["running", "queued", "recent"]) {
-          if (dropped) payload[band] = (payload[band] || []).filter((row) => row.id !== dropped);
-        }
-        return handler.fulfill({
-          status: 200, contentType: "application/json", body: JSON.stringify(payload),
-        });
-      }),
-    },
-  });
-  const measure = () => page.evaluate(() => {
-    const shell = document.querySelector(".q-shell");
-    const table = document.querySelector(".q-table");
-    return {
-      panel: Boolean(document.querySelector(".q-detail")),
-      open: Boolean(shell && shell.classList.contains("open")),
-      table: table ? Math.round(table.getBoundingClientRect().width) : 0,
-      shell: shell ? Math.round(shell.getBoundingClientRect().width) : 0,
-    };
-  });
-  await page.click("[data-run='ci-2001-0000']");
-  await page.waitForTimeout(900);
-  const opened = await measure();
-  dropped = "ci-2001-0000";
-  await page.waitForTimeout(4500);
-  const after = await measure();
-  check("queue: a run that leaves the queue takes its panel with it",
-    opened.panel && opened.open && !after.panel && !after.open,
-    JSON.stringify({ opened, after }));
-  check("queue: and the table is given the whole width back",
-    after.table >= after.shell - 2 && after.table > opened.table, JSON.stringify(after));
-  check("queue: nothing threw when the open run left the queue", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
-/* ------------------------------------------------------------ the stage log */
-
-{
-  const { page, context } = await open({ view: "queue" });
-  await page.click("[data-run='ci-2001-0000']");
-  await page.waitForTimeout(900);
-  await page.click("#view .q-tab:nth-child(2)");
-  await page.waitForTimeout(1200);
-  const seen = await page.evaluate(() => {
-    const log = document.getElementById("queueLog");
-    return {
-      bottom: log ? log.scrollHeight - log.scrollTop - log.clientHeight : -1,
-      text: document.querySelector(".q-detail").innerText,
-    };
-  });
-  check("queue: a cut log names the command that shows all of it",
-    seen.text.includes("fleet ci log ci-2001-0000") && seen.text.includes("256 KB"),
-    seen.text.slice(0, 200));
-  check("queue: the log opens at its end", seen.bottom >= 0 && seen.bottom < 40, String(seen.bottom));
-  check("queue: the failed tests of that run are listed by name",
-    /orders.spec.ts/.test(seen.text), seen.text.slice(0, 200));
-  await page.fill("#view .q-findbox", "step 3999");
-  await page.waitForTimeout(700);
-  const found = await page.evaluate(() => ({
-    marks: document.querySelectorAll("#queueLog mark").length,
-    label: document.querySelector(".q-find").innerText,
-  }));
-  check("queue: a find marks what it found and counts it",
-    found.marks > 0 && /of \d+/.test(found.label), JSON.stringify(found));
-  await context.close();
-}
-
-{
-  const { page, context } = await open({ view: "queue" });
-  await page.click("[data-run='ci-2007-0000']");
-  await page.waitForTimeout(900);
-  const seen = await page.evaluate(() => document.querySelector(".q-detail").innerText);
-  check("queue: two verdicts that disagree are explained in one sentence",
-    /This farm says failed and the hosted run says passed/.test(seen)
-    && /hosted answer is the one that counts/.test(seen), seen.slice(0, 250));
-  await context.close();
-}
-
-/* On a phone the detail panel is the whole viewport. Every other cover on this dashboard
-   closes on Escape, and one that does not is a cover a reader can feel stuck in. */
-{
-  const { page, context, thrown } = await open({
-    view: "queue", size: { width: 390, height: 844 },
-  });
-  await page.click("[data-run='ci-2001-0000']");
-  await page.waitForTimeout(900);
-  const sheet = await page.evaluate(() => {
-    const node = document.querySelector(".q-detail");
-    return node ? getComputedStyle(node).position : "";
-  });
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(500);
-  const gone = await page.evaluate(() => !document.querySelector(".q-detail"));
-  check("queue: the small screen sheet closes on Escape", sheet === "fixed" && gone,
-    JSON.stringify({ sheet, gone }));
-  check("queue: and the table is there to read again",
-    (await page.evaluate(() => document.querySelectorAll(".q-row").length)) > 0);
-  check("queue: nothing threw on Escape", thrown.length === 0, thrown[0]);
-  await context.close();
-}
-
 /* ------------------------------------------------------------ the drain preview */
 
 {
@@ -572,7 +173,7 @@ for (const view of ["queue", "machine"]) {
   check("machine: the drain confirm names the lanes it will stop",
     /demo-api-3f2a/.test(confirm), confirm.slice(0, 200));
   check("machine: the drain confirm says what is lost",
-    /loses its verdict/.test(confirm) && /restart policy/.test(confirm), confirm.slice(0, 300));
+    /restart policy/.test(confirm) && /salvage could not push/.test(confirm), confirm.slice(0, 300));
   check("machine: the drain confirm says the agent runner stops",
     /stops the agent runner/.test(confirm), confirm.slice(0, 300));
   check("machine: the drain confirm says this page keeps running",
@@ -601,9 +202,8 @@ for (const view of ["queue", "machine"]) {
   await page.click("[data-power='throttle']");
   await page.waitForTimeout(900);
   const throttle = await page.evaluate(() => document.querySelector(".m-confirm").innerText);
-  check("machine: the throttle confirm names the caps and the database it releases",
-    /40% of the CPU/.test(throttle) && /5.6 of 14 cores/.test(throttle)
-    && /releases the verification database/.test(throttle), throttle.slice(0, 400));
+  check("machine: the throttle confirm names the caps",
+    /40% of the CPU/.test(throttle) && /5.6 of 14 cores/.test(throttle), throttle.slice(0, 400));
   check("machine: the throttle confirm carries no number the server did not send",
     !/none of/.test(throttle), throttle.slice(0, 400));
   check("machine: the throttle confirm passes on the server's warnings",
@@ -674,30 +274,6 @@ for (const view of ["queue", "machine"]) {
     /respawns a lane/.test(seen.runner[3] || ""), JSON.stringify(seen.runner));
   check("machine: the row that cannot be worked here hands over the command that works it",
     /fleet dashboard restart/.test((seen.dashboard[4] || "")), JSON.stringify(seen.dashboard));
-  await context.close();
-}
-
-/* The queue runner is started by `fleet ci daemon start`. `fleet daemon start` is the agent
-   runner, a different service on a different unit, and a fix column that hands a reader the
-   wrong one of the two sends them to stop the farm's other half. */
-{
-  /* The prerequisites table lives in the Health section, which a farm draws only when it sets
-     FLEET_DASH_HEALTH=on; this page is that farm. */
-  const healthOn = async (route) => {
-    const answer = await route.fetch();
-    const config = await answer.json();
-    config.features = { ...(config.features || {}), health_panel: true };
-    return route.fulfill({ response: answer, json: config });
-  };
-  const { page, context } = await open({ view: "machine", state: "error",
-    overrides: { "/api/config": healthOn } });
-  const row = await page.evaluate(() => {
-    const found = [...document.querySelectorAll("#view table tr")]
-      .find((node) => /queue runner/.test(node.innerText));
-    return found ? found.innerText : "";
-  });
-  check("machine: the queue runner is fixed by the command that starts the queue runner",
-    /fleet ci daemon start/.test(row), row.slice(0, 160));
   await context.close();
 }
 
@@ -858,8 +434,6 @@ for (const view of ["queue", "machine"]) {
     /5220/.test(free) && /registry only|registry/.test(free), free.slice(0, 250));
   await context.close();
 }
-
-
 
 {
   const { page, context, thrown } = await open({ view: "machine" });

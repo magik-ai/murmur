@@ -348,7 +348,7 @@ async function openImport(page) {
   await sleep(200);
   await advance(20000);
   const before = reads.length;
-  await page.evaluate(() => { location.hash = "#/queue"; });
+  await page.evaluate(() => { location.hash = "#/elsewhere"; });
   await sleep(200);
   const left = simulated;
   await advance(120000);

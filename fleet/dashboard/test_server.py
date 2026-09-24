@@ -145,9 +145,8 @@ def fetch_json(base, path, **kwargs):
 
 class DashboardServerTest(unittest.TestCase):
     def setUp(self):
-        # The farm's real daemon may be active while these isolated fixtures run.
-        # Default it to inactive; the dedicated daemon-state test overrides both
-        # outcomes explicitly.
+        # These fixtures must not ask this machine's user manager anything: every tool call
+        # answers "inactive", whatever is really running here.
         patcher = mock.patch.object(
             dashboard.subprocess,
             "run",
@@ -155,122 +154,6 @@ class DashboardServerTest(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-
-    def test_ci_queue_is_well_formed_before_the_coordinator_runs(self):
-        with tempfile.TemporaryDirectory() as state:
-            with mock.patch.object(dashboard, "STATE", state):
-                with snapshot_services([{"id": "ci_runner", "state": "inactive"}]):
-                    self.assertEqual(
-                        dashboard.ci_queue(),
-                        {"updated": None, "running": [], "queued": [], "recent": [],
-                         "daemon_alive": False},
-                    )
-
-    def test_ci_queue_uses_the_coordinator_refreshed_view(self):
-        stored = {
-            "updated": 1784600000,
-            "running": [],
-            "queued": [],
-            "recent": [{"id": "ci-passed", "state": "passed"}],
-        }
-        refreshed = {
-            **stored,
-            "updated": 1784600001,
-            "recent": [
-                {
-                    "id": "ci-passed",
-                    "state": "passed",
-                    "stale": True,
-                    "stale_reason": "verified against main@old, now new",
-                    "farm_verdict": "passed",
-                    "hosted_verdict": "failed",
-                    "divergent": True,
-                }
-            ],
-        }
-        with tempfile.TemporaryDirectory() as state:
-            ci_dir = pathlib.Path(state, "ci")
-            ci_dir.mkdir()
-            ci_dir.joinpath("queue.json").write_text(json.dumps(stored))
-            with (
-                mock.patch.object(dashboard, "STATE", state),
-                mock.patch.object(
-                    dashboard.CI, "read_state", return_value=refreshed
-                ) as read_state,
-                snapshot_services([{"id": "ci_runner", "state": "inactive"}]),
-            ):
-                # Before the refresher has published, the route serves what is on disk and asks
-                # the refresher to look, rather than paying for git and gh on a read.
-                dashboard._ci_refresh_wake.clear()
-                self.assertEqual(dashboard.ci_queue(),
-                                 {**stored, "daemon_alive": False})
-                self.assertTrue(dashboard._ci_refresh_wake.is_set())
-                read_state.assert_not_called()
-                dashboard.ci_refresh_once()
-                self.assertEqual(dashboard.ci_queue(),
-                                 {**refreshed, "daemon_alive": False, "refresh_age": 0})
-        read_state.assert_called_once_with(refresh=True)
-
-    def test_ci_queue_falls_back_to_the_stored_shape_when_refresh_fails(self):
-        stored = {
-            "updated": 1784600000,
-            "running": "invalid",
-            "queued": [{"id": "ci-queued", "state": "queued"}],
-            "recent": [{"id": "legacy", "state": "passed"}],
-        }
-        with tempfile.TemporaryDirectory() as state:
-            ci_dir = pathlib.Path(state, "ci")
-            ci_dir.mkdir()
-            ci_dir.joinpath("queue.json").write_text(json.dumps(stored))
-            with (
-                mock.patch.object(dashboard, "STATE", state),
-                mock.patch.object(
-                    dashboard.CI,
-                    "read_state",
-                    side_effect=dashboard.CI.CIError("refresh unavailable"),
-                ),
-            ):
-                self.assertEqual(
-                    dashboard.ci_queue(),
-                    {
-                        "updated": 1784600000,
-                        "running": [],
-                        "queued": [{"id": "ci-queued", "state": "queued"}],
-                        "recent": [{"id": "legacy", "state": "passed"}],
-                        "daemon_alive": False,
-                    },
-                )
-
-    def test_malformed_ci_queue_returns_empty_payload_and_other_routes_stay_live(self):
-        empty = {"updated": None, "running": [], "queued": [], "recent": []}
-        live_agents = [{"slug": "ui2", "status": "running"}]
-        with tempfile.TemporaryDirectory() as state:
-            ci_dir = pathlib.Path(state, "ci")
-            ci_dir.mkdir()
-            ci_dir.joinpath("queue.json").write_text('{"running": [')
-            with (
-                mock.patch.object(dashboard, "STATE", state),
-                mock.patch.object(dashboard, "agents", return_value=live_agents),
-                mock.patch.object(dashboard.CI, "read_state") as read_state,
-            ):
-                server = dashboard.Server(("127.0.0.1", 0), dashboard.Handler)
-                thread = threading.Thread(target=server.serve_forever, daemon=True)
-                thread.start()
-                base = f"http://127.0.0.1:{server.server_address[1]}"
-
-                def get(path):
-                    with urllib.request.urlopen(base + path) as response:
-                        self.assertEqual(response.status, 200)
-                        return json.load(response)
-
-                try:
-                    self.assertEqual(get("/api/ci"), {**empty, "daemon_alive": False})
-                    self.assertEqual(get("/api/fleet"), live_agents)
-                finally:
-                    server.shutdown()
-                    server.server_close()
-                    thread.join(timeout=2)
-        read_state.assert_not_called()
 
     def test_unreadable_agent_records_stay_visible_and_detail_is_explicit(self):
         with tempfile.TemporaryDirectory() as state:
@@ -317,8 +200,8 @@ class DashboardServerTest(unittest.TestCase):
 
     def test_accounts_snapshot_serves_without_blocking_and_keeps_shape(self):
         # The endpoint serves whatever the 10-minute refresher last produced and never touches
-        # the network itself - a dashboard that blocks on Anthropic to draw is the same defect
-        # the CI pane had. Shape is pinned so the tiles cannot silently lose fields, and the
+        # the network itself: a dashboard that blocks on the vendor to draw is a dashboard that
+        # hangs. Shape is pinned so the tiles cannot silently lose fields, and the
         # snapshot must be a deep copy: a handler mutating its response must not poison the
         # shared state.
         fixture = {"at": 123.0,
@@ -334,112 +217,14 @@ class DashboardServerTest(unittest.TestCase):
             snap["accounts"][0]["weekly"] = 0
             self.assertEqual(fixture["accounts"][0]["weekly"], 51)
 
-    def test_ci_log_tail_is_bounded_and_missing_logs_are_plain(self):
+    def test_the_mode_and_models_routes_do_not_shadow_each_other(self):
+        """Both are prefix-matched, and /api/models starts with /api/mode: route order is
+        observable, so each answers with its own payload here."""
         with tempfile.TemporaryDirectory() as state:
-            log_dir = pathlib.Path(state, "ci", "logs", "ci-safe")
-            log_dir.mkdir(parents=True)
-            log_path = log_dir / "backend.log"
-            log_path.write_text("0123456789")
-            record = {
-                "id": "ci-safe",
-                "tiers": [
-                    {"name": "backend", "log": str(log_path)},
-                    {
-                        "name": "frontend",
-                        "log": str(log_dir / "frontend.log"),
-                    },
-                    {"name": "docker", "log": None},
-                ],
-            }
-            queue = {
-                "running": [],
-                "queued": [],
-                "recent": [record],
-            }
             with (
                 mock.patch.object(dashboard, "STATE", state),
-                mock.patch.object(dashboard, "CI_LOG_TAIL_BYTES", 5),
-                mock.patch.object(dashboard, "ci_queue", return_value=queue),
-            ):
-                code, payload = dashboard.ci_log_tail("ci-safe", "backend")
-                self.assertEqual(code, 200)
-                self.assertEqual(payload["content"], "56789")
-                self.assertTrue(payload["truncated"])
-
-                code, payload = dashboard.ci_log_tail("ci-safe", "docker")
-                self.assertEqual(code, 200)
-                self.assertTrue(payload["missing"])
-                self.assertIn("No action log", payload["message"])
-
-                code, payload = dashboard.ci_log_tail(
-                    "ci-safe", "frontend"
-                )
-                self.assertEqual(code, 200)
-                self.assertTrue(payload["missing"])
-                self.assertIn("not available yet", payload["message"])
-
-    def test_ci_log_tail_refuses_a_record_path_outside_its_run_directory(self):
-        with tempfile.TemporaryDirectory() as state:
-            log_dir = pathlib.Path(state, "ci", "logs", "ci-safe")
-            log_dir.mkdir(parents=True)
-            outside = pathlib.Path(state, "outside.log")
-            outside.write_text("must not leak")
-            escaped = log_dir / "backend.log"
-            escaped.symlink_to(outside)
-            queue = {
-                "running": [],
-                "queued": [],
-                "recent": [
-                    {
-                        "id": "ci-safe",
-                        "tiers": [
-                            {"name": "backend", "log": str(escaped)}
-                        ],
-                    }
-                ],
-            }
-            with (
-                mock.patch.object(dashboard, "STATE", state),
-                mock.patch.object(dashboard, "ci_queue", return_value=queue),
-            ):
-                code, payload = dashboard.ci_log_tail("ci-safe", "backend")
-                self.assertEqual(code, 403)
-                self.assertIn("outside", payload["error"])
-
-                code, payload = dashboard.ci_log_tail(
-                    "ci-safe", "../../outside.log"
-                )
-                self.assertEqual(code, 404)
-                self.assertEqual(payload["error"], "CI stage not found")
-
-    def test_ci_log_mode_and_models_routes_do_not_shadow_each_other(self):
-        with tempfile.TemporaryDirectory() as state:
-            log_dir = pathlib.Path(state, "ci", "logs", "ci-passed")
-            log_dir.mkdir(parents=True)
-            log_path = log_dir / "backend.log"
-            log_path.write_text("backend action output\n")
-            sample = {
-                "updated": 1784600000,
-                "running": [{"id": "ci-running", "state": "running"}],
-                "queued": [{"id": "ci-queued", "state": "queued"}],
-                "recent": [
-                    {
-                        "id": "ci-passed",
-                        "state": "passed",
-                        "tiers": [
-                            {"name": "backend", "log": str(log_path)}
-                        ],
-                    }
-                ],
-            }
-            ci_dir = pathlib.Path(state, "ci")
-            ci_dir.joinpath("queue.json").write_text(json.dumps(sample))
-            with (
-                mock.patch.object(dashboard, "STATE", state),
-                mock.patch.object(dashboard.CI, "read_state", return_value=sample),
                 mock.patch.object(dashboard.MODELS, "listing", return_value=[{"route": "models"}]),
                 machine_snapshot(mode={"route": "mode"}),
-                snapshot_services([{"id": "ci_runner", "state": "inactive"}]),
             ):
                 server = dashboard.Server(("127.0.0.1", 0), dashboard.Handler)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -451,17 +236,6 @@ class DashboardServerTest(unittest.TestCase):
                         return json.load(response)
 
                 try:
-                    self.assertEqual(get("/api/ci"), {**sample, "daemon_alive": False})
-                    self.assertEqual(
-                        get("/api/ci/log?id=ci-passed&tier=backend"),
-                        {
-                            "id": "ci-passed",
-                            "tier": "backend",
-                            "content": "backend action output\n",
-                            "missing": False,
-                            "truncated": False,
-                        },
-                    )
                     self.assertEqual(get("/api/mode"),
                                      {"route": "mode", "at": "2026-09-22T08:00:00Z",
                                       "stale_since": None, "error": None, "pending": False})
@@ -470,23 +244,6 @@ class DashboardServerTest(unittest.TestCase):
                     server.shutdown()
                     server.server_close()
                     thread.join(timeout=2)
-
-
-    def test_daemon_alive_tracks_the_unit_and_is_not_a_constant(self):
-        """Every assertion above would still pass if daemon_alive were hardcoded False.
-
-        The answer is the services snapshot's, so this drives the snapshot rather than a call:
-        the queue route is drawn every few seconds and must ask the machine nothing."""
-        with tempfile.TemporaryDirectory() as state:
-            with mock.patch.object(dashboard, "STATE", state):
-                with snapshot_services([{"id": "ci_runner", "state": "active"}]):
-                    self.assertTrue(dashboard.ci_queue()["daemon_alive"])
-                with snapshot_services([{"id": "ci_runner", "state": "inactive"}]):
-                    self.assertFalse(dashboard.ci_queue()["daemon_alive"])
-                with snapshot_services([]):
-                    # Nobody has looked yet. "The queue is not being worked" would be a claim
-                    # this dashboard cannot make.
-                    self.assertIsNone(dashboard.ci_queue()["daemon_alive"])
 
 
 class StreamTextTest(unittest.TestCase):
@@ -627,7 +384,6 @@ case "$2" in
   is-active)
     case "$unit" in
       fleet-daemon.service) echo active; exit 0;;
-      fleet-ci.service) echo inactive; exit 3;;
       fleet-sweep.timer) echo failed; exit 3;;
     esac
     echo unknown; exit 3;;
@@ -683,9 +439,9 @@ exit 1
 
 
 class ServicesTest(unittest.TestCase):
-    """The control room's four rows: the agent runner, the verification runner, the sweep timer
-    and this dashboard. Every one of them costs a process to read, so the refresher reads them
-    and the route serves what it left."""
+    """The control room's three rows: the agent runner, the sweep timer and this dashboard.
+    Every one of them costs a process to read, so the refresher reads them and the route serves
+    what it left."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -702,17 +458,16 @@ class ServicesTest(unittest.TestCase):
             with mock.patch.dict(dashboard._services_snapshot, blank, clear=True):
                 yield box
 
-    def test_the_four_rows_carry_a_state_a_sentence_and_when_it_last_changed(self):
+    def test_the_three_rows_carry_a_state_a_sentence_and_when_it_last_changed(self):
         with steady_clock(), self.farm() as box:
             dashboard.services_refresh()
             rows = dashboard.services()["services"]
             self.assertIn("systemctl --user is-active fleet-daemon.service",
                           box.calls.read_text())
         self.assertEqual([row["id"] for row in rows],
-                         ["agent_runner", "ci_runner", "sweep_timer", "dashboard"])
+                         ["agent_runner", "sweep_timer", "dashboard"])
         by_id = {row["id"]: row for row in rows}
         self.assertEqual(by_id["agent_runner"]["state"], "active")
-        self.assertEqual(by_id["ci_runner"]["state"], "inactive")
         self.assertEqual(by_id["sweep_timer"]["state"], "failed")
         for row in rows:
             self.assertTrue(row["detail"], row["id"])
@@ -745,9 +500,9 @@ class ServicesTest(unittest.TestCase):
     def test_every_fix_on_a_row_is_a_command_that_does_what_the_row_asks(self):
         """`fleet autosweep` takes on|off|status. A fix built as "<verb> start" sent the reader
         to `fleet autosweep start`, which prints the status and changes nothing."""
-        # in this fixture the verification runner is inactive and the sweep timer has failed,
-        # which are the two states that put a command in front of the reader
-        expected = {"ci_runner": "fleet ci daemon start", "sweep_timer": "fleet autosweep on"}
+        # in this fixture the sweep timer has failed, which puts a command in front of the
+        # reader
+        expected = {"sweep_timer": "fleet autosweep on"}
         with self.farm():
             dashboard.services_refresh()
             rows = {row["id"]: row for row in dashboard.services()["services"]}
@@ -802,17 +557,17 @@ exit 1
         with self.farm({"tmux": TMUX_FAKE}):
             dashboard.services_refresh()
             rows = dashboard.services()["services"]
-        for row in rows[:3]:
+        for row in rows[:2]:
             self.assertEqual(row["state"], "absent", row["id"])
             self.assertEqual(row["actions"], [], row["id"])
             self.assertIn("systemd user manager", row["detail"])
-        self.assertEqual(rows[3]["id"], "dashboard")
+        self.assertEqual(rows[2]["id"], "dashboard")
 
     def test_a_row_that_will_not_read_does_not_cost_the_page_the_others(self):
         real = dashboard._unit_row
 
         def one_bad(spec):
-            if spec["id"] == "ci_runner":
+            if spec["id"] == "sweep_timer":
                 raise RuntimeError("boom")
             return real(spec)
 
@@ -820,8 +575,8 @@ exit 1
             with mock.patch.object(dashboard, "_unit_row", one_bad):
                 dashboard.services_refresh()
             rows = dashboard.services()["services"]
-            self.assertEqual(len(rows), 4)
-            self.assertEqual(dashboard.service_row("ci_runner")["state"], "unknown")
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(dashboard.service_row("sweep_timer")["state"], "unknown")
             self.assertEqual(dashboard.service_row("agent_runner")["state"], "active")
         self.assertNotIn("Traceback", json.dumps(rows))
 
@@ -837,7 +592,7 @@ exit 1
                 status, payload = fetch_json(base, "/api/services")
                 self.assertEqual(status, 200)
                 self.assertFalse(payload["pending"])
-                self.assertEqual(len(payload["services"]), 4)
+                self.assertEqual(len(payload["services"]), 3)
                 self.assertEqual(box.calls.read_text(), "",
                                  "reading the services must not ask the machine anything")
 
@@ -900,8 +655,6 @@ class ServiceActionTest(unittest.TestCase):
         for service, action, expected in (
                 ("agent_runner", "start", "fleet daemon start"),
                 ("agent_runner", "stop", "fleet daemon stop"),
-                ("ci_runner", "start", "fleet ci daemon start"),
-                ("ci_runner", "stop", "fleet ci daemon stop"),
                 ("sweep_timer", "start", "fleet autosweep on"),
                 ("sweep_timer", "stop", "fleet autosweep off")):
             with self.farm() as box:
@@ -916,13 +669,13 @@ class ServiceActionTest(unittest.TestCase):
 
     def test_a_restart_is_the_stop_and_then_the_start_in_that_order(self):
         with self.farm() as box:
-            status, payload = dashboard.service_action({"service": "ci_runner",
+            status, payload = dashboard.service_action({"service": "agent_runner",
                                                         "action": "restart"})
             recorded = [line for line in box.calls.read_text().splitlines()
                         if line.startswith("fleet-parsed")]
         self.assertEqual(status, 200, payload)
-        self.assertEqual(recorded, ['fleet-parsed ci daemon {"action": "stop"}',
-                                    'fleet-parsed ci daemon {"action": "start"}'])
+        self.assertEqual(recorded, ['fleet-parsed daemon {"action": "stop"}',
+                                    'fleet-parsed daemon {"action": "start"}'])
 
     def test_the_dashboard_refuses_and_names_the_command_that_does_it(self):
         with self.farm() as box:
@@ -936,17 +689,17 @@ class ServiceActionTest(unittest.TestCase):
     def test_an_unknown_service_or_action_never_reaches_the_cli(self):
         with self.farm() as box:
             for body in ({"service": "postgres", "action": "start"},
-                         {"service": "ci_runner", "action": "reboot"},
+                         {"service": "agent_runner", "action": "reboot"},
                          {"service": "", "action": ""},
-                         {"service": "ci_runner"}):
+                         {"service": "agent_runner"}):
                 status, payload = dashboard.service_action(body)
                 self.assertEqual(status, 400, body)
                 self.assertNotIn("Traceback", json.dumps(payload))
             self.assertEqual(box.calls.read_text(), "")
 
     def test_a_refusing_cli_is_a_400_carrying_its_last_line(self):
-        with self.farm(FLEET_FAKE_FAIL="Failed to start fleet-ci.service: Unit not found."):
-            status, payload = dashboard.service_action({"service": "ci_runner",
+        with self.farm(FLEET_FAKE_FAIL="Failed to start fleet-daemon.service: Unit not found."):
+            status, payload = dashboard.service_action({"service": "agent_runner",
                                                         "action": "start"})
         self.assertEqual(status, 400)
         self.assertIn("Unit not found", payload["error"])
@@ -962,14 +715,14 @@ class ServiceActionTest(unittest.TestCase):
                     mock.patch.object(dashboard, "_refresh_wake", wake), \
                     running_server() as base:
                 status, payload = fetch_json(base, "/api/services", method="POST",
-                                             body={"service": "ci_runner", "action": "start"})
+                                             body={"service": "agent_runner", "action": "start"})
                 self.assertEqual(status, 403)
                 self.assertIn("token", payload["error"])
                 status, payload = fetch_json(base, "/api/services", token="s3cret",
                                              method="POST",
-                                             body={"service": "ci_runner", "action": "start"})
+                                             body={"service": "agent_runner", "action": "start"})
                 self.assertEqual(status, 200, payload)
-                self.assertEqual(payload["verb"], "fleet ci daemon")
+                self.assertEqual(payload["verb"], "fleet daemon")
                 self.assertEqual(wake.wakes, 1,
                                  "the row a page draws next must be the new one")
 
@@ -1036,7 +789,7 @@ class JobsTest(unittest.TestCase):
         self.assertIn("already running", refusal["error"])
         self.assertEqual(refusal["job"]["id"], running)
         # a job holding a different resource is not blocked by it
-        status, other = dashboard.start_job("enqueue", [self.tool("true")], timeout=5)
+        status, other = dashboard.start_job("add_project", [self.tool("true")], timeout=5)
         self.assertEqual(status, 202)
         self.assertIn(running, [record["id"] for record in dashboard.running_jobs()])
         gate.write_text("go")
@@ -1047,7 +800,8 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(dashboard.running_jobs(), [])
 
     def test_the_routes_serve_the_records_and_refuse_a_name_that_is_not_one(self):
-        status, payload = dashboard.start_job("enqueue", [self.tool("echo queued")], timeout=5)
+        status, payload = dashboard.start_job("add_project", [self.tool("echo registered")],
+                                              timeout=5)
         job_id = payload["job"]["id"]
         self.wait_for(job_id, "done")
         with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
@@ -1147,16 +901,14 @@ class PowerTest(unittest.TestCase):
         self.assertEqual(payload["lanes"][1]["restart"], "until-pr")
         text = " ".join([payload["sentence"]] + payload["warnings"])
         self.assertIn("agent runner", text)
-        self.assertIn("verification", text)
         self.assertIn("loses", text)
 
-    def test_the_throttle_preview_names_the_caps_and_the_database(self):
+    def test_the_throttle_preview_names_the_caps(self):
         status, payload = dashboard.power_preview("throttle")
         self.assertEqual(status, 200)
         self.assertEqual(payload["lanes"], [])
         self.assertIn("% of the CPU", payload["sentence"])
         self.assertIn("memory", payload["sentence"])
-        self.assertIn("verification database", payload["sentence"])
 
     def test_the_resume_preview_says_the_runner_will_spend_subscription(self):
         payload = dashboard.power_preview("resume")[1]
@@ -1290,105 +1042,6 @@ class PowerTest(unittest.TestCase):
                 self.assertEqual(payload["action"], "throttle")
                 self.assertIn('fleet-parsed mode {"mode": "balanced"}', box.calls.read_text(),
                               "and the press that follows it does")
-
-
-class CiWriteTest(unittest.TestCase):
-    """Queueing a change for verification, and cancelling one. Both are checked against what this
-    farm has before a word of them reaches a command line."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.state = pathlib.Path(self.tmp.name, "state")
-        self.config = pathlib.Path(self.tmp.name, "config")
-        (self.state / "ci").mkdir(parents=True)
-        self.config.mkdir()
-        (self.config / "projects.toml").write_text('[alpha]\nrepo = "acme/alpha"\n')
-        (self.state / "ci" / "queue.json").write_text(json.dumps({
-            "updated": 1784600000,
-            "running": [{"id": "ci-running", "state": "running"}],
-            "queued": [{"id": "ci-waiting", "state": "queued"}],
-            "recent": [{"id": "ci-old", "state": "passed"}]}))
-        for target, value in (("STATE", str(self.state)), ("CONFIG", str(self.config))):
-            patcher = mock.patch.object(dashboard, target, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
-    @contextlib.contextmanager
-    def farm(self, **env):
-        with fake_tools({"fleet": FLEET_FAKE}, env=env or None) as box:
-            with mock.patch.object(dashboard, "FLEET_HOME", str(box.root)):
-                yield box
-
-    def finish(self, job_id, seconds=5):
-        deadline = time.time() + seconds
-        while time.time() < deadline:
-            record = dashboard.read_job(job_id)[1]
-            if record.get("state") != "running":
-                return record
-            time.sleep(0.02)
-        self.fail(f"job {job_id} never finished")
-
-    def test_queueing_a_change_is_a_job_running_the_enqueue_verb(self):
-        with self.farm() as box:
-            status, payload = dashboard.ci_enqueue({"project": "alpha", "pr": "128"})
-            self.assertEqual(status, 202, payload)
-            self.assertEqual(payload["pr"], 128)
-            done = self.finish(payload["job"]["id"])
-            recorded = box.calls.read_text()
-        self.assertEqual(done["state"], "done", done)
-        self.assertIn("enqueued", done["output"])
-        self.assertIn('fleet-parsed ci enqueue {"branch": null, "pr": 128, "project": "alpha"}',
-                      recorded)
-
-    def test_a_project_this_farm_does_not_have_never_reaches_the_cli(self):
-        with self.farm() as box:
-            for body in ({"project": "ghost", "pr": 1}, {"project": "", "pr": 1},
-                         {"project": "../alpha", "pr": 1},
-                         {"project": "alpha", "pr": "0"}, {"project": "alpha", "pr": "-3"},
-                         {"project": "alpha", "pr": "main"}, {"project": "alpha"}):
-                status, payload = dashboard.ci_enqueue(body)
-                self.assertEqual(status, 400, body)
-                self.assertNotIn("Traceback", json.dumps(payload))
-            self.assertEqual(box.calls.read_text(), "")
-
-    def test_cancelling_sends_the_separator_the_option_parser_needs(self):
-        with self.farm() as box:
-            status, payload = dashboard.ci_cancel({"id": "ci-waiting"})
-            recorded = box.calls.read_text()
-        self.assertEqual(status, 200, payload)
-        self.assertIn("fleet ci cancel -- ci-waiting", recorded)
-        self.assertIn('fleet-parsed ci cancel {"id": "ci-waiting"}', recorded)
-
-    def test_a_run_that_is_not_in_the_queue_is_refused_with_the_ones_that_are(self):
-        with self.farm() as box:
-            status, payload = dashboard.ci_cancel({"id": "ci-old"})     # already finished
-            self.assertEqual(status, 400)
-            self.assertEqual(payload["runs"], ["ci-running", "ci-waiting"])
-            for run_id in ("", "../../etc/passwd", "-h"):
-                self.assertEqual(dashboard.ci_cancel({"id": run_id})[0], 400, run_id)
-            self.assertEqual(box.calls.read_text(), "")
-
-    def test_a_refusing_cli_is_a_400_carrying_what_it_said(self):
-        with self.farm(FLEET_FAKE_FAIL="fleet ci: the queue is locked by another writer"):
-            status, payload = dashboard.ci_cancel({"id": "ci-running"})
-        self.assertEqual(status, 400)
-        self.assertIn("locked", payload["error"])
-
-    def test_both_routes_need_the_write_token(self):
-        with self.farm():
-            with mock.patch.object(dashboard, "BIND", "127.0.0.1"), \
-                    mock.patch.object(dashboard, "TOKEN", "s3cret"), running_server() as base:
-                for route, body in (("/api/ci/enqueue", {"project": "alpha", "pr": 7}),
-                                    ("/api/ci/cancel", {"id": "ci-running"})):
-                    self.assertEqual(fetch_json(base, route, method="POST", body=body)[0], 403)
-                status, payload = fetch_json(base, "/api/ci/enqueue", token="s3cret",
-                                             method="POST", body={"project": "alpha", "pr": 7})
-                self.assertEqual(status, 202, payload)
-                self.finish(payload["job"]["id"])
-                status, payload = fetch_json(base, "/api/ci/cancel", token="s3cret",
-                                             method="POST", body={"id": "ci-running"})
-                self.assertEqual(status, 200, payload)
 
 
 class LoginStateTest(unittest.TestCase):
@@ -2502,8 +2155,8 @@ class DashboardConfigTest(unittest.TestCase):
         self.assertEqual(payload["version"], "abc1234")
         self.assertEqual(payload["hq_agent"], "dashboard")
         self.assertEqual(payload["features"], {"hq": False, "slice": False, "gpu": False,
-                                               "cpu_temp": False, "ci_daemon": False,
-                                               "forge": "unknown", "health_panel": False})
+                                               "cpu_temp": False, "forge": "unknown",
+                                               "health_panel": False})
 
     def test_a_complete_machine_reports_each_part_it_has(self):
         systemctl = 'case "$*" in *LoadState*) echo loaded;; esac\n'
@@ -2518,8 +2171,8 @@ class DashboardConfigTest(unittest.TestCase):
         self.assertEqual(payload["title"], "acme farm")
         self.assertEqual(payload["hq_agent"], "console")
         self.assertEqual(payload["features"], {"hq": True, "slice": True, "gpu": True,
-                                               "cpu_temp": True, "ci_daemon": True,
-                                               "forge": "github", "health_panel": True})
+                                               "cpu_temp": True, "forge": "github",
+                                               "health_panel": True})
 
     def test_the_health_section_is_off_unless_the_farm_asks_for_it(self):
         for value, expected in (("", False), ("off", False), ("0", False), ("on", True),
@@ -2596,8 +2249,8 @@ class DashboardHealthTest(unittest.TestCase):
                 mock.patch.object(dashboard.M, "LHM_URL", ""):
             rows = self.rows()
         self.assertEqual(set(rows), {"gh", "tmux", "systemd_user", "linger", "hq", "claude",
-                                     "codex", "gpu_sensor", "cpu_temp_sensor", "ci_daemon",
-                                     "sweep_timer", "office"})
+                                     "codex", "gpu_sensor", "cpu_temp_sensor", "sweep_timer",
+                                     "office"})
         for row in rows.values():
             self.assertIn(row["state"], ("ok", "missing", "error", "off"), row)
             self.assertTrue(row["label"], row)
@@ -2607,11 +2260,11 @@ class DashboardHealthTest(unittest.TestCase):
         self.assertEqual(rows["tmux"]["state"], "missing")
         # A machine with no user manager still runs lanes: they live in tmux. Painting that row
         # red said something untrue about what was blocked.
-        for name in ("systemd_user", "linger", "ci_daemon"):
+        for name in ("systemd_user", "linger"):
             self.assertEqual(rows[name]["state"], "off", name)
             self.assertNotIn("lanes cannot", rows[name]["detail"], name)
         self.assertIn("tmux", rows["systemd_user"]["detail"])
-        for word in ("power modes", "CI daemon", "sweep timer"):
+        for word in ("power modes", "sweep timer"):
             self.assertIn(word, rows["systemd_user"]["detail"], word)
         self.assertEqual(rows["hq"]["state"], "missing")
         # With no engine at all, no lane can run: that is missing, not a choice.
@@ -2645,7 +2298,7 @@ esac
                 rows = self.rows()
             self.assertNotIn("inbox", box.calls.read_text())
         for name in ("gh", "tmux", "systemd_user", "linger", "hq", "claude", "codex",
-                     "gpu_sensor", "cpu_temp_sensor", "ci_daemon", "office"):
+                     "gpu_sensor", "cpu_temp_sensor", "office"):
             self.assertEqual(rows[name]["state"], "ok", f"{name}: {rows[name]}")
             self.assertEqual(rows[name]["fix"], "", name)
         self.assertIn("acme/office", rows["office"]["detail"])
@@ -2660,7 +2313,7 @@ esac
         self.assertIn("gh auth status", rows["office"]["fix"])
 
     def test_a_check_that_throws_becomes_one_error_row_not_a_broken_page(self):
-        # Eleven working rows must survive the twelfth, and the message a person sees is the
+        # Ten working rows must survive the eleventh, and the message a person sees is the
         # exception's text, never a stack trace.
         def boom():
             raise RuntimeError("the sensor exploded")
@@ -2671,7 +2324,7 @@ esac
             rows = self.rows()
         self.assertEqual(rows["gh"]["state"], "error")
         self.assertEqual(rows["gh"]["detail"], "RuntimeError: the sensor exploded")
-        self.assertEqual(len(rows), 12)
+        self.assertEqual(len(rows), 11)
 
     def test_a_hung_tool_is_a_failed_check_not_a_hung_page(self):
         hang = f"#!{sys.executable}\nimport time\ntime.sleep(30)\n"
@@ -3342,34 +2995,6 @@ elif command == "kill":
     if flags.get("--retire"):
         print("retired lane (no live siblings)")
     print("killed " + positional[0])
-elif command == "ci":
-    sub, tail = (rest[0] if rest else ""), rest[1:]
-    if sub == "enqueue":
-        # lib/ci.py parses with argparse: options only, and one of --pr or --branch.
-        parser = argparse.ArgumentParser(prog="fleet ci enqueue")
-        parser.add_argument("--project", required=True)
-        parser.add_argument("--pr", type=int)
-        parser.add_argument("--branch")
-        args = parser.parse_args(tail)
-        if (args.pr is None) == (args.branch is None):
-            sys.exit("fleet ci: one of --pr or --branch is required")
-        parsed("ci enqueue", vars(args))
-        print("enqueued ci-42 (acme/%s %s)" % (args.project, args.pr or args.branch))
-    elif sub == "cancel":
-        # argparse again, and `id` is a POSITIONAL: without `--` a leading dash is an option.
-        parser = argparse.ArgumentParser(prog="fleet ci cancel")
-        parser.add_argument("id")
-        args = parser.parse_args(tail)
-        parsed("ci cancel", {{"id": args.id}})
-        print("cancelled queued run")
-    elif sub == "daemon":
-        action = tail[0] if tail else "start"
-        if action not in ("run", "start", "stop", "status"):
-            sys.exit("fleet ci: invalid choice: " + action)
-        parsed("ci daemon", {{"action": action}})
-        print("fleet ci daemon: " + action)
-    else:
-        sys.exit("fleet ci: invalid choice: " + sub)
 elif command == "daemon":
     action = rest[0] if rest else "status"
     if action not in ("start", "on", "stop", "off", "status", "tick"):
@@ -3685,7 +3310,7 @@ class DashboardMailTest(unittest.TestCase):
             21: [{"created_at": stamp(1800),
                   "body": "**from rubicon** (2026-09-21T08:00:00Z):\nthe new office issue"}],
             9: [{"created_at": stamp(3600),
-                 "body": "**from winston** (2026-09-21T07:00:00Z):\nthe queue is open"}],
+                 "body": "**from winston** (2026-09-21T07:00:00Z):\nthe orders lane is open"}],
         }
         with self.office(boxes=boxes, comments=comments):
             dashboard.mail_refresh()
@@ -4139,17 +3764,17 @@ class RefresherTest(unittest.TestCase):
         self.assertFalse(thread.is_alive(), "the refresher must stop when it is told to")
 
 class ReadsCostNothingTest(unittest.TestCase):
-    """The page redraws every few seconds. Every read this lane added must therefore be pure
-    memory and files: one tool call on a read path is a few thousand an hour, against the API
-    budget every agent on this machine shares."""
+    """The page redraws every few seconds. Every read route must therefore be pure memory and
+    files: one tool call on a read path is a few thousand an hour, against the API budget every
+    agent on this machine shares."""
 
-    # EVERY read route, with none held back. The panes that used to ask the machine on a read
-    # (/api/ci, /api/sweep, /api/mode, /api/metrics) are served from their own refreshers now.
+    # EVERY read route, with none held back. The panes that ask the machine something
+    # (/api/sweep, /api/mode, /api/metrics) are served from their own refreshers.
     QUIET_ROUTES = ("/", "/index.html", "/static/app.js", "/api/access", "/api/version",
                     "/api/config", "/api/health", "/api/projects", "/api/identities",
                     "/api/fleet", "/api/agent?slug=lane-1", "/api/agent/log?slug=lane-1",
                     "/api/mail/boxes", "/api/mail/thread?box=winston", "/api/mail/feed?hours=24",
-                    "/api/mail/who", "/api/services", "/api/ci", "/api/ci/log?id=ci-1&tier=build",
+                    "/api/mail/who", "/api/services",
                     "/api/sweep", "/api/mode", "/api/metrics", "/api/accounts", "/api/models",
                     "/api/jobs", "/api/jobs/drain-1", "/api/power/preview?action=drain",
                     "/api/accounts/login-state", "/api/machines", "/api/hosts")
@@ -4171,12 +3796,6 @@ class ReadsCostNothingTest(unittest.TestCase):
                 {"id": "drain-1", "action": "drain", "state": "done",
                  "started_at": "2026-09-22T08:00:00Z", "ended_at": "2026-09-22T08:01:00Z",
                  "output": "", "pid": os.getpid()}))
-            (state / "ci" / "logs" / "ci-1").mkdir(parents=True)
-            (state / "ci" / "logs" / "ci-1" / "build.log").write_text("it built\n")
-            (state / "ci" / "queue.json").write_text(json.dumps({
-                "updated": 1784600000, "running": [], "queued": [],
-                "recent": [{"id": "ci-1", "state": "passed",
-                            "tiers": [{"name": "build", "log": "build.log"}]}]}))
             config = box.root / "fleet-config"
             config.mkdir()
             (config / "projects.toml").write_text('[alpha]\nrepo = "acme/alpha"\n')

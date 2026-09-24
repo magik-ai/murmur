@@ -1,11 +1,11 @@
-/* Queue and Machine, in every state the stub can produce, at a desktop width and a phone
-   width, with the detail panel open and the add-account step panel open. The check is narrow
-   on purpose: nothing may throw, the page may never scroll sideways, and every screen must
-   draw something. The pictures are the point, so a person can look at a tab they have never
-   seen and say what it is for. They are written outside the repository and never committed.
+/* Machine, in every state the stub can produce, at a desktop width and a phone width, and
+   with the add-account step panel open. The check is narrow on purpose: nothing may throw, the
+   page may never scroll sideways, and every screen must draw something. The pictures are the
+   point, so a person can look at a tab they have never seen and say what it is for. They are
+   written outside the repository and never committed.
 
-   The views are opened through the stub's harness page: the lane that owns index.html and
-   app.js registers them in the real shell, and this check does not wait for it to land. */
+   The view is opened through the stub's harness page, a small shell around the same modules
+   index.html puts it in, so each picture is of the view and nothing else. */
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -21,38 +21,10 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const STATES = ["ready", "empty", "error", "loading", "quiet"];
 const SIZES = [{ width: 1440, height: 900 }, { width: 390, height: 844 }];
 
-/* The failed requests a state is meant to produce. The browser logs one console line for each;
-   that line is the fixture working, not the page breaking. */
-const EXPECTED_REQUEST_FAILURES = { error: ["/api/ci"] };
-
 const results = [];
 function check(name, passed, detail) {
   results.push({ name, passed });
   console.log(`${passed ? "PASS" : "FAIL"}  ${name}${detail ? `  ${detail}` : ""}`);
-}
-
-/* Classify a colour the way an eye does, not by its exact value: the point is that a failed
-   run reads red in both themes, not that it is one particular red. */
-function hue(value) {
-  const text = String(value);
-  const parts = text.match(/[\d.]+/g);
-  if (!parts) return "none";
-  if (text.includes("oklch")) {
-    const [, chroma, angle] = parts.map(Number);
-    if (chroma < 0.05) return "grey";
-    if (angle < 40 || angle >= 340) return "red";
-    if (angle < 110) return "amber";
-    if (angle < 200) return "green";
-    if (angle < 300) return "blue";
-    return `other(${angle})`;
-  }
-  const [red, green, blue] = parts.map(Number);
-  if (Math.abs(red - green) < 18 && Math.abs(green - blue) < 18) return "grey";
-  if (green > red + 25 && green > blue + 15) return "green";
-  if (red > green + 40 && green > blue + 15) return "amber";
-  if (red > green + 50) return "red";
-  if (blue > red + 30) return "blue";
-  return `other(${red},${green},${blue})`;
 }
 
 /* A port that is already taken is the one way these checks can go green against a page nobody
@@ -98,37 +70,6 @@ async function measured(page, state, screen, size) {
     const head = [...document.querySelectorAll("#view .section-head h2")].find((node) => node.textContent === "Power");
     return head ? head.title : "";
   });
-  if (screen === "queue" && state === "ready") {
-    const counted = await page.evaluate(() => ({
-      rows: document.querySelectorAll(".q-row").length,
-      bands: [...document.querySelectorAll(".q-band")].map((node) => node.innerText.trim()),
-    }));
-    return [
-      ["shows every run as a row", counted.rows >= 40, `${counted.rows} rows`],
-      ["names its three bands with their counts",
-        counted.bands.length === 3 && /Running \(1\)/.test(counted.bands[0])
-        && /Recent \(40\)/.test(counted.bands[2]), counted.bands.join(" | ")],
-    ];
-  }
-  if (screen === "queue" && state === "quiet") {
-    return [
-      ["says a quiet queue is quiet and still counts what finished",
-        /Nothing is being verified right now/.test(body) && /Recent \(40\)/.test(body),
-        body.slice(0, 160)],
-    ];
-  }
-  if (screen === "queue" && state === "empty") {
-    return [["says the queue has never run and how to fill it",
-      /never run/.test(body) && /fleet ci enqueue/.test(body), body.slice(0, 160)]];
-  }
-  if (screen === "queue" && state === "error") {
-    return [
-      ["says the queue could not be read instead of drawing an empty table",
-        /reported a problem|could not be read|did not answer/i.test(body), body.slice(0, 160)],
-      ["passes on the service manager's own sentence about the runner",
-        /no user service manager/.test(body), body.slice(0, 250)],
-    ];
-  }
   if (screen === "machine" && state === "ready") {
     const out = [
       ["carries its five sections",
@@ -162,33 +103,9 @@ async function measured(page, state, screen, size) {
   return [];
 }
 
-/* The two screens that are not a plain tab: the run detail and the add-account step panel. The
-   Models section's screens are test_screens_models.mjs. */
+/* The screen that is not a plain tab: the add-account step panel. The Models section's screens
+   are test_screens_models.mjs. */
 async function openExtra(page, screen, size, state) {
-  if (screen === "queue-detail") {
-    const target = await page.evaluate(() => {
-      const row = document.querySelector(".q-row");
-      return row ? row.dataset.run : "";
-    });
-    // Nothing to open in a queue that is empty, failing or still loading: that is its own screen.
-    if (!target) return false;
-    await page.click(`[data-run='${target}']`);
-    await page.waitForTimeout(1200);
-    const seen = await page.evaluate(() => {
-      const panel = document.querySelector(".q-detail");
-      if (!panel) return null;
-      const box = panel.getBoundingClientRect();
-      return { width: Math.round(box.width), view: window.innerWidth, fixed: getComputedStyle(panel).position };
-    });
-    if (seen && size.width <= 1000) {
-      check(`queue detail ${size.width} becomes a full width sheet`,
-        seen.fixed === "fixed" && seen.width >= seen.view - 1, JSON.stringify(seen));
-    } else if (seen) {
-      check(`queue detail ${size.width} sits beside the table`,
-        seen.fixed !== "fixed" && seen.width < seen.view, JSON.stringify(seen));
-    }
-    return true;
-  }
   if (screen === "machine-add") {
     /* A read-only page switches this button off on purpose, and a page still loading has not
        drawn it yet. Both are screens worth a picture, they are simply not this one. */
@@ -215,7 +132,7 @@ async function openExtra(page, screen, size, state) {
   return true;
 }
 
-const SCREENS = ["queue", "machine", "queue-detail", "machine-add"];
+const SCREENS = ["machine", "machine-add"];
 
 for (const state of STATES) {
   for (const size of SIZES) {
@@ -225,18 +142,13 @@ for (const state of STATES) {
     });
     const page = await context.newPage();
     const problems = [];
-    const allowed = EXPECTED_REQUEST_FAILURES[state] || [];
     page.on("pageerror", (error) => problems.push(`uncaught: ${error.message}`));
     page.on("console", (message) => {
       if (message.type() !== "error") return;
-      const said = message.text();
-      if (said.includes("Failed to load resource")
-        && allowed.some((route) => message.location().url.includes(route))) return;
-      problems.push(said);
+      problems.push(message.text());
     });
     for (const screen of SCREENS) {
-      const view = screen.startsWith("queue") ? "queue" : "machine";
-      await page.goto(`${BASE}/harness?state=${state}#/${view}`, { waitUntil: "domcontentloaded" });
+      await page.goto(`${BASE}/harness?state=${state}#/machine`, { waitUntil: "domcontentloaded" });
       await page.waitForTimeout(state === "loading" ? 900 : 1500);
       if (screen.includes("-")) {
         const done = await openExtra(page, screen, size, state);
@@ -261,31 +173,6 @@ for (const state of STATES) {
     check(`${state} ${size.width} logged no error`, problems.length === 0, problems.slice(0, 3).join(" | "));
     await context.close();
   }
-}
-
-/* The five meanings, measured on each row's state mark in both themes. The coloured row edge is
-   gone (owner audit 2026-09-23: a state is a mark and a word, never a rail), so the colour a
-   reader sees for a run is the mark's, and that is what is measured. */
-for (const scheme of ["light", "dark"]) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: scheme });
-  const page = await context.newPage();
-  await page.goto(`${BASE}/harness?state=ready#/queue`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1500);
-  const edges = await page.evaluate(() => {
-    const out = {};
-    for (const row of document.querySelectorAll(".q-row")) {
-      const meaning = ["run", "wait", "fail", "done", "pause"].find((name) => row.classList.contains(name));
-      if (!meaning || out[meaning]) continue;
-      const mark = row.querySelector("td .pill .dot");
-      out[meaning] = mark ? getComputedStyle(mark).backgroundColor : "";
-    }
-    return out;
-  });
-  for (const [meaning, want] of Object.entries({ run: "blue", wait: "amber", fail: "red", done: "green", pause: "grey" })) {
-    check(`${scheme}: a ${meaning} run has a ${want} mark`, edges[meaning] && hue(edges[meaning]) === want,
-      `${edges[meaning]} reads ${hue(edges[meaning] || "")}`);
-  }
-  await context.close();
 }
 
 await browser.close();

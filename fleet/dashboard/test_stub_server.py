@@ -10,12 +10,12 @@ the page that made the request, and from STUB_STATE. So a browser opened on
 `http://127.0.0.1:PORT/?state=empty` sees the empty dataset everywhere without the page
 knowing anything about this file.
 
-    ready    a farm with agents, a queue, mail, accounts and a healthy machine
+    ready    a farm with agents, mail, accounts and a healthy machine
     empty    a farm that has just been installed: nothing registered, nothing run
-    error    gh missing, hq missing, no graphics card, and a queue that will not answer
+    error    gh missing, hq missing, no graphics card, and no user service manager
     loading  every route answers slowly, so the skeletons are what you see
-    quiet    a busy farm whose queue has only finished runs, whose lane names are too long
-             for a card, and whose office holds two inbox issues under one name
+    quiet    a busy farm whose lane names are too long for a card, and whose office holds
+             two inbox issues under one name
 """
 import http.server
 import json
@@ -166,104 +166,6 @@ PROJECTS = [
      "base_branch": "main", "ports": {"web": 5220, "api": 8100, "e2e": 9100},
      "lanes_open": 0, "last_activity": ago(86000)},
 ]
-
-QUEUE_STATES = ["passed", "passed_partial", "failed", "conflict", "ejected", "cancelled", "blocked"]
-
-
-def queue_record(index, state, kind):
-    started = ago(3600 - index * 120)
-    return {
-        "id": f"ci-{1000 + index}-0000", "project": "demo" if index % 2 else "storefront",
-        "repo": "your-org/demo", "pr": 400 + index, "branch": f"demo/change-{index}",
-        "state": state, "reason": {
-            "passed_partial": "verified with the hosted browser check left out",
-            "conflict": "the change no longer applies to the current main branch",
-            "blocked": "waiting for a person to release the hold",
-        }.get(state, ""),
-        "started": started, "ended": None if kind == "running" else started + 700,
-        "position": index + 1 if kind == "queued" else None,
-        "tiers": [
-            {"name": "changed files", "state": "passed", "started": started, "ended": started + 4},
-            {"name": "unit tests", "state": "passed", "started": started + 4, "ended": started + 300},
-            {"name": "end to end", "state": "running" if kind == "running" else state,
-             "started": started + 300, "ended": None if kind == "running" else started + 700,
-             "detail": "" if state != "failed" else "one case failed on the orders screen"},
-        ],
-        "uncovered": ["hosted browser check"] if state == "passed_partial" else [],
-        "failed_tests": [
-            {"tier": "end to end", "test": "orders.spec.ts > an empty basket says so",
-             "log": f"/home/farm/.fleet/ci/logs/ci-{1000 + index}-0000/end-to-end.log"},
-        ] if state == "failed" else [],
-        "base_branch": "main", "head_sha": f"{index:07x}9ab",
-        "enqueued": started - 30,
-        "farm_verdict": state if state in ("passed", "failed") else None,
-        "hosted_verdict": state if state in ("passed", "failed") else None,
-        "divergent": False,
-    }
-
-
-# A farm that has been up for a day holds dozens of finished runs, and the table has to stay
-# readable with all of them in it. These carry the shape the detail panel reads: five stages,
-# failed tests with their names, the gates this queue does not cover, and the two verdicts.
-DEEP_STAGES = ["changed files", "unit tests", "browser", "container image", "documents"]
-DEEP_STATES = ["passed", "failed", "passed_partial", "passed", "cancelled", "passed"]
-
-
-def deep_record(index):
-    state = DEEP_STATES[index % len(DEEP_STATES)]
-    started = ago(7200 + index * 300)
-    project = "demo" if index % 2 else "storefront"
-    stages = []
-    at = started
-    for position, name in enumerate(DEEP_STAGES):
-        span = 40 + position * 45
-        stage_state = "passed"
-        if state == "failed" and name == "browser":
-            stage_state = "failed"
-        elif state == "failed" and position > 2:
-            stage_state = "skipped"
-        elif state == "cancelled" and position > 1:
-            stage_state = "cancelled"
-        elif state == "passed_partial" and name == "container image":
-            stage_state = "skipped"
-        stages.append({
-            "name": name, "state": stage_state, "started": at, "ended": at + span,
-            "detail": "one case failed on the orders screen" if stage_state == "failed" else "",
-            "log": f"{name.replace(' ', '-')}.log",
-        })
-        at += span
-    # One run where the two verdicts disagree. It has to be a failed one, or "they disagree"
-    # would be a sentence over two identical words.
-    divergent = state == "failed" and index == 7
-    return {
-        "id": f"ci-{2000 + index}-0000", "project": project, "repo": f"your-org/{project}",
-        "pr": 300 + index, "branch": f"{project}/change-{index}", "state": state,
-        "reason": {"passed_partial": "verified with the hosted browser check left out",
-                   "cancelled": "a person cancelled this run"}.get(state, ""),
-        "started": started, "ended": at, "enqueued": started - 45, "position": None,
-        "base_branch": "main", "head_sha": f"{index:07x}c1d",
-        "tiers": stages,
-        "uncovered": ["hosted browser check", "licence scan", "publish the image"]
-                     if state == "passed_partial" else [],
-        "failed_tests": [
-            {"tier": "browser", "test": "orders.spec.ts > an empty basket says so",
-             "log": f"/home/farm/.fleet/ci/logs/ci-{2000 + index}-0000/browser.log"},
-            {"tier": "browser", "test": "orders.spec.ts > a declined card is explained",
-             "log": f"/home/farm/.fleet/ci/logs/ci-{2000 + index}-0000/browser.log"},
-        ] if state == "failed" else [],
-        "farm_verdict": "failed" if state == "failed" else "passed",
-        "hosted_verdict": "passed" if divergent or state != "failed" else "failed",
-        "divergent": divergent,
-    }
-
-
-QUEUE = {
-    "updated": NOW, "daemon_alive": True, "refresh_age": 4,
-    "running": [queue_record(0, "running", "running")],
-    "queued": [queue_record(1, "queued", "queued"), queue_record(2, "queued", "queued")],
-    "recent": [queue_record(index + 3, state, "recent") for index, state in enumerate(QUEUE_STATES)]
-              + [deep_record(index) for index in range(40 - len(QUEUE_STATES))],
-}
 
 ACCOUNTS = {
     "at": NOW,
@@ -585,7 +487,6 @@ HEALTH_READY = [
     {"id": "codex", "label": "codex", "state": "off", "detail": "switched off in the policy file", "fix": ""},
     {"id": "gpu_sensor", "label": "nvidia-smi", "state": "ok", "detail": "one card reporting", "fix": ""},
     {"id": "cpu_temp_sensor", "label": "temperature sensor", "state": "ok", "detail": "reading from the package sensor", "fix": ""},
-    {"id": "ci_daemon", "label": "queue runner", "state": "ok", "detail": "running", "fix": ""},
     {"id": "sweep_timer", "label": "sweep timer", "state": "ok", "detail": "next run in nine minutes", "fix": ""},
     {"id": "office", "label": "head office", "state": "ok", "detail": "answered in 240 ms", "fix": ""},
 ]
@@ -606,8 +507,6 @@ HEALTH_ERROR = [
      "fix": "set FLEET_NVIDIA_SMI to the path of nvidia-smi"},
     {"id": "cpu_temp_sensor", "label": "temperature sensor", "state": "error",
      "detail": "The sensor package is installed but returned nothing.", "fix": "sudo sensors-detect"},
-    {"id": "ci_daemon", "label": "queue runner", "state": "error", "detail": "The runner is not answering.",
-     "fix": "fleet ci daemon start"},
     {"id": "sweep_timer", "label": "sweep timer", "state": "off", "detail": "not enabled on this machine",
      "fix": "fleet autosweep --enable"},
     {"id": "office", "label": "head office", "state": "missing", "detail": "no office to reach",
@@ -663,13 +562,6 @@ def models_now():
     return [row for row in MODELS + SENT["models"] if row["id"] not in SENT["removed"]]
 
 
-# A stage log the server had to cut. The page must say so and name the command that shows the
-# whole thing, which it cannot be trusted to do until a fixture is actually 256 KB long.
-TRUNCATED_LOG = "\n".join(
-    f"[12:{index // 60 % 60:02d}:{index % 60:02d}] step {index}: "
-    "compiled one module and wrote its output to the work tree" for index in range(4000)
-)[-256 * 1024:]
-
 # The five login states the account reader can report, each under the key the server sends it
 # in. The sentence is `sentence`, not `detail`: a page reading the wrong one drew five empty
 # tooltips and told nobody what to do about an account that is not logged in.
@@ -702,10 +594,6 @@ SERVICE_ROWS = [
     {"id": "agent_runner", "label": "agent runner", "unit": "fleet-daemon.service",
      "actions": ["start", "stop", "restart"], "verb": "fleet daemon", "fix": "fleet daemon start",
      "what": "respawns a lane that carries a restart policy until it delivers"},
-    {"id": "ci_runner", "label": "verification runner", "unit": "fleet-ci.service",
-     "actions": ["start", "stop", "restart"], "verb": "fleet ci daemon",
-     "fix": "fleet ci daemon start",
-     "what": "verifies one queued change at a time against main"},
     {"id": "sweep_timer", "label": "sweep timer", "unit": "fleet-sweep.timer",
      "actions": ["start", "stop"], "verb": "fleet autosweep", "fix": "fleet autosweep on",
      "what": "buries merged worktrees and resolved cards every few minutes"},
@@ -721,10 +609,8 @@ def services_for(state):
     for index, row in enumerate(SERVICE_ROWS):
         if state == "empty":
             live, detail = "inactive", "never started on this machine"
-        elif state == "error" and row["id"] in ("ci_runner", "sweep_timer"):
-            live = "failed" if row["id"] == "ci_runner" else "inactive"
-            detail = ("the unit exited with status 1" if live == "failed"
-                      else "not enabled on this machine")
+        elif state == "error" and row["id"] == "sweep_timer":
+            live, detail = "inactive", "not enabled on this machine"
         else:
             live, detail = "active", "running"
         if row["id"] == "dashboard":
@@ -777,19 +663,16 @@ def power_preview(action):
             "label": "Throttle the farm and stop new agents",
             "sentence": "Every agent already running keeps running. This caps every agent "
                         "already running at 40% of the CPU (about 5.6 of 14 cores) and 40% of "
-                        "this machine's memory, stops any new agent from being spawned, and "
-                        "releases the verification database.",
+                        "this machine's memory, and stops any new agent from being spawned.",
             "warnings": ["Nothing is lost, and nothing is stopped."],
             "lanes": [],
         }
     elif action == "drain":
         payload = {
             "label": "Drain the farm",
-            "sentence": f"This salvages and then stops the {len(lanes)} lane(s) below, stops "
-                        "the agent runner so nothing is respawned, and stops the verification "
-                        "database.",
-            "warnings": ["A verification in flight loses its verdict.",
-                         "A lane with no restart policy loses whatever salvage could not push.",
+            "sentence": f"This salvages and then stops the {len(lanes)} lane(s) below, and "
+                        "stops the agent runner so nothing is respawned.",
+            "warnings": ["A lane with no restart policy loses whatever salvage could not push.",
                          "This dashboard keeps running through all of it."],
             "lanes": lanes,
         }
@@ -798,7 +681,7 @@ def power_preview(action):
             "label": "Resume the farm",
             "sentence": "This starts the agent runner again, and it will respawn every until-pr "
                         "and until-merged lane from its brief, which spends subscription.",
-            "warnings": ["The verification database starts again at the next run."],
+            "warnings": [],
             "lanes": [row for row in lanes if row["restart"]],
         }
     else:
@@ -1061,7 +944,7 @@ def machine_plan(body):
 def config_for(state):
     # health_panel is off, as on every farm that has not set FLEET_DASH_HEALTH=on.
     features = {"hq": True, "slice": True, "gpu": True, "cpu_temp": True,
-                "ci_daemon": True, "forge": True, "health_panel": False}
+                "forge": True, "health_panel": False}
     if state == "error":
         features.update({"hq": False, "gpu": False, "cpu_temp": True})
     return {"title": "murmur", "version": "2026.09.21-a1b2c3d", "features": features,
@@ -1085,7 +968,6 @@ def pending_payload(path):
     if path == "/api/config":
         answer = config_for("ready")
         answer["features"]["slice"] = False
-        answer["features"]["ci_daemon"] = False
         answer["pending"] = iso()
         return answer
     key = {"/api/health": "checks", "/api/mail/boxes": "boxes", "/api/mail/thread": "messages",
@@ -1096,14 +978,11 @@ def pending_payload(path):
 
 
 def quiet_payload(path, query):
-    """The three things the live farm showed that no other state here produces: a queue with
-    nothing running and nothing waiting, lane names too long for a card, and an office holding
-    two inbox issues under one name. Everything else in this state is the ready farm."""
+    """What a busy farm shows that no other state here produces: lane names too long for a
+    card, an office holding two inbox issues under one name, and a provider that did not answer
+    in time. Everything else in this state is the ready farm."""
     if path == "/api/fleet":
         return 200, AGENTS + LONG_AGENTS
-    if path == "/api/ci":
-        return 200, {"updated": NOW, "daemon_alive": True, "refresh_age": 2,
-                     "running": [], "queued": [], "recent": QUEUE["recent"]}
     if path == "/api/mail/boxes":
         return 200, envelope(boxes=MAIL_BOXES_DOUBLED)
     if path == "/api/hosts":
@@ -1156,7 +1035,7 @@ def payload_for(state, path, query):
         return 200, {"setting": "auto", "effective": "full", "gpu_util": 22, "allow_spawn": True,
                      "cpu_quota_pct": None, "cpu_cores": None, "cores_total": 14,
                      "mem_high_pct": None, "mem_high_gb": None, "ram_total_gb": 64.0,
-                     "ram_free_gb": 28.4, "ci_ram_released": True}
+                     "ram_free_gb": 28.4}
     if path == "/api/sweep":
         if state == "error":
             return 200, {"enabled": False, "secs_left": None, "result": None}
@@ -1181,27 +1060,6 @@ def payload_for(state, path, query):
         return 200, {"slug": slug, "file": f"/home/farm/.fleet/logs/{slug}.log",
                      "lines": LOG_LINES[-tail:], "truncated": tail < len(LOG_LINES),
                      "missing": False}
-    if path == "/api/ci":
-        if state == "empty":
-            return 200, {"updated": NOW, "daemon_alive": True, "refresh_age": 1,
-                         "running": [], "queued": [], "recent": []}
-        if state == "error":
-            return 500, {"error": "the queue runner is not answering"}
-        return 200, QUEUE
-    if path == "/api/ci/log":
-        run_id = query.get("id", [""])[0]
-        tier = query.get("tier", [""])[0]
-        if state == "empty":
-            return 200, {"id": run_id, "tier": tier, "content": "", "truncated": False,
-                         "missing": True, "message": "No log was recorded for this stage."}
-        if not run_id or not tier:
-            return 400, {"error": "a log needs a run and a stage"}
-        # One stage carries a log the server had to cut, so the page can be made to say so.
-        if tier in ("unit tests", "browser"):
-            return 200, {"id": run_id, "tier": tier, "content": TRUNCATED_LOG,
-                         "truncated": True, "missing": False}
-        return 200, {"id": run_id, "tier": tier, "content": "\n".join(LOG_LINES[:40]),
-                     "truncated": False, "missing": False}
     if path == "/api/services":
         if state == "error":
             # A farm with no systemd user manager is a farm that cannot answer this, and it says
@@ -1312,11 +1170,11 @@ def payload_for(state, path, query):
 
 # --------------------------------------------------------------------- the harness
 
-# The Queue and Machine views live in their own files and are registered by index.html and
-# app.js, which another lane owns. This page is the same shell around the same two modules, so
-# the two views can be opened, measured and photographed on their own before the page that
-# links them exists. It reads the same routes, on the same three second tick, through the same
-# core modules: nothing about the views is stubbed here.
+# The Machine view, alone in a small shell: no header controls and no palette, so a check
+# measures that view and nothing else on the page. It reads the same routes, on the same three
+# second tick, through the same core modules: nothing about the view is stubbed here. The one
+# other tab, #/elsewhere, is empty: it is there so a check can leave the Machine tab the way a
+# reader does and see the view's own clocks stop.
 HARNESS = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -1324,7 +1182,6 @@ HARNESS = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>murmur</title>
 <link rel="stylesheet" href="/static/app.css">
-<link rel="stylesheet" href="/static/queue.css">
 <link rel="stylesheet" href="/static/models.css">
 <link rel="stylesheet" href="/static/machine.css">
 <link rel="stylesheet" href="/static/hosting.css">
@@ -1335,9 +1192,6 @@ HARNESS = r"""<!doctype html>
     <div class="side-head"><span class="mark" aria-hidden="true"></span>
       <span class="mark-name" id="sidebarTitle">murmur</span></div>
     <nav id="navlinks">
-      <a class="navlink" href="#/queue"><svg viewBox="0 0 24 24" aria-hidden="true"><path
-        d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2"
-        stroke-linecap="round"/></svg><span class="label">Queue</span></a>
       <a class="navlink" href="#/machine"><svg viewBox="0 0 24 24" aria-hidden="true"><path
         d="M6 6h12v12H6z" fill="none" stroke="currentColor" stroke-width="2"/><path
         d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" stroke="currentColor"
@@ -1372,13 +1226,13 @@ HARNESS = r"""<!doctype html>
 import * as api from "/static/core/api.js";
 import * as identity from "/static/core/identity.js";
 import { render, paintDrawer, closeDrawer } from "/static/core/ui.js";
-import queue from "/static/views/queue.js";
 import machine from "/static/views/machine.js";
 
-const VIEWS = new Map([[queue.id, queue], [machine.id, machine]]);
+const elsewhere = { id: "elsewhere", title: "Elsewhere", needs: [], render: () => [] };
+const VIEWS = new Map([[machine.id, machine], [elsewhere.id, elsewhere]]);
 const ALWAYS = ["/api/config", "/api/access", "/api/identities"];
 const extra = new Set();
-const state = { view: "queue", params: new URLSearchParams(), project: "" };
+const state = { view: "machine", params: new URLSearchParams(), project: "" };
 
 const context = {
   get config() { return api.resource("/api/config").data || { title: "murmur", features: {} }; },
@@ -1405,7 +1259,7 @@ const context = {
   async refresh(path) { await api.refresh(path); paint(); },
 };
 
-function current() { return VIEWS.get(state.view) || queue; }
+function current() { return VIEWS.get(state.view) || machine; }
 
 function paths() {
   const view = current();
@@ -1440,9 +1294,9 @@ async function tick(force) {
 }
 
 function route() {
-  const raw = (location.hash || "#/queue").replace(/^#\/?/, "");
+  const raw = (location.hash || "#/machine").replace(/^#\/?/, "");
   const [path, query = ""] = raw.split("?");
-  const id = path.split("/")[0] || "queue";
+  const id = path.split("/")[0] || "machine";
   if (!VIEWS.has(id)) return;
   if (id !== state.view) { extra.clear(); closeDrawer(); }
   state.view = id;
@@ -1636,27 +1490,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                       "resume": "starting the agent runner again"}[action]
             return self._json(200, {"ok": True,
                                     "job": job_new(action, detail, fails=self.state() == "error")})
-        if parsed.path == "/api/ci/enqueue":
-            project = str(body.get("project", "")).strip()
-            number = body.get("pr")
-            try:
-                number = int(number)
-            except (TypeError, ValueError):
-                number = 0
-            if not project or number <= 0:
-                return self._json(400, {"error": "a verification needs a project and the number "
-                                                 "of a change"})
-            # One number the runner always refuses, so a failed job can be seen on purpose.
-            fails = number == 999
-            return self._json(200, {"ok": True, "job": job_new(
-                "verify a change", f"{project} #{number}", fails=fails)})
-        if parsed.path == "/api/ci/cancel":
-            wanted = str(body.get("id", ""))
-            known = [row["id"] for bucket in ("running", "queued", "recent")
-                     for row in QUEUE[bucket]]
-            if wanted not in known:
-                return self._json(404, {"error": "there is no run with that id"})
-            return self._json(200, {"ok": True, "id": wanted})
         if parsed.path == "/api/accounts/add":
             engine = (body.get("engine") or "claude").strip()
             if engine == "codex":

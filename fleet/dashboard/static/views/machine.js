@@ -207,8 +207,8 @@ function confirmBody(context, action) {
           }, h("span", { class: "mono" }, lane.slug),
             h("span", { class: "muted" }, lane.restart ? ` restarts as ${lane.restart}` : " has no restart policy")))) : null,
           h("p", { key: "two" },
-            "It stops the agent runner and the verification database. A run in flight loses its "
-            + "verdict. A lane with no restart policy loses whatever salvage could not push."),
+            "It stops the agent runner. A lane with no restart policy loses whatever salvage "
+            + "could not push."),
           h("p", { key: "three" }, "This page keeps running."),
         ];
       }

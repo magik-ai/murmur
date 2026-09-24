@@ -21,10 +21,6 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const STATES = ["ready", "empty", "error", "loading", "quiet"];
 const SIZES = [{ width: 1440, height: 1000 }, { width: 390, height: 844 }];
 
-/* The failed requests a state is meant to produce. The browser logs one console line for each;
-   that line is the fixture working, not the page breaking. */
-const EXPECTED_REQUEST_FAILURES = { error: ["/api/ci"] };
-
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKqkqLp0m1n2o3p4q5r6s7t8u9v0w1x2y3z4a5b6c7d8 you@laptop";
 
 const results = [];
@@ -212,14 +208,10 @@ for (const state of STATES) {
     });
     const page = await context.newPage();
     const problems = [];
-    const allowed = EXPECTED_REQUEST_FAILURES[state] || [];
     page.on("pageerror", (error) => problems.push(`uncaught: ${error.message}`));
     page.on("console", (message) => {
       if (message.type() !== "error") return;
-      const said = message.text();
-      if (said.includes("Failed to load resource")
-        && allowed.some((route) => message.location().url.includes(route))) return;
-      problems.push(said);
+      problems.push(message.text());
     });
     for (const screen of SCREENS) {
       await page.goto(`${BASE}/harness?state=${state}#/machine`, { waitUntil: "domcontentloaded" });

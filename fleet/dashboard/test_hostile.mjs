@@ -71,7 +71,6 @@ const text = (page) => page.evaluate(() => document.getElementById("view").inner
 /* ------------------------------------------- a body that is not the shape it claims to be */
 
 for (const [route, hash, name] of [
-  ["/api/ci", "#/queue", "queue"],
   ["/api/metrics", "#/board", "the machine strip"],
   ["/api/accounts", "#/board", "the accounts strip"],
   ["/api/fleet", "#/board", "the agents pane"],
@@ -233,12 +232,11 @@ for (const [from, wanted, name] of [
   await context.close();
 }
 
-/* The queue lives on its own tab (owner ruling 2026-09-22). The Board is the two strips and the
-   agents at full width, every machine tile one height with its note on the bottom edge, and
-   every subscription in one row. */
+/* The Board is the two strips and the agents at full width, every machine tile one height with
+   its note on the bottom edge, and every subscription in one row. */
 
 {
-  const { page, context, thrown, asked } = await open({ hash: "#/board" });
+  const { page, context, thrown } = await open({ hash: "#/board" });
   await page.waitForTimeout(800);
   const seen = await page.evaluate(() => {
     const tiles = [...document.querySelectorAll(".machine-strip .tile")];
@@ -251,7 +249,6 @@ for (const [from, wanted, name] of [
     const canvas = document.querySelector(".board-canvas");
     const agents = document.querySelector(".agents-pane");
     return {
-      queue: Boolean(document.querySelector(".queue-pane, .splitter")),
       tiles: tiles.length,
       oneHeight: Math.max(...heights) - Math.min(...heights) <= 1,
       notesAtBottom: bottomsMatch,
@@ -260,8 +257,6 @@ for (const [from, wanted, name] of [
       full: agents.getBoundingClientRect().width >= canvas.getBoundingClientRect().width - 2,
     };
   });
-  check("nothing of the queue is on the Board", !seen.queue, JSON.stringify(seen));
-  check("the Board never asks for the queue", !asked.some((url) => url.includes("/api/ci")), asked.join(" "));
   check("every machine tile is one height with its note on the bottom edge",
     seen.tiles >= 5 && seen.oneHeight && seen.notesAtBottom, JSON.stringify(seen));
   check("every subscription sits in one row", seen.accounts >= 4 && seen.oneRow, JSON.stringify(seen));
@@ -1178,7 +1173,7 @@ for (const width of [700, 1024, 1280, 1440]) {
 
 /* ------------------------------------------------------- the palette, from every tab */
 
-for (const [hash, name] of [["#/mail", "mail"], ["#/queue", "queue"], ["#/machine", "machine"]]) {
+for (const [hash, name] of [["#/mail", "mail"], ["#/machine", "machine"]]) {
   const { page, context, thrown } = await open({ hash });
   await page.keyboard.press("Meta+k");
   await page.waitForTimeout(400);

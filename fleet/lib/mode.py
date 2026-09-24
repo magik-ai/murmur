@@ -51,17 +51,16 @@ import metrics as M  # noqa: E402
 # share when NOT quota-bound (100 = default, lower = yields); allow_spawn = accept new agents.
 # mem_high_pct = share of machine RAM the farm may hold before the kernel starts reclaiming from
 # it (None = uncapped). MemoryHigh throttles rather than kills, so a squeezed lane slows down
-# instead of losing its work. release_ci_ram = also stop the CI Postgres when idle; its data dir is
-# a 6 GB tmpfs, which is RAM, and it is the largest single thing the farm holds.
+# instead of losing its work.
 DEFAULT_PROFILES = {
     "full":     {"cpu_quota_pct": None, "cpu_weight": 100, "allow_spawn": True,
-                 "mem_high_pct": None, "release_ci_ram": False},
+                 "mem_high_pct": None},
     "soft":     {"cpu_quota_pct": 50,   "cpu_weight": 40,  "allow_spawn": True,
-                 "mem_high_pct": 60,   "release_ci_ram": False},
+                 "mem_high_pct": 60},
     "balanced": {"cpu_quota_pct": 35,   "cpu_weight": 20,  "allow_spawn": False,
-                 "mem_high_pct": 40,   "release_ci_ram": True},
+                 "mem_high_pct": 40},
     "hard":     {"cpu_quota_pct": 20,   "cpu_weight": 10,  "allow_spawn": False,
-                 "mem_high_pct": 25,   "release_ci_ram": True},
+                 "mem_high_pct": 25},
 }
 DEFAULT_AUTO = {
     "auto_enter_gpu": 25,   # GPU util % that reads as "a game is running" -> throttle
@@ -257,10 +256,6 @@ def resolve_effective(setting, gpu_util, rt, auto, sensor_present=False):
 
 
 
-CI_SLICE = "fleet-ci.slice"
-CI_PG_CONTAINER = "fleet-ci-postgres"
-
-
 def _ram_free_gb():
     try:
         with open("/proc/meminfo") as handle:
@@ -276,17 +271,6 @@ def _ram_free_gb():
     return None
 
 
-def _ci_pg_running():
-    try:
-        out = subprocess.run(
-            ["docker", "ps", "--filter", f"name=^{CI_PG_CONTAINER}$", "--format", "{{.Names}}"],
-            capture_output=True, text=True, timeout=10,
-        ).stdout.strip()
-        return out == CI_PG_CONTAINER
-    except Exception:
-        return True
-
-
 def _machine_ram_bytes():
     try:
         with open("/proc/meminfo") as handle:
@@ -296,29 +280,6 @@ def _machine_ram_bytes():
     except OSError:
         pass
     return 8 * 1024 ** 3
-
-
-def _ci_run_active():
-    """True if a candidate is mid-flight. Never take RAM from a run that is using it."""
-    try:
-        import json
-        state = os.path.expanduser(os.environ.get("FLEET_STATE", "~/.fleet"))
-        with open(os.path.join(state, "ci", "queue.json")) as handle:
-            payload = json.load(handle)
-        return bool(payload.get("running"))
-    except Exception:
-        # Unreadable means unknown, and unknown means hands off.
-        return True
-
-
-def _release_ci_ram():
-    """Stop the CI Postgres so its tmpfs is handed back. ensure_ci_postgres() recreates it on the
-    next run, so the cost is a few seconds there and nothing else."""
-    if _ci_run_active():
-        return False
-    subprocess.run(["docker", "stop", CI_PG_CONTAINER],
-                   capture_output=True, timeout=60)
-    return True
 
 
 def _apply(profile_name, profs):
@@ -338,13 +299,10 @@ def _apply(profile_name, profs):
         mem_high = ""                                # empty removes the cap
     else:
         mem_high = f"{max(1, round(_machine_ram_bytes() * mem_pct / 100 / (1024 ** 2)))}M"
-    for slice_name in (SLICE, CI_SLICE):
-        subprocess.run(
-            ["systemctl", "--user", "set-property", slice_name,
-             f"CPUQuota={quota}", f"CPUWeight={weight}", f"MemoryHigh={mem_high}"],
-            capture_output=True)
-    if prof.get("release_ci_ram"):
-        _release_ci_ram()
+    subprocess.run(
+        ["systemctl", "--user", "set-property", SLICE,
+         f"CPUQuota={quota}", f"CPUWeight={weight}", f"MemoryHigh={mem_high}"],
+        capture_output=True)
 
 
 def tick(force=False):
@@ -386,7 +344,6 @@ def tick(force=False):
         else round(_machine_ram_bytes() * prof["mem_high_pct"] / 100 / 1024 ** 3, 1),
         "ram_total_gb": round(_machine_ram_bytes() / 1024 ** 3, 1),
         "ram_free_gb": _ram_free_gb(),
-        "ci_ram_released": bool(prof.get("release_ci_ram")) and not _ci_pg_running(),
     }
 
 
@@ -413,7 +370,6 @@ def status():
         else round(_machine_ram_bytes() * prof["mem_high_pct"] / 100 / 1024 ** 3, 1),
         "ram_total_gb": round(_machine_ram_bytes() / 1024 ** 3, 1),
         "ram_free_gb": _ram_free_gb(),
-        "ci_ram_released": bool(prof.get("release_ci_ram")) and not _ci_pg_running(),
     }
 
 

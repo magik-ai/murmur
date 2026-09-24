@@ -41,7 +41,6 @@ from urllib.parse import parse_qs, unquote, urlparse
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET_HOME = os.path.dirname(HERE)          # the checkout this file lives in, never a fixed path
 sys.path.insert(0, os.path.join(FLEET_HOME, "lib"))
-import ci as CI  # noqa: E402
 import metrics as M  # noqa: E402
 import identity as ID  # noqa: E402
 import claude_accounts as CA  # noqa: E402
@@ -114,9 +113,7 @@ def ensure_token():
 
 
 TOKEN = os.environ.get("FLEET_DASH_TOKEN", "").strip() or stored_token()
-CI_LOG_TAIL_BYTES = 256 * 1024
 MAX_BODY_BYTES = 256 * 1024
-CI_DAEMON_UNIT = "fleet-ci.service"
 DAEMON_UNIT = "fleet-daemon.service"
 SWEEP_TIMER_UNIT = "fleet-sweep.timer"
 # The tmux session `dashboard/run.sh` starts this server in. The variable exists so a suite can
@@ -245,7 +242,7 @@ def measured_features():
     """The features that have to ask the user manager. Only the refresher calls this: this
     route is open, so anyone who can reach the port could otherwise spend two process spawns
     per request, with no token and nothing to rate limit them."""
-    return {"slice": unit_loaded(MODE.SLICE), "ci_daemon": unit_loaded(CI_DAEMON_UNIT)}
+    return {"slice": unit_loaded(MODE.SLICE)}
 
 
 def config_refresh():
@@ -269,7 +266,6 @@ def config_payload():
             "slice": bool(units.get("slice")),
             "gpu": free["gpu"],
             "cpu_temp": free["cpu_temp"],
-            "ci_daemon": bool(units.get("ci_daemon")),
             "forge": free["forge"],
             "health_panel": free["health_panel"],
         },
@@ -280,8 +276,8 @@ def config_payload():
         # The name a person types after `ssh -t` to reach this farm, for every command the page
         # hands them to run elsewhere. Never a secret: it is the alias in their own ssh config.
         "farm_alias": CA.FARM_ALIAS,
-        # True until the refresher's first pass: the two unit facts above are not known yet and
-        # are reported as absent, which is the safe way round for a page deciding what to draw.
+        # True until the refresher's first pass: the unit fact above is not known yet and is
+        # reported as absent, which is the safe way round for a page deciding what to draw.
         "pending": not snapshot.get("tried"),
     }
 
@@ -290,64 +286,6 @@ def config_payload():
 CI_CACHE = {}
 _UNREADABLE_REPORTED = set()
 
-
-_CI_REFRESH_TTL = 2.0
-_ci_refresh_cache = {"at": 0.0, "value": None, "stamp": None}
-_ci_refresh_lock = threading.Lock()
-# Set by a request that met a queue the refresher has not observed yet, so the next pass happens
-# in a moment instead of at the end of the current sleep.
-_ci_refresh_wake = threading.Event()
-
-
-
-def _ci_state_stamp(payload):
-    """What the observations actually depend on: which candidates exist, and their states."""
-    if not isinstance(payload, dict):
-        return None
-    rows = []
-    for bucket in ("running", "queued", "recent"):
-        for item in payload.get(bucket) or []:
-            if isinstance(item, dict):
-                rows.append((bucket, item.get("id"), item.get("state")))
-    return tuple(rows)
-
-
-def ci_refresh_once():
-    """One observation pass over the queue. Runs git and gh, so only the refresher calls it."""
-    try:
-        refreshed = CI.read_state(refresh=True)
-    except Exception:
-        return
-    if not isinstance(refreshed, dict):
-        return
-    stamp = _ci_state_stamp(refreshed)
-    with _ci_refresh_lock:
-        _ci_refresh_cache["value"] = refreshed
-        _ci_refresh_cache["at"] = time.time()
-        _ci_refresh_cache["stamp"] = stamp
-
-
-def _ci_refresher(interval=15.0):
-    """Keep the observation snapshot warm off the request path.
-
-    A failure here must leave the previous snapshot alone rather than blank the pane: "the forge is
-    unreachable" and "there is nothing to show" look identical once the value is gone, and only one
-    of them is true.
-    """
-    while True:
-        # Cleared before the pass, never after it: a request that arrives while this one runs is
-        # asking about a queue this pass may not have seen.
-        _ci_refresh_wake.clear()
-        ci_refresh_once()
-        # A wait rather than a sleep: a page that opened on a queue nobody has observed yet is
-        # answered on the next pass instead of at the end of this one.
-        _ci_refresh_wake.wait(interval)
-
-
-def start_ci_refresher():
-    thread = threading.Thread(target=_ci_refresher, name="ci-refresher", daemon=True)
-    thread.start()
-    return thread
 
 ACCOUNTS_REFRESH_SECONDS = 600  # owner's cadence: each refresh is one API call per account
 # "Refresh now" on the page. One press is one request per account to the vendor, so a second
@@ -649,172 +587,6 @@ def accounts_refresh_request(now=None):
                            "seconds."}
 
 
-def ci_queue(refresh=True):
-    """The local-CI queue written by Fleet's CI coordinator.
-
-    The dashboard is also useful before that coordinator has ever run, so a
-    missing file is a normal empty queue rather than an error.  Validate the
-    stored payload before asking the coordinator for its refreshed view: if
-    refresh is temporarily unavailable, the dashboard can still render the
-    same last-known queue it rendered before freshness observations existed.
-    """
-    # A stale `updated` is only meaningful next to "is anything still writing this?". Without it
-    # the pane ages silently and reads as live data that simply has not changed. The answer comes
-    # from the services snapshot, never from a call on this request: this route is drawn every
-    # few seconds by every open page.
-    def _daemon_alive():
-        return service_alive("ci_runner")
-
-    empty = {"updated": None, "running": [], "queued": [], "recent": [],
-             "daemon_alive": _daemon_alive()}
-    try:
-        with open(os.path.join(STATE, "ci", "queue.json")) as f:
-            stored = json.load(f)
-    except (OSError, json.JSONDecodeError, UnicodeError):
-        return empty
-    if not isinstance(stored, dict):
-        return empty
-
-    def shaped(payload):
-        return {
-            "updated": payload.get("updated"),
-            "running": (
-                payload.get("running")
-                if isinstance(payload.get("running"), list)
-                else []
-            ),
-            "queued": (
-                payload.get("queued")
-                if isinstance(payload.get("queued"), list)
-                else []
-            ),
-            "recent": (
-                payload.get("recent")
-                if isinstance(payload.get("recent"), list)
-                else []
-            ),
-            # Without this the pane cannot tell "nothing has happened" from "nothing is writing
-            # this any more", and a stale timestamp reads as live data.
-            "daemon_alive": _daemon_alive(),
-        }
-
-    if not refresh:
-        return shaped(stored)
-    # Never block a draw on the forge. The refresher thread publishes here; until it has produced
-    # anything we serve the stored queue, which is what the dashboard rendered before observations
-    # existed at all.
-    # A snapshot built from a different queue file is not a stale view of this one, it is an
-    # answer about something else. Key it on the file it was built from.
-    stamp = _ci_state_stamp(stored)
-    with _ci_refresh_lock:
-        snapshot = _ci_refresh_cache["value"]
-        produced = _ci_refresh_cache["at"]
-        if _ci_refresh_cache.get("stamp") != stamp:
-            snapshot = None
-    if snapshot is not None:
-        view = shaped(snapshot)
-        view["refresh_age"] = max(0, int(time.time() - produced))
-        return view
-    # Nothing published for THIS queue yet: the first draw after a restart, or a queue that moved
-    # under the refresher. Serve what is on disk and wake the refresher, which owns it from here.
-    # Paying for the refresh inline was a read that ran git and gh and wrote the state file back,
-    # and several panes poll this route every few seconds.
-    _ci_refresh_wake.set()
-    return shaped(stored)
-
-
-def ci_log_tail(candidate_id, tier_name):
-    """Return a bounded log tail for one stage of one known CI record.
-
-    Callers identify the record and stage, never a filesystem path. The path is
-    taken from that stage's queue record and must still resolve beneath the
-    record's canonical log directory; this also rejects a symlink escaping it.
-    """
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", candidate_id or ""):
-        return 400, {"error": "invalid CI run id"}
-    if not tier_name:
-        return 400, {"error": "CI stage is required"}
-
-    state = ci_queue(refresh=False)
-    record = next(
-        (
-            item
-            for bucket in ("running", "queued", "recent")
-            for item in state.get(bucket, [])
-            if isinstance(item, dict)
-            if item.get("id") == candidate_id
-        ),
-        None,
-    )
-    if record is None:
-        return 404, {"error": "CI run not found"}
-    tier = next(
-        (
-            item
-            for item in (
-                record.get("tiers", [])
-                if isinstance(record.get("tiers"), list)
-                else []
-            )
-            if isinstance(item, dict)
-            if item.get("name") == tier_name
-        ),
-        None,
-    )
-    if tier is None:
-        return 404, {"error": "CI stage not found"}
-
-    response = {"id": candidate_id, "tier": tier_name}
-    stored_path = tier.get("log")
-    if not stored_path:
-        return 200, {
-            **response,
-            "content": "",
-            "missing": True,
-            "message": "No action log was recorded for this stage.",
-            "truncated": False,
-        }
-
-    run_root = os.path.realpath(
-        os.path.join(STATE, "ci", "logs", candidate_id)
-    )
-    requested = os.path.expanduser(str(stored_path))
-    if not os.path.isabs(requested):
-        requested = os.path.join(run_root, requested)
-    resolved = os.path.realpath(requested)
-    try:
-        inside_run = os.path.commonpath([run_root, resolved]) == run_root
-    except ValueError:
-        inside_run = False
-    if not inside_run:
-        return 403, {"error": "CI log path is outside this run's log directory"}
-    if not os.path.isfile(resolved):
-        return 200, {
-            **response,
-            "content": "",
-            "missing": True,
-            "message": "The action log is not available yet.",
-            "truncated": False,
-        }
-
-    try:
-        size = os.path.getsize(resolved)
-        start = max(0, size - CI_LOG_TAIL_BYTES)
-        with open(resolved, "rb") as handle:
-            handle.seek(start)
-            content = handle.read(CI_LOG_TAIL_BYTES).decode(
-                "utf-8", errors="replace"
-            )
-    except OSError:
-        return 500, {"error": "The action log could not be read."}
-    return 200, {
-        **response,
-        "content": content,
-        "missing": False,
-        "truncated": start > 0,
-    }
-
-
 def static_file(name):
     """(status, body, content type) for one file under `dashboard/static`.
 
@@ -887,10 +659,10 @@ def _check_systemd_user():
     word = (out or err).strip().splitlines()[0] if (out or err).strip() else ""
     if rc == 127:
         # Lanes themselves run in tmux, so this is not what stops work. What needs a user
-        # manager is the CPU cap behind the power modes, the CI daemon, the sweep timer and
-        # the dashboard's own unit.
-        return "off", ("no user manager here, so the power modes, the CI daemon and the sweep "
-                       "timer are unavailable; lanes themselves run in tmux and are fine"), \
+        # manager is the CPU cap behind the power modes, the sweep timer and the dashboard's
+        # own unit.
+        return "off", ("no user manager here, so the power modes and the sweep timer are "
+                       "unavailable; lanes themselves run in tmux and are fine"), \
             "run this farm on a machine with a systemd user manager to get those"
     if word in ("running", "degraded", "starting", "maintenance"):
         return "ok", f"user manager is {word}", ""
@@ -962,21 +734,6 @@ def _check_cpu_temp_sensor():
         "set FLEET_LHM_URL to a hardware monitor endpoint if this machine has one"
 
 
-def _check_ci_daemon():
-    rc, out, err = run_tool(["systemctl", "--user", "is-active", CI_DAEMON_UNIT])
-    answer = (out or "").strip()
-    if answer == "active":
-        return "ok", "verifying candidates before merge", ""
-    if rc == 127:
-        return "off", "no user manager here, so there is no CI daemon to run", \
-            "run this farm on a machine with a systemd user manager"
-    if answer in ("inactive", "failed", "unknown", "activating", "deactivating", ""):
-        detail = ("the queue is not being worked" if answer != "failed"
-                  else "the unit failed; the queue is not being worked")
-        return "off", detail, "fleet ci daemon start"
-    return "error", (err or answer).strip()[:200], "fleet ci daemon start"
-
-
 def _check_sweep_timer():
     state = sweep_status()
     if state.get("enabled"):
@@ -1011,7 +768,6 @@ HEALTH_CHECKS = (
     ("codex", "Codex engine", _check_codex),
     ("gpu_sensor", "GPU sensor", _check_gpu_sensor),
     ("cpu_temp_sensor", "CPU temperature sensor", _check_cpu_temp_sensor),
-    ("ci_daemon", "farm CI daemon", _check_ci_daemon),
     ("sweep_timer", "sweep timer", _check_sweep_timer),
     ("office", "head office reachable", _check_office_reachable),
 )
@@ -1025,7 +781,7 @@ def run_health_checks():
             state, detail, fix = check()
         except Exception as exc:
             # A broken check is a fact about this machine, not a reason to lose the other
-            # eleven rows, and never a traceback on a page.
+            # rows, and never a traceback on a page.
             state, detail, fix = "error", f"{type(exc).__name__}: {exc}"[:200], ""
         rows.append({"id": identifier, "label": label, "state": state,
                      "detail": detail, "fix": fix})
@@ -1418,10 +1174,10 @@ def select_models_request(body):
 
 # ---------------------------------------------------------------- services
 #
-# Four rows in the machine's control room: the agent runner, the verification runner, the sweep
-# timer, and this dashboard. Every fact here costs a process, so all four are read by the 45
-# second refresher and NEVER on a request: a page redrawing every few seconds would otherwise ask
-# systemd a few thousand questions an hour.
+# Three rows in the machine's control room: the agent runner, the sweep timer, and this
+# dashboard. Every fact here costs a process, so all three are read by the 45 second refresher
+# and NEVER on a request: a page redrawing every few seconds would otherwise ask systemd a few
+# thousand questions an hour.
 #
 # The dashboard's own row is read from its tmux session and its listening socket, the two things
 # `dashboard/run.sh status` looks at, and it is read-only: a page that can stop itself answers the
@@ -1437,11 +1193,6 @@ SERVICE_UNITS = (
      "stopped": "stopped, so no lane is respawned when it ends before delivering",
      "verb": "fleet daemon", "start": ["daemon", "start"], "stop": ["daemon", "stop"],
      "fix": "fleet daemon start"},
-    {"id": "ci_runner", "label": "Verification runner", "unit": CI_DAEMON_UNIT,
-     "what": "verifies one queued change at a time against main",
-     "stopped": "stopped, so the queue is not being worked",
-     "verb": "fleet ci daemon", "start": ["ci", "daemon", "start"],
-     "stop": ["ci", "daemon", "stop"], "fix": "fleet ci daemon start"},
     {"id": "sweep_timer", "label": "Sweep timer", "unit": SWEEP_TIMER_UNIT,
      "what": "buries merged worktrees and resolved cards every few minutes",
      "stopped": "off, so nothing buries merged worktrees or resolved cards",
@@ -1625,7 +1376,7 @@ def services_refresh():
             rows.append(_unit_row(spec))
         except Exception as exc:
             # One row that will not read is a fact about that unit, not a reason to lose the
-            # other three, and never a traceback on a page.
+            # others, and never a traceback on a page.
             rows.append({"id": spec["id"], "label": spec["label"], "unit": spec["unit"],
                          "what": spec["what"], "verb": spec["verb"], "state": "unknown",
                          "detail": f"this farm could not read {spec['unit']}"
@@ -1654,13 +1405,6 @@ def service_row(identifier):
         if row.get("id") == identifier:
             return row
     return None
-
-
-def service_alive(identifier):
-    """True, False, or None when nothing has been read yet. The third answer matters: "nothing
-    is working the queue" and "nobody has looked" are different sentences."""
-    row = service_row(identifier)
-    return None if row is None else row.get("state") == "active"
 
 
 # `fleet autosweep on` writes two unit files and reloads the user manager; the others enable a
@@ -1708,7 +1452,7 @@ def service_action(body):
 # ------------------------------------------------------------ the machine's live numbers
 #
 # Load, memory, GPU, the power mode and the sweep countdown. Each of these asks the machine
-# something (a sensor, docker, the user manager), so they are read on their own short cadence and
+# something (a sensor, the user manager), so they are read on their own short cadence and
 # served from memory. Five seconds is faster than a person perceives and is a fixed cost, where a
 # read path was a cost per open page per tick.
 
@@ -1772,7 +1516,7 @@ def start_machine_refresher():
 
 # ---------------------------------------------------------------- long actions, as jobs
 #
-# A write that can outlast a request (draining the farm, resuming it, queueing a verification)
+# A write that can outlast a request (draining the farm, resuming it, adding a project)
 # answers at once with a job id and runs on a thread of its own. The record is a file under
 # $FLEET_STATE/jobs, so a page that was reloaded, or a second page, can still read what happened;
 # and a second press of a running action is refused rather than quietly run twice.
@@ -2173,7 +1917,7 @@ def add_project(body):
     never a second writer of the same file: a page that edited projects.toml itself would be a
     second implementation of the one thing that knows how to refuse a duplicate.
 
-    It answers 202 and a job id, like drain and enqueue: `fleet add-project` clones the
+    It answers 202 and a job id, like drain and resume: `fleet add-project` clones the
     repository, so holding the connection open for it meant a browser waiting up to five
     minutes, an outcome lost on a reload, and a second press starting a second clone because
     nothing was there to refuse it.
@@ -2643,10 +2387,9 @@ def agent_kill(body):
 #
 # Three actions, labelled as what they do. There is no spawn-only pause verb on this farm, so the
 # control that stops new agents is `fleet mode balanced`, which also caps the CPU and memory of
-# every agent already running and releases the verification database. Draining is
-# `fleet game-mode on`: it salvages and kills every live lane, stops the agent runner and stops
-# the verification database. Resuming is `fleet game-mode off`, and the runner it starts respawns
-# every until-pr and until-merged lane, which spends subscription.
+# every agent already running. Draining is `fleet game-mode on`: it salvages and kills every live
+# lane and stops the agent runner. Resuming is `fleet game-mode off`, and the runner it starts
+# respawns every until-pr and until-merged lane, which spends subscription.
 
 POWER_THROTTLE_TIMEOUT = 30    # writes a cgroup and answers
 POWER_DRAIN_TIMEOUT = 900      # salvage pushes one lane at a time, over the network
@@ -2712,19 +2455,16 @@ def power_preview(action):
     if action == "throttle":
         payload = {
             "label": "Throttle the farm and stop new agents",
-            "sentence": f"Every agent already running keeps running. This {_throttle_caps()}, "
-                        "stops any new agent from being spawned, and releases the verification "
-                        "database.",
+            "sentence": f"Every agent already running keeps running. This {_throttle_caps()} "
+                        "and stops any new agent from being spawned.",
             "warnings": ["Nothing is lost, and nothing is stopped."],
         }
     elif action == "drain":
         payload = {
             "label": "Drain the farm",
-            "sentence": f"This salvages and then stops the {len(lanes)} lane(s) below, stops the "
-                        "agent runner so nothing is respawned, and stops the verification "
-                        "database.",
-            "warnings": ["A verification in flight loses its verdict.",
-                         "A lane with no restart policy loses whatever salvage could not push.",
+            "sentence": f"This salvages and then stops the {len(lanes)} lane(s) below, and stops "
+                        "the agent runner so nothing is respawned.",
+            "warnings": ["A lane with no restart policy loses whatever salvage could not push.",
                          "This dashboard keeps running through all of it."],
         }
     else:
@@ -2732,7 +2472,7 @@ def power_preview(action):
             "label": "Resume the farm",
             "sentence": "This starts the agent runner again, and it will respawn every until-pr "
                         "and until-merged lane from its brief, which spends subscription.",
-            "warnings": ["The verification database starts again at the next run."],
+            "warnings": [],
         }
     payload.update({"action": action, "lanes": lanes, "lane_count": len(lanes),
                     "running_job": running})
@@ -2770,63 +2510,6 @@ def power_action(body):
     payload.update({"action": action, "lanes": preview["lanes"],
                     "lane_count": preview["lane_count"], "sentence": preview["sentence"]})
     return code, payload
-
-
-# ---------------------------------------------------------------- the verification queue
-#
-# Two writes: queue a change for verification, and cancel one. Both are validated here against
-# what this farm actually has, so a typo is a sentence on the page rather than a record in the
-# queue that nothing will ever pick up.
-
-CI_ENQUEUE_TIMEOUT = 120      # it writes a record, but it also resolves the change on the forge
-CI_CANCEL_TIMEOUT = 60
-CI_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-# A pull request number, as GitHub numbers them. Anything else was a typo or a path.
-PR_MAX = 10 ** 7
-
-
-def ci_enqueue(body):
-    """(status, payload) for POST /api/ci/enqueue."""
-    project = str(body.get("project") or "").strip()
-    raw = body.get("pr")
-    if not PROJECT_NAME.fullmatch(project) or project not in _projects_registry():
-        return 400, {"error": f"'{project}' is not a project registered on this farm",
-                     "projects": sorted(_projects_registry())}
-    try:
-        number = int(str(raw).strip())
-    except (TypeError, ValueError):
-        return 400, {"error": "a change is named by its number, for example 128"}
-    if not 0 < number < PR_MAX:
-        return 400, {"error": "a change number is a whole number above zero"}
-    # Options only, so no separator: lib/ci.py parses with argparse and every value below
-    # travels behind its own option.
-    args = [fleet_bin(), "ci", "enqueue", "--project", project, "--pr", str(number)]
-    code, payload = start_job("ci_enqueue", args, CI_ENQUEUE_TIMEOUT,
-                              label=f"Verifying {project} change {number}")
-    payload.update({"project": project, "pr": number})
-    return code, payload
-
-
-def ci_cancel(body):
-    """(status, payload) for POST /api/ci/cancel."""
-    run_id = str(body.get("id") or "").strip()
-    if not run_id or not CI_RUN_ID.fullmatch(run_id):
-        return 400, {"error": "invalid run id"}
-    queue = ci_queue(refresh=False)
-    known = [str(item.get("id")) for bucket in ("running", "queued")
-             for item in queue.get(bucket) or [] if isinstance(item, dict) and item.get("id")]
-    if run_id not in known:
-        # Cancelling a run that has already finished does nothing, and cancelling a name that was
-        # never in the queue would answer "cancellation requested" for nothing at all.
-        return 400, {"error": f"'{run_id}' is not running or waiting in this farm's queue",
-                     "runs": known}
-    # `--` first: lib/ci.py takes the run id as a POSITIONAL through argparse, which reads a
-    # leading dash as an option.
-    rc, out, err = run_tool([fleet_bin(), "ci", "cancel", "--", run_id],
-                            timeout=CI_CANCEL_TIMEOUT)
-    if rc != 0:
-        return 400, {"error": tool_message(rc, out, err, "fleet ci cancel"), "id": run_id}
-    return 200, {"ok": True, "id": run_id, "detail": (out or "").strip()[:200]}
 
 
 # ---------------------------------------------------------------- hosting: machines
@@ -4197,17 +3880,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # one code name -> one mark; the card reads its emoji/colour from here,
                 # not from the per-agent field, so an initiator is never scattered.
                 self._send(200, json.dumps(ID.load()))
-            # Keep the exact CI route above the prefix-matched mode/model routes. A
-            # prior /api/models vs /api/mode collision proved route order observable.
-            elif path == "/api/ci/log":
-                query = parse_qs(urlparse(self.path).query)
-                code, payload = ci_log_tail(
-                    query.get("id", [""])[0],
-                    query.get("tier", [""])[0],
-                )
-                self._send(code, json.dumps(payload))
-            elif path == "/api/ci":
-                self._send(200, json.dumps(ci_queue()))
             elif path == "/api/accounts/login-state":
                 self._send(200, json.dumps(accounts_login_state()))
             elif path.startswith("/api/accounts"):
@@ -4312,12 +3984,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(code, json.dumps(payload))
             elif path == "/api/agent/msg":
                 code, payload = agent_msg(body)
-                self._send(code, json.dumps(payload))
-            elif path == "/api/ci/enqueue":
-                code, payload = ci_enqueue(body)
-                self._send(code, json.dumps(payload))
-            elif path == "/api/ci/cancel":
-                code, payload = ci_cancel(body)
                 self._send(code, json.dumps(payload))
             elif path == "/api/power":
                 code, payload = power_action(body)
@@ -4509,10 +4175,6 @@ if __name__ == "__main__":
     start_hosting_refresher()
     threading.Thread(target=_mode_loop, daemon=True).start()
     threading.Thread(target=_ci_loop, daemon=True).start()
-    # The queue's own observations. This thread was written and then never started, so the
-    # observations were paid for on the first request that met a new queue; that read ran git and
-    # gh and wrote the state file back, which is not a read at all.
-    start_ci_refresher()
     threading.Thread(target=_accounts_refresher, name="accounts-refresher", daemon=True).start()
     start_refresher()
     GH.start(office=hq_office, registry=_projects_registry)

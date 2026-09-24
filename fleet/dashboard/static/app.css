@@ -887,16 +887,6 @@ button.account-chip:hover { border-color: var(--line-strong); }
 .account-chip .label .pill { flex: none; }
 .account-chip .foot { margin-top: auto; }
 
-.queue-rows { display: grid; gap: 8px; }
-.queue-row {
-  display: grid; gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
-}
-
 /* One lane's ending, asked about before it happens. The sentence is inside the confirm, so
    nobody presses a word whose consequence is written somewhere else. */
 .lane-actions { display: grid; gap: 8px; }
@@ -1009,17 +999,6 @@ button.account-chip:hover { border-color: var(--line-strong); }
   .conversations-pane { display: none; }
   .convo-select { display: flex; }
 }
-
-.queue-lists { display: grid; gap: var(--gap); }
-.ci-card { display: grid; gap: 8px; padding: 12px 14px; }
-.stages { display: flex; gap: 4px; flex-wrap: wrap; }
-.stage {
-  font-size: 11px; padding: 1px 7px; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--surface-2); color: var(--text-dim);
-}
-.stage.done { color: var(--tone-done); }
-.stage.fail { color: var(--tone-fail); }
-.stage.run { color: var(--tone-run); }
 
 /* Three rows, always the same three rows: label, value, note. The middle row absorbs the
    slack so every tile in a strip is the same height, with the note on the bottom edge. */

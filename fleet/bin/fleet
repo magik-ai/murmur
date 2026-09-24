@@ -756,10 +756,6 @@ cmd_group() {
   FLEET_BIN="$SELF" FLEET_HOME="$FLEET_HOME" "$PY" "$FLEET_HOME/lib/group.py" "$@"
 }
 
-cmd_ci() {
-  FLEET_HOME="$FLEET_HOME" "$PY" "$FLEET_HOME/lib/ci.py" "$@"
-}
-
 cmd_models() {
   # The model catalog: what's available, its routing role, and per-model on/off + health.
   # Flipping a model on fires a real test request (auth + limits) before any lane routes to it.
@@ -928,10 +924,10 @@ except Exception: pass' "$f" 2>/dev/null)
 cmd_game_mode() { # on|off|status — free the machine for gaming by SAVING + STOPPING the farm
   # On 32GB a farm-in-flight (~11-18GB) and a heavy game (~10GB) do not both fit. A running lane's
   # RAM is IN USE and cannot be reclaimed live (soft throttle does nothing), so this frees it by
-  # salvaging every lane's work to git, stopping the daemon so it will not respawn, killing the
-  # lanes to release their RAM, and stopping the CI Postgres. `off` restarts the daemon, which
-  # respawns until-* lanes from their briefs. Lanes with no restart policy lose in-progress work
-  # beyond what salvage pushed — that is the cost of freeing a machine that is genuinely full.
+  # salvaging every lane's work to git, stopping the daemon so it will not respawn, and killing
+  # the lanes to release their RAM. `off` restarts the daemon, which respawns until-* lanes from
+  # their briefs. Lanes with no restart policy lose in-progress work beyond what salvage pushed —
+  # that is the cost of freeing a machine that is genuinely full.
   local action="${1:-status}"
   case "$action" in
     on)
@@ -943,20 +939,21 @@ cmd_game_mode() { # on|off|status — free the machine for gaming by SAVING + ST
       systemctl --user stop fleet-daemon.service 2>/dev/null && echo "daemon stopped (no respawns)"
       for s in $slugs; do cmd_kill "$s" >/dev/null 2>&1; done
       echo "lanes killed (RAM released)"
-      docker stop fleet-ci-postgres >/dev/null 2>&1 && echo "CI postgres stopped (freed its tmpfs)" || true
       sleep 3
-      free -m | awk '/Mem:/{print "WSL free now: "$4"MB (autoMemoryReclaim returns it to Windows over ~1-2 min)"}'
+      free -m | awk '/Mem:/{print "free now: "$4"MB"}'
       echo "RAM is yours. Resume with: fleet game-mode off"
       ;;
     off)
-      systemctl --user start fleet-daemon.service 2>/dev/null && \
+      if systemctl --user start fleet-daemon.service 2>/dev/null; then
         echo "daemon started — it will respawn until-pr/until-merged lanes from their briefs"
-      echo "CI Postgres starts on demand at the next CI run"
+      else
+        echo "daemon not started (was it ever installed? run: fleet daemon start)"
+      fi
       ;;
     status)
       echo "daemon: $(systemctl --user is-active fleet-daemon.service 2>/dev/null)"
       echo "live lanes: $(_live_lane_slugs | wc -w)"
-      free -m | awk '/Mem:/{print "WSL used "$3"MB, free "$4"MB"}'
+      free -m | awk '/Mem:/{print "used "$3"MB, free "$4"MB"}'
       ;;
     *) echo "usage: fleet game-mode on|off|status"; return 1;;
   esac
@@ -1877,7 +1874,6 @@ cmd_lib_tool() {
 case "${1:-help}" in
   spawn) shift; cmd_spawn "$@";;
   group) shift; cmd_group "$@";;
-  ci) shift; cmd_ci "$@";;
   status|ps) shift; cmd_status "$@";;
   metrics) shift; cmd_metrics "$@";;
   capacity) shift; cmd_capacity "$@";;
@@ -1929,14 +1925,6 @@ fleet: headless Claude Code and Codex agents on the farm
                                   live lane state, branch heads and changed-file counts
   fleet group assemble NAME [--dry-run]
                                   merge pushed lanes into one integration branch and one PR
-  fleet ci enqueue --project X (--pr N | --branch B)
-                                  queue a candidate for serialized merge-result verification
-  fleet ci daemon [start]|stop|status
-                                  manage the fleet-ci.slice user service (start is default)
-  fleet ci daemon run             foreground worker; --once processes at most one candidate
-  fleet ci status [--json]        queue state; JSON is the dashboard's stable contract
-  fleet ci log <id>               print every tier log for a run
-  fleet ci cancel <id>            eject a queued run or stop a running one
   fleet status|ps [--project X]   table of agents + farm health
                [--json]           machine-readable: farm + every lane (status,
                                   outcome, pr, restart, scope). Build tooling on this.

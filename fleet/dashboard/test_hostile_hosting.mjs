@@ -1152,7 +1152,7 @@ for (const [opener, picker, controls] of [
   /* The Machine tab reads /api/hosts on its own three second tick, so the dialog's own asking is
      only visible from a tab that does not: leaving the tab closes the dialog, and from then on
      every request for the providers would be the dialog's clock still running. */
-  await page.evaluate(() => { location.hash = "#/queue"; });
+  await page.evaluate(() => { location.hash = "#/elsewhere"; });
   await page.waitForTimeout(400);
   const atClose = asked.length;
   await page.waitForTimeout(4000);

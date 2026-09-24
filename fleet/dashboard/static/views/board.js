@@ -1,6 +1,6 @@
 /* The Board: the one screen an operator keeps open all day. It answers three questions
    without a terminal, in this order: is anything unfinished about the setup, is the machine
-   and the subscription healthy, and who is working on what while what is being verified.
+   and the subscription healthy, and who is working on what.
    Nothing else belongs here, and nothing here is a summary of a summary. */
 
 import {
@@ -218,14 +218,9 @@ function accountsStrip(context) {
     }));
 }
 
-/* ------------------------------------------------------------ the queue */
-
-
 /* ---------------------------------------------------------- the canvas */
 
-
-/* The queue lives on its own tab (owner ruling 2026-09-22): the Board is the agents, at full
-   width, under the two strips. */
+/* The Board is the agents, at full width, under the two strips. */
 function canvas(context) {
   return h("div", { class: "board-canvas", key: "canvas" }, agentsPane(context));
 }

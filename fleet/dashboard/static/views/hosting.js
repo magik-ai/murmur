@@ -1002,7 +1002,7 @@ export function openAddMachine(context) {
   openDrawer({
     key: ADD_MACHINE_KEY,
     title: "Add a machine",
-    sub: "A machine runs a whole farm: worktrees, the queue and a dashboard of its own.",
+    sub: "A machine runs a whole farm: worktrees, lanes and a dashboard of its own.",
     body: () => addMachineBody(context),
     onClose: () => {
       stopPoll();

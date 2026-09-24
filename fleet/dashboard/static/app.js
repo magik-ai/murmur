@@ -1,6 +1,6 @@
 /* The page: a hash router, a three second tick, the view registry, and the chrome around
    them (theme, project filter, freshness, capacity, the power setting, the jump palette).
-   Four tabs, and the addresses the old seven used still work. */
+   Three tabs, and the addresses the old seven used still work. */
 
 import * as api from "./core/api.js";
 import * as identity from "./core/identity.js";
@@ -11,7 +11,6 @@ import {
 } from "./core/ui.js";
 import board from "./views/board.js";
 import mail from "./views/mail.js";
-import queue from "./views/queue.js";
 
 /* The machine tab is written in its own lane, in its own file. Until that file is on the
    farm the tab is here and says so, rather than taking the whole page down with a failed
@@ -28,7 +27,7 @@ const machineSoon = {
   }),
 };
 
-let VIEWS = [board, mail, queue, machineSoon];
+let VIEWS = [board, mail, machineSoon];
 const BY_ID = new Map(VIEWS.map((view) => [view.id, view]));
 /* Asked for on every tab: the page cannot draw its chrome without them, and the jump
    palette can only offer a conversation it has heard of. */
@@ -49,7 +48,6 @@ const REDIRECTS = {
 const ICONS = {
   board: '<path d="M3 3h7v7H3zM14 3h7v4h-7zM14 11h7v10h-7zM3 14h7v7H3z" fill="currentColor"/>',
   mail: '<path d="M3 5h18v14H3zM3 6l9 7 9-7" fill="none" stroke="currentColor" stroke-width="2"/>',
-  queue: '<path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   machine: '<path d="M6 6h12v12H6z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" stroke="currentColor" stroke-width="2"/>',
 };
 
@@ -642,7 +640,7 @@ function wire() {
 }
 
 /* The machine tab, once its lane has installed its file. A tab that is not there yet is a
-   tab that says so; it is never a reason for the other three not to draw. */
+   tab that says so; it is never a reason for the other two not to draw. */
 async function adoptMachine() {
   try {
     const module = await import("./views/machine.js");
