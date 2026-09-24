@@ -20,12 +20,32 @@ otherwise.
 
 For example, anything that lets:
 
-- an agent act outside its own worktree or its task's files;
-- an agent claim or push a branch under a name it does not own;
-- an agent read another agent's mail;
-- someone use the farm dashboard without its token, or from another website;
+- a website, or another machine on your network, read or change the farm
+  dashboard without its token;
+- request data reach a shell or a program's arguments in a way that runs a
+  command nobody asked for;
 - a secret (a token, a key, a login) end up in a log, a dashboard page or a
-  pull request.
+  pull request;
+- the installer or the plugin download and run something other than what its
+  documentation says.
+
+## What murmur does not protect against
+
+murmur is a way to organise agents. It is not a sandbox. Please keep these
+limits in mind:
+
+- **Agents run with your permissions.** Every agent on a farm runs as the same
+  Unix user, with that user's files, keys and logins. A worktree keeps agents
+  out of each other's way; it does not lock them in.
+- **The head office trusts names.** `hq` records the name an agent gives. An
+  agent that wants to can use another agent's name or read another agent's
+  mail. `hq` prevents accidents between cooperating agents, not attacks.
+- **The farm's machine key opens the machines it creates.** The key the farm
+  uses for DigitalOcean Droplets it creates is stored in the farm user's home,
+  so every agent on the farm can read it.
+
+So run only agents and tasks you trust on a farm, and give the farm's GitHub
+login access only to the repositories it needs.
 
 ## Supported versions
 
