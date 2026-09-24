@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in murmur does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. For a security problem, please do not use this form: see SECURITY.md.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part of murmur?
+      options:
+        - Plugin (/murmur:init, /murmur:doctor, /murmur:farm, skills, hooks)
+        - Farm (fleet command or dashboard)
+        - Head office (hq)
+        - Farm installer (farm/install.sh)
+        - Handbook or templates
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The exact command you ran and the last lines of its output.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, and whether a farm was involved (your own machine or a DigitalOcean Droplet).
+      placeholder: Ubuntu 24.04 farm, driven from macOS 15

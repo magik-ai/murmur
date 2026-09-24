@@ -1,18 +1,49 @@
 # Changelog
 
-Keep a Changelog format, semver from the first tag.
+All notable changes to murmur are written down here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and version numbers
+follow [Semantic Versioning](https://semver.org/) from the first tagged release.
 
 ## Unreleased
 
-- `/murmur:farm`: a farm on DigitalOcean from the laptop. Preflight (doctl's `murmur` context, an ssh key that works without a terminal, GitHub), questions with defaults, a plan with the price, a purchase only with the price typed back, a name no ssh Host or Match line already names (the system config and its Includes too), where ssh will go rehearsed with the real block before any purchase, the ssh block and a pinned host key, the install on the box with no questions, Tailscale or a loopback-only tunnel, the dashboard opened with its token in the fragment, the logins verified. `fleet machines` never buys twice: a lost create is pending and adopted, and the firewall is compared whole with the one spec (ssh in, everything out, no deny, the tag) and rewritten to it on any difference, and any other firewall that would also sit over the new droplet stops the purchase and is named. The dashboard is a user unit and binds the Tailscale address only (2026-09-24).
-- murmur ships what it has run for real: the Claude Code and Codex engines, on your own machine or a DigitalOcean Droplet. The other model presets (Gemini CLI, Qwen Code, Kimi Code, Grok Build, OpenCode, Aider, Ollama, the Custom command) and the remote runners (DigitalOcean Managed Agents, Railway, Vercel, with `fleet runner`, `fleet spawn --runner` and `fleet hosts secret`) are removed. A farm whose `models.toml` still lists a removed engine keeps it, marked as not in the catalog with how to take it out. Adding an engine or a machine back is a contribution: see CONTRIBUTING.md (2026-09-24).
-- Machine tab: the Engines block is Models. Presets for popular services (Claude Code, Codex, Gemini CLI, Qwen Code, Kimi Code, OpenCode, Aider, Ollama local, a custom command), an add dialog with numbered steps, a six-column table with one status word per model, remove for models you added, and a catalog the farm writes itself. A key never goes through the page (2026-09-23).
-- Dashboard v2: four tabs. Board (agents with two filters and a search, the verification queue beside them, machine and account strips, a setup checklist), Mail (three fixed panes, plain words), Queue (a table with a detail panel and a log viewer; verify, cancel, runner on and off), Machine (power with honest confirms and jobs, services, accounts with a real add flow and login states, engines with an installed check, projects, health, settings). New routes for services, jobs, power, kill, queue writes, login state, engines, project removal (2026-09-22).
-- The farm dashboard is a product: seven tabs (Overview, Agents, Mail, Queue, Projects, Accounts, System), an agent mail tab on the head office, honest empty and error states with the fix command, a first-run checklist, light and dark, a Cmd+K palette, no constant that names one farm; new routes /api/config, /api/health, /api/projects, /api/agent/log, /api/agent/msg, /api/mail/* (2026-09-21).
-- `farm/install.sh`: one-command farm installer for Ubuntu and Debian, and chapter 12 of the handbook, the machine: where to get one, sizes and prices, the two logins, reaching the dashboard (2026-09-21).
-- hq and fleet are merged upstream (agent-hq #544, #545; fleet #1, #2) and both machines of the reference farm run them; the import into this repository is next (2026-09-20).
-- The session hook reads `.murmur/config.toml` and tells the agent what <OWNER>, <TRACKER> and <FARM> mean in this repository (2026-09-20).
-- The name is murmur. MIT. init and doctor skills with scripts; tracker adapters; lessons from the field; a synthetic memory sample; the first-stranger review applied (2026-09-20, night).
+The first public release. It contains:
 
-- Plan, research and skeleton (2026-09-20).
-- Handbook chapters 00 to 11, thirteen templates, the plugin with three skills and two hooks, all first drafts (2026-09-20).
+### Plugin (`plugin/`)
+
+- `/murmur:init` sets up a repository for team work. It asks seven questions
+  and writes a rules file for agents, the tracker rules, a pull request template
+  and a lessons file. It never overwrites an existing file.
+- `/murmur:doctor` checks the setup and reports what is missing.
+- `/murmur:farm` creates a farm on a DigitalOcean Droplet from your laptop. It
+  buys the Droplet only after you type the monthly price back, installs murmur
+  on it and opens the dashboard through an SSH tunnel or Tailscale.
+- Skills for splitting work across agents (orchestrate), merging it
+  (conductor) and working unattended (night mode).
+- Hooks that tell each session how the repository is set up and block edits to
+  generated files.
+
+### Farm (`fleet/`)
+
+- `fleet` starts Claude Code and Codex agents on a Linux machine. Each agent
+  works on its own branch in its own git worktree.
+- Capacity limits and power settings keep the machine responsive. A supervisor
+  restarts agents that have a restart policy, and a sweep timer cleans up
+  finished work.
+- A web dashboard with three tabs: Board (agents, machine health, subscription
+  limits), Mail (messages between agents) and Machine (power, services,
+  machines, accounts, models and projects).
+- Machines: a Linux machine you reach over SSH, or a DigitalOcean Droplet.
+
+### Head office (`hq/`)
+
+- A command-line tool with no dependencies. Agents register their names, claim
+  branches (with a pre-push guard) and send each other messages through a
+  private GitHub repository.
+
+### Also included
+
+- `farm/install.sh`: one command that turns an Ubuntu or Debian machine into a farm.
+- A handbook of 13 chapters (`docs/`) and templates for your own repository
+  (`templates/`).
+- The Starling Almanac design system (`design/`) and the murmur.farm landing
+  page (`site/`).

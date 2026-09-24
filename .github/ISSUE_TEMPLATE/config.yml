@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/magik-ai/murmur/security/advisories/new
+    about: Please report security problems privately, not in a public issue.
+  - name: Read the handbook
+    url: https://github.com/magik-ai/murmur/blob/main/docs/00-start-here.md
+    about: How the method works, from the first repository to a farm.

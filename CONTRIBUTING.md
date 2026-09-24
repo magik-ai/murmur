@@ -1,42 +1,148 @@
-# Contributing
+# Contributing to murmur
 
-During the pilot: open an issue with the `pilot-feedback` template. Pull requests welcome for docs and templates. Code changes to `hq/` and `fleet/` need a short design note in the PR body until the public release.
+Thank you for helping. Bug reports, fixes, documentation and new engines or
+cloud providers are all welcome.
 
-Everything in this repository is English.
+## Ways to help
 
-## Adding an engine or a place to run agents
+- **Report a bug.** Open an issue with the bug template. Include the exact
+  command you ran and the last lines of its output.
+- **Suggest an improvement.** Open an issue with the feature template. Say what
+  you were trying to do and what got in the way.
+- **Fix something.** Small fixes (a typo, a wrong command in the docs, a clear
+  bug) can go straight to a pull request. For a bigger change, open an issue
+  first so we can agree on the approach before you spend time on it.
+- **Report a security problem** privately, as [SECURITY.md](SECURITY.md)
+  describes. Please do not use a public issue for it.
 
-murmur ships only what we have run for real: the **Claude Code** and **Codex** engines, on **your own machine** (any Linux box reached over SSH) or on a **DigitalOcean Droplet**. The other engine presets (Gemini CLI, Qwen Code, Kimi Code, Grok Build, OpenCode, Aider, Ollama, a free-form Custom command) and the remote runners (DigitalOcean Managed Agents, Railway, Vercel) were removed on 2026-09-24 by the owner's decision. Adding one back is a contribution, and the machinery that runs it is still in place, so a contribution is mostly data plus a test.
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-In the pull request, say what you ran for real with it: a lane spawned on it that opened a pull request, and where its terms say headless use is permitted. A preset nobody has run is exactly what was taken out.
+## How the repository is laid out
 
-### An engine preset
+| Folder | What it holds | Language |
+| --- | --- | --- |
+| [`plugin/`](plugin) | The Claude Code plugin: commands, skills, hooks and their scripts | Markdown, Python, Bash |
+| [`fleet/`](fleet) | The farm: the `fleet` command, the dashboard and the systemd units | Bash, Python, JavaScript |
+| [`hq/`](hq) | The head office command-line tool | Python |
+| [`farm/`](farm) | The one-command farm installer | Bash |
+| [`docs/`](docs) | The handbook | Markdown |
+| [`templates/`](templates) | Files users copy into their own repositories | Markdown, Bash |
+| [`design/`](design) | The design system used by the dashboard and the website | CSS, JavaScript |
+| [`site/`](site) | The murmur.farm landing page | HTML, CSS |
+| [`tests/`](tests) | Tests for the plugin | Python |
 
-**The file:** `fleet/lib/model_presets.py`. Add one dict to `PRESETS`. Every field is required, so no reader has to guess:
+## Set up
+
+You need:
+
+- Python 3.11 or newer
+- git and Bash
+- Node.js 18 or newer, for the dashboard tests
+- Optional: Playwright with Chromium, for the dashboard's browser tests
+
+The Python code uses only the standard library, on purpose: the farm and the
+head office must work on a machine that has little more than Python, git and
+the GitHub CLI. Only the `hq` tests need an extra package (pytest).
+
+## Run the tests
+
+Run the tests for the part you changed before you open a pull request. CI runs
+the same commands (see [`.github/workflows/`](.github/workflows)). All commands
+start from the root of the repository.
+
+The head office (`hq`) uses pytest, so install it in a virtual environment first:
+
+```bash
+cd hq
+python3 -m venv .venv
+.venv/bin/pip install -e ".[test]"
+.venv/bin/python -m pytest -q
+```
+
+The plugin:
+
+```bash
+python3 tests/test_plugin_installed_copy.py -v
+python3 tests/test_murmur_farm.py -v
+```
+
+The farm (`fleet`), its main suites:
+
+```bash
+cd fleet
+bash tests/policy-test.sh bin/fleet
+python3 tests/supervisor-test.py lib/supervisor.py
+python3 dashboard/test_server.py
+python3 tests/hosting-test.py
+```
+
+[fleet/docs/VERIFYING.md](fleet/docs/VERIFYING.md) lists every suite, the
+arguments each one takes, and how to run the dashboard's browser tests.
+
+When you add a test, first make sure it fails without your fix. A test that
+cannot fail proves nothing.
+
+## Pull requests
+
+- Keep each pull request to one topic. Small pull requests get reviewed faster.
+- Explain what changed, why, and how you tested it.
+- Update the documentation in the same pull request when behaviour changes.
+- Add a line to the `Unreleased` section of [CHANGELOG.md](CHANGELOG.md) for
+  anything a user would notice.
+- Write everything in English: code, comments, docs and commit messages.
+- Never put a real secret in a test or an example. Use fake values such as
+  `ghp_` followed by `x` characters.
+
+By contributing, you agree that your contribution is licensed under the
+[MIT License](LICENSE), like the rest of the project.
+
+## Adding an agent engine
+
+murmur ships two engines: **Claude Code** and **Codex**. Other engines can be
+added as presets. The code that runs them already exists, so a new engine is
+mostly data plus a test.
+
+In your pull request, please tell us what you ran with it for real (for
+example, a lane that opened a pull request) and whether the tool's terms allow
+running it without a person at the keyboard.
+
+**Where:** add one entry to `PRESETS` in
+[`fleet/lib/model_presets.py`](fleet/lib/model_presets.py). Every field is required:
 
 | Field | What it holds |
-|---|---|
-| `id` | the preset's own name and the default catalog id: lower case, digits, `-` and `_` |
-| `label` | the vendor's own name for it |
-| `color` | a `#RRGGBB` glyph colour for the models table |
-| `kind` | `subscription`, `key` or `local`: what the operator has to arrange. The add dialog gives a `key` engine `fleet models auth <id>` and a `local` one its `pull_hint` |
-| `engine` | `"generic"` for any CLI other than Claude Code and Codex |
-| `bin` | the command as it appears on the farm's `PATH` |
-| `install_hint` | the one command that installs it |
-| `pull_hint` | for a `local` engine, how a model is fetched (`<variant>` is filled in); `""` otherwise |
-| `auth_env` | the variable the headless CLI reads its key from; `""` for a subscription |
-| `run` | the non-interactive command line: `{bin}` and `{task}` are required, `{variant}` wherever the model goes |
-| `health` | `HEALTH`: the test request asks for 17 plus 25, and only a reply line of `42` passes |
-| `tos` | one sentence: whether running it headless is permitted, and how sure we are |
-| `access` | one sentence: how it is paid for |
-| `variants` | the model names it offers; a preset that lists any must carry `{variant}` in `run` |
-| `docs` | where the vendor documents its CLI |
+| --- | --- |
+| `id` | The preset's name and default catalog id: lower case, digits, `-` and `_` |
+| `label` | The vendor's name for the tool |
+| `color` | A `#RRGGBB` colour for the models table |
+| `kind` | `subscription`, `key` or `local`: what the user has to set up |
+| `engine` | `"generic"` for any tool other than Claude Code and Codex |
+| `bin` | The command, as it appears on the farm's `PATH` |
+| `install_hint` | The one command that installs it |
+| `pull_hint` | For a `local` engine, how to download a model (`<variant>` is filled in); `""` otherwise |
+| `auth_env` | The environment variable the tool reads its key from; `""` for a subscription |
+| `run` | The non-interactive command line. `{bin}` and `{task}` are required; `{variant}` goes where the model name goes |
+| `health` | Use `HEALTH`. The test asks for 17 plus 25 and passes only on a reply of `42` |
+| `tos` | One sentence: is running it unattended allowed, and how sure are we |
+| `access` | One sentence: how it is paid for |
+| `variants` | The model names it offers. If you list any, `run` must contain `{variant}` |
+| `docs` | Where the vendor documents the tool |
 
-**Why no other code is needed.** A catalog entry with `engine = "generic"` is the mechanism, and it stays: `POST /api/models/add` and the Add a model dialog turn the preset into an entry with `model_presets.entry_from()`, `bin/fleet` launches it from `bin`, `run` and `auth_env` (`lib/models.py launchcmd`), `lib/parse_generic.py` reads its output into the lane's card, `fleet models auth <id>` stores its key on stdin, and `fleet models test <id>` runs the health request.
+**How it runs:** the dashboard's "Add a model" dialog and `POST /api/models/add`
+turn the preset into a catalog entry. `fleet/bin/fleet` launches a `generic`
+entry from its `bin`, `run` and `auth_env`, and
+[`fleet/lib/parse_generic.py`](fleet/lib/parse_generic.py) turns its output into
+the agent's card. `fleet models auth <id>` stores a key, and
+`fleet models test <id>` runs the health check.
 
-**Optional, model discovery:** `fleet/lib/model_discovery.py`. Add the documented model list to `DOCS` under the preset id, and, when the CLI can list models without sending a prompt, a function to `ROUTES` that returns `(rows, secrets)`: rows through `keep()`, and any credential it read on the way, so the answer is scrubbed of it.
+**Optional, model lists:** in
+[`fleet/lib/model_discovery.py`](fleet/lib/model_discovery.py), add the
+documented model names to `DOCS` under your preset's id. If the tool can list
+its models without sending a prompt, also add a function to `ROUTES`.
 
-**The tests to extend:** `fleet/tests/models-test.py` (the preset list assertion, now `["claude", "codex"]`, and a check of your preset's `run`, `install_hint` and `auth_env`), and `fleet/dashboard/test_stub_server.py` `MODEL_PRESETS` with `fleet/dashboard/test_hostile_models.mjs` when the dialog should show something new. Run:
+**Tests to extend:** `fleet/tests/models-test.py` (it asserts the list of
+presets, today `["claude", "codex"]`), and, if the dialog should show something
+new, `MODEL_PRESETS` in `fleet/dashboard/test_stub_server.py` together with
+`fleet/dashboard/test_hostile_models.mjs`. Then run:
 
 ```bash
 cd fleet
@@ -44,28 +150,49 @@ python3 tests/models-test.py
 python3 dashboard/test_server.py
 ```
 
-### A machine preset
+## Adding a machine provider
 
-**The file:** `fleet/lib/host_presets.py`. Add one dict to `PRESETS` with `job = "machine"`. Every field is required:
+murmur can run a farm on **a Linux machine you reach over SSH** or on a
+**DigitalOcean Droplet**. Another provider is a preset plus, if it creates
+machines, the code that creates them.
+
+**Where:** add one entry to `PRESETS` in
+[`fleet/lib/host_presets.py`](fleet/lib/host_presets.py), with `job = "machine"`.
+Every field is required:
 
 | Field | What it holds |
-|---|---|
-| `id` | the provider name on every command line |
-| `label`, `summary` | the vendor's name, and two short lines for its card (90 characters at most) |
-| `color` | a `#RRGGBB` glyph colour |
-| `job` | `machine`: a whole farm, with systemd user services, tmux, worktrees, the dashboard and the installer |
-| `cli`, `install`, `login` | the binary the farm calls, the command that installs it, and the login a person runs in their own terminal (never the page) |
-| `whoami` | the read-only login check, as an argv list; `{target}` in it means the check belongs to one machine |
-| `docs`, `terms`, `stage`, `pricing` | where the CLI is documented, what you agree to and what is UNVERIFIED, `ga`, `preview` or `early access`, and one sentence on price with the day it was read |
-| `sizes` | `[{slug, label, vcpu, ram_gb, disk_gb, monthly_usd, default}]`, exactly one `default: true`, or `[]` |
-| `regions` | the regions offered, the first is the default, or `[]` |
-| `engines` | the fleet engines it can run: `["claude", "codex"]` |
+| --- | --- |
+| `id` | The provider name used on every command line |
+| `label`, `summary` | The vendor's name, and two short lines for its card (90 characters at most) |
+| `color` | A `#RRGGBB` colour |
+| `job` | `machine` |
+| `cli`, `install`, `login` | The command the farm calls, the command that installs it, and the login a person runs in their own terminal (never in the dashboard) |
+| `whoami` | A read-only login check, as a list of arguments. `{target}` in it means the check is for one machine |
+| `docs`, `terms`, `stage`, `pricing` | Where the tool is documented; what you agree to and what is not verified; `ga`, `preview` or `early access`; one sentence on price, with the date you read it |
+| `sizes` | `[{slug, label, vcpu, ram_gb, disk_gb, monthly_usd, default}]` with exactly one `default: true`, or `[]` |
+| `regions` | The regions offered, the first one is the default, or `[]` |
+| `engines` | The engines it can run: `["claude", "codex"]` |
 
-Then add the id to `HOSTING_PROVIDERS` in `fleet/dashboard/server.py`: the dashboard keeps unknown words out of an argv with it, and `HostingProvidersTest` fails when the two differ.
+Then add the id to `HOSTING_PROVIDERS` in
+[`fleet/dashboard/server.py`](fleet/dashboard/server.py). The dashboard uses
+that list to keep unknown words out of commands, and `HostingProvidersTest`
+fails if the two lists differ.
 
-A box you reach over SSH needs nothing more: `fleet machines add` registers it and `fleet machines check` walks it to ready. A provider that **creates** machines also needs its create, list and destroy in `fleet/lib/machines.py`, which today speaks to DigitalOcean only (`doctl`): follow the `do-droplet` paths there, and keep its rules (the row is written before the provider is called, a price is confirmed before anything is bought, destroy needs the name typed back).
+A machine you reach over SSH needs nothing more: `fleet machines add` registers
+it and `fleet machines check` walks it to ready. A provider that **creates**
+machines also needs create, list and destroy code in
+[`fleet/lib/machines.py`](fleet/lib/machines.py), which today talks only to
+DigitalOcean (`doctl`). Follow the `do-droplet` code paths there and keep their
+rules: the record is written before the provider is called, the price is
+confirmed before anything is bought, and destroying a machine needs its name
+typed back.
 
-**The tests to extend:** `fleet/tests/hosting-test.py` (the preset list in `test_murmur_ships_your_own_machine_and_a_droplet_and_nothing_else`, and a fake of the provider's CLI under `fleet/tests/fakes/core/` that records every call, so no test spends money), `HostingProvidersTest` in `fleet/dashboard/test_server.py`, and `fleet/dashboard/test_hostile_hosting.mjs` when the Add a machine dialog changes. Run:
+**Tests to extend:** `fleet/tests/hosting-test.py` (the preset list in
+`test_murmur_ships_your_own_machine_and_a_droplet_and_nothing_else`, plus a fake
+of the provider's command-line tool under `fleet/tests/fakes/core/` that records
+every call, so no test spends money), `HostingProvidersTest` in
+`fleet/dashboard/test_server.py`, and `fleet/dashboard/test_hostile_hosting.mjs`
+if the "Add a machine" dialog changes. Then run:
 
 ```bash
 cd fleet

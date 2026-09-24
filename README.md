@@ -2,7 +2,7 @@
   <a href="https://murmur.farm">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset=".github/assets/readme-dark.png">
-      <img alt="murmur. Open-source orchestrator for coding agents. Run Claude Code and Codex as one team on a machine you own." src=".github/assets/readme-light.png" width="100%">
+      <img alt="murmur: an open-source orchestrator for coding agents. Run Claude Code and Codex as one team on a machine you own." src=".github/assets/readme-light.png" width="100%">
     </picture>
   </a>
 </p>
@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://murmur.farm"><b>murmur.farm</b></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="#start-in-two-minutes">Start in two minutes</a>
+  <a href="#quick-start">Quick start</a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="docs/00-start-here.md">Handbook</a>
   &nbsp;&nbsp;&nbsp;&nbsp;
@@ -19,148 +19,209 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5B4A8A?style=flat-square"></a>
-  <img alt="Runs Claude Code and Codex" src="https://img.shields.io/badge/runs-Claude%20Code%20and%20Codex-C8912F?style=flat-square">
-  <img alt="A Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-2B1F2E?style=flat-square">
+  <a href="https://github.com/magik-ai/murmur/actions/workflows/plugin-tests.yml"><img alt="plugin tests" src="https://github.com/magik-ai/murmur/actions/workflows/plugin-tests.yml/badge.svg"></a>
+  <a href="https://github.com/magik-ai/murmur/actions/workflows/fleet-tests.yml"><img alt="fleet tests" src="https://github.com/magik-ai/murmur/actions/workflows/fleet-tests.yml/badge.svg"></a>
+  <a href="https://github.com/magik-ai/murmur/actions/workflows/hq-tests.yml"><img alt="hq tests" src="https://github.com/magik-ai/murmur/actions/workflows/hq-tests.yml/badge.svg"></a>
 </p>
 
-murmur is an open-source orchestrator for coding agents. It runs Claude Code and Codex as one team on a machine you own, so the work goes on after you close the lid: every agent has a name, claims its branch before it touches the code, writes to the others through a shared head office, is reviewed by an agent that did not write the change, and lands on main only when main with that change on top is still green.
+murmur is an open-source tool for running several AI coding agents as one team.
+It works with Claude Code and Codex, on your laptop or on a machine you own.
 
-## One agent is a tool, and ten of them need to work as a team
+With murmur, every agent:
 
-Ten agents need what every team needs, an owner for each piece of work, a reviewer who did not write it and a merge that knows two green branches can still clash, and murmur is that team with the whole of it on one screen: who is running, what is being checked, which subscription has room, and a stop button for every agent.
+- has a name, so you can see who did what;
+- claims its branch before it starts, so two agents never change the same code;
+- gets its work reviewed by a different agent;
+- merges only when `main` with the change on top still passes the tests.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/board-dark.webp">
-  <img alt="The murmur Board: the farm's load, memory and disk, every subscription with its limits, and every agent as a card with its status, its checks and its engine." src=".github/assets/board.webp" width="100%">
-</picture>
+You get one dashboard that shows every agent, and the work can go on overnight
+while you sleep.
 
-## Three parts: the farm, the messenger and the workflow
+## Why murmur
 
-### The farm
+One coding agent is easy to watch. You give it a task, you read the diff.
 
-A machine you own runs the agents within its power, and one dashboard shows every one of them, from the power setting and the background services to each subscription's windows and the projects the agents work in. It lives in [`fleet/`](fleet).
+Ten agents at once are a team, and a team needs rules. Who owns which task?
+Who checks the work? How do two finished changes get into `main` without
+breaking it? Without answers, agents overwrite each other's work, review
+their own mistakes, and merge changes that pass alone but fail together.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/machine-dark.webp">
-  <img alt="The Machine tab: power, the farm's services, its machines, subscriptions, models and projects." src=".github/assets/machine.webp" width="100%">
-</picture>
+murmur is those rules, written down, plus the tools that make agents follow them.
 
-### The messenger
+## What is inside
 
-Agents claim a branch before they touch it and write to each other and to you, so every agent knows who is working where, and because the head office is a private GitHub repository it keeps working while your farm is off. It lives in [`hq/`](hq).
+murmur has three parts. You can start with the first one and add the others later.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/mail-dark.webp">
-  <img alt="The Mail tab: every conversation between agents on the left, one thread in the middle, and the agents here now on the right." src=".github/assets/mail.webp" width="100%">
-</picture>
-
-### The workflow
-
-Seven questions set up your repository with its law file, its pull request template and its lessons file, and then night mode drives the work to main and reports by morning. It is a Claude Code plugin in [`plugin/`](plugin), with a handbook of thirteen short chapters in [`docs/`](docs).
+**1. The plugin** ([`plugin/`](plugin)). A Claude Code plugin. `/murmur:init`
+sets up a repository for team work: it asks seven questions and writes a rules
+file for agents, a pull request template and a lessons file. Its skills tell
+agents how to split work, review it, merge it and keep working while you are away.
 
 <img alt="The murmur plugin in Claude Code, setting up a repository with seven questions." src=".github/assets/plugin.webp" width="100%">
 
-## You set the goal, and four roles carry it to main
+**2. The farm** ([`fleet/`](fleet)). Runs agents on an always-on Linux machine,
+as many as its CPU and memory allow. A web dashboard shows every agent, every
+subscription's usage limits and the machine's health, with a stop button for each agent.
 
-Nobody does two jobs: the one who plans writes no code, the one who writes code does not merge it, and only you decide what ships.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/board-dark.webp">
+  <img alt="The Board tab of the dashboard: machine load, memory and disk, each subscription's limits, and one card per agent with its status and checks." src=".github/assets/board.webp" width="100%">
+</picture>
 
-| Role | What it does |
-| --- | --- |
-| You | Give the goal, answer plain questions, decide what ships |
-| The orchestrator | Splits the goal so each agent gets its own files |
-| The lanes | One agent each, first commit to reviewed pull request |
-| The conductor | Merges each piece into main, holds the one veto |
+**3. The head office** ([`hq/`](hq)). A small command-line tool. Agents use it
+to register their names, claim branches and send each other messages. It stores
+everything in a private GitHub repository, so it works even when the farm is off.
 
-## Every piece of work travels the same five stations
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/mail-dark.webp">
+  <img alt="The Mail tab: conversations on the left, one thread in the middle, the agents that are online on the right." src=".github/assets/mail.webp" width="100%">
+</picture>
 
-A starling watches only its seven nearest neighbours and ten thousand of them still turn as one, and in murmur every piece of work follows the same few rules back to main:
+The repository also has a [handbook](docs/00-start-here.md) that explains the
+method in 13 chapters, [templates](templates) for your own repository,
+and a [one-command installer](farm) for the farm.
 
-1. **Claim a branch**, so every other agent sees the claim and keeps off it.
-2. **Work alone**, in its own copy of the repository.
-3. **Get reviewed** by an agent that did not write the code.
-4. **Test with main**, which means main with this branch on top, before the merge queue.
-5. **Merge**, so main stays green and the agent takes the next piece.
+## Quick start
 
-## Start in two minutes
+### 1. Set up a repository
 
-In Claude Code, inside the repository you want to set up:
+Open Claude Code inside the repository you want to set up, then run:
 
-```
+```text
 /plugin marketplace add magik-ai/murmur
 /plugin install murmur@murmur
 /murmur:init
 /murmur:doctor
 ```
 
-`/murmur:init` asks seven questions and never overwrites a file of yours: it adds a short pointer to an existing `CLAUDE.md` or `AGENTS.md` and writes anything that differs next to it as `.murmur-new`. If the command is not found right after the install, run `/reload-plugins` or open a new session.
+`/murmur:init` asks seven questions. Press Enter to keep a default. It never
+overwrites your files. If you already have a `CLAUDE.md` or `AGENTS.md`, it
+adds a short pointer at the end. If another file it wants to write already
+exists, it leaves yours alone or writes its version next to it as a
+`.murmur-new` file for you to compare.
 
-When three or four agents run at once, give them a machine that stays on. From Claude Code, `/murmur:farm` buys a DigitalOcean Droplet only after you type its price back, installs murmur on it and opens its dashboard through a private tunnel. On an Ubuntu or Debian box you already have, one command turns it into a farm:
+`/murmur:doctor` checks the setup and tells you what is missing.
 
-```
-curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash
-```
+If a `/murmur:` command is not found right after the install, run
+`/reload-plugins` or start a new Claude Code session.
 
-Until the repository is public, both commands answer only to accounts invited to it: clone it with `gh repo clone magik-ai/murmur` first and run `farm/install.sh` from the clone, as [farm/README.md](farm/README.md) shows.
+### 2. Add a farm (optional)
 
-Then read [the first chapter of the handbook](docs/00-start-here.md), and [the chapter about the machine](docs/12-the-machine.md) when you set up the farm.
+You do not need a farm on day one. Once you run three or four agents at the
+same time, give them a machine that stays on. There are two ways:
+
+- **A new cloud machine.** In Claude Code, run `/murmur:farm`. It creates a
+  DigitalOcean Droplet, installs murmur on it and opens its dashboard through
+  an SSH tunnel or Tailscale. Before it buys anything, it shows you the monthly
+  price and asks you to type it back.
+- **A machine you already have.** On an Ubuntu or Debian machine, run:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash
+  ```
+
+Then read [the first chapter of the handbook](docs/00-start-here.md). When you
+set up the farm, read [chapter 12, the machine](docs/12-the-machine.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/machine-dark.webp">
+  <img alt="The Machine tab: power settings, the farm's services, its machines, subscriptions, models and projects." src=".github/assets/machine.webp" width="100%">
+</picture>
+
+## How the work moves
+
+Each job has one owner, and nobody does two jobs:
+
+| Role | What it does |
+| --- | --- |
+| You | Set the goal, answer questions, decide what ships |
+| Orchestrator | Splits the goal into tasks, so each agent gets its own files |
+| Lanes | One agent per task: from the first commit to a reviewed pull request |
+| Conductor | Merges finished work into `main` and can stop any merge |
+
+Every change goes through the same five steps:
+
+1. **Claim a branch.** Other agents see the claim and stay away.
+2. **Work alone**, in a separate copy of the repository (a git worktree).
+3. **Get a review** from an agent that did not write the change.
+4. **Test with `main`**: run the tests on `main` with this change on top, not
+   just on the branch. GitHub's merge queue can do this for you.
+5. **Merge.** `main` stays green, and the agent picks up the next task.
 
 ## What it runs on
 
-| Part | What murmur supports today |
+| | What murmur supports today |
 | --- | --- |
-| Agents | Claude Code and Codex, each on its own subscription |
-| Machines | An Ubuntu or Debian box you own, or a DigitalOcean Droplet |
-| Head office | A private GitHub repository you already have |
-| Price | Free and MIT licensed |
+| Agents | Claude Code and Codex, each signed in with its own subscription |
+| Your laptop | Claude Code, git and the GitHub CLI (`gh`) |
+| The farm (optional) | Ubuntu 22.04 or newer, or Debian 12, with systemd. Your own machine or a DigitalOcean Droplet |
+| Head office | A private GitHub repository |
+| Price | Free and open source (MIT). You pay only for your subscriptions and your machine |
 
-murmur ships only what we run every day, so another engine is a preset you add yourself and another cloud is a connector you write, and either one is welcome back as a pull request: [CONTRIBUTING.md](CONTRIBUTING.md) says how.
+murmur ships only engines and machines that have been tested for real. To add
+another agent engine or cloud provider, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## What is inside
+## Documentation
 
-| Folder | What it holds |
+| Where | What you find |
 | --- | --- |
-| [`plugin/`](plugin) | The Claude Code plugin and its six skills |
-| [`fleet/`](fleet) | The farm: spawn, watch, verify, sweep, the dashboard |
-| [`hq/`](hq) | The head office: names, branch claims, mail |
-| [`farm/`](farm) | One command that turns a box into a farm |
-| [`docs/`](docs) | The handbook, thirteen chapters for a week |
-| [`templates/`](templates) | Fill-in files for your own repository |
+| [`docs/`](docs) | The handbook: the method, one chapter per topic, in reading order |
+| [`plugin/`](plugin) | The Claude Code plugin: commands, skills and hooks |
+| [`fleet/`](fleet) | The farm: the `fleet` command, the dashboard, [quick start](fleet/docs/QUICKSTART.md) and [operations guide](fleet/docs/OPERATIONS.md) |
+| [`hq/`](hq) | The head office: names, branch claims and messages |
+| [`farm/`](farm) | The one-command farm installer |
+| [`templates/`](templates) | Files to copy into your own repository |
 
 ## Questions people ask first
 
 <details>
 <summary><b>Do I need a farm?</b></summary>
 <br>
-Not on day one: the plugin and the head office work on your laptop, and a machine that stays on helps once three or four agents run at once.
+No. The plugin and the head office work on your laptop. A separate machine
+helps once three or four agents run at the same time, or when you want work to
+continue after you close the laptop.
 </details>
 
 <details>
 <summary><b>Which agents does it run?</b></summary>
 <br>
-Claude Code and Codex, each on its own subscription, and a lane never falls back to a metered key by accident.
+Claude Code and Codex. Each one uses its own subscription. The farm removes
+API keys from the agent's environment, so an agent cannot switch to paid API
+usage by accident.
 </details>
 
 <details>
 <summary><b>Does it need GitHub?</b></summary>
 <br>
-Yes, the head office, the branch claims and the merge queue all live there.
+Yes. The head office, the branch claims and the merge queue all use GitHub.
 </details>
 
 <details>
-<summary><b>Where does the dashboard live, and can anyone reach it?</b></summary>
+<summary><b>Where does the dashboard run, and who can open it?</b></summary>
 <br>
-On the farm, next to the agents it shows: on your laptop it opens at a local address, and on a cloud machine you reach it through an ssh tunnel or your own Tailscale network. Nothing is open to the internet, and every change on the page needs a token.
+It runs on the farm. By default it listens only on the farm itself. From your
+laptop you open it through an SSH tunnel or your own Tailscale network. Any
+change made from the page needs a secret token.
 </details>
 
 <details>
 <summary><b>What does it cost?</b></summary>
 <br>
-Nothing, murmur is MIT licensed, and you pay only for your own subscriptions and machine.
+murmur is free (MIT license). You pay only for your agent subscriptions and, if
+you use one, the farm machine.
 </details>
 
-## Delivered by
+## Contributing
 
-murmur is made by [magik-ai](https://github.com/magik-ai).
+Bug reports, fixes and new engines or providers are welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) first. Please report security problems
+privately, as [SECURITY.md](SECURITY.md) describes. Everyone taking part
+follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+murmur is released under the [MIT License](LICENSE). It is maintained by
+[magik-ai](https://github.com/magik-ai).
 
 <br>
 
@@ -173,6 +234,4 @@ murmur is made by [magik-ai](https://github.com/magik-ai).
   </a>
 </p>
 
-<p align="center">Ten thousand starlings turn as one because each of them watches only its seven nearest neighbours,<br>and murmur asks the same small discipline of your agents.</p>
-
-<p align="center"><a href="LICENSE">MIT license</a> &nbsp;&nbsp;&nbsp;&nbsp; <a href="SECURITY.md">Security</a> &nbsp;&nbsp;&nbsp;&nbsp; <a href="CONTRIBUTING.md">Contributing</a></p>
+<p align="center">The name comes from a murmuration: thousands of starlings that fly as one<br>because each bird follows a few simple rules about its nearest neighbours.</p>
