@@ -158,7 +158,7 @@
   <section id="roles" class="screen" aria-labelledby="h-roles">
     <div class="wrap">
       <h2 class="h2" id="h-roles">Four roles, one job each</h2>
-      <p class="prose">The orchestrator plans and writes no code. The lanes write the code. The conductor decides the order of merges and can stop any of them. Only you decide what ships.</p>
+      <p class="prose">The orchestrator plans and writes no code. The lanes write the code. The conductor merges finished work after you say yes, and can stop any merge. Only you decide what ships.</p>
       <figure class="roles-map" aria-label="You give the orchestrator a goal. It splits the work into lanes. The conductor merges each lane into main, and a report comes back to you.">
         <svg class="roles-svg" viewBox="0 0 1000 300" aria-hidden="true">
           <path class="flow" d="M 128 110 L 330 110"/>
@@ -184,7 +184,7 @@
           <li><svg class="role-icon" aria-hidden="true"><use href="#i-you"/></svg><h3 class="h3">You</h3><p>Set the goal, answer questions and decide what ships.</p></li>
           <li><svg class="role-icon" aria-hidden="true"><use href="#i-orch"/></svg><h3 class="h3">The orchestrator</h3><p>Splits the goal into lanes, so no two agents edit the same file.</p></li>
           <li><svg class="role-icon" aria-hidden="true"><use href="#i-lane"/></svg><h3 class="h3">The lanes</h3><p>One agent per task, from the first commit to a reviewed pull request.</p></li>
-          <li><svg class="role-icon" aria-hidden="true"><use href="#i-cond"/></svg><h3 class="h3">The conductor</h3><p>Merges each finished lane into main, and can stop any merge.</p></li>
+          <li><svg class="role-icon" aria-hidden="true"><use href="#i-cond"/></svg><h3 class="h3">The conductor</h3><p>Merges each finished lane into main after you say yes, and can stop any merge.</p></li>
         </ol>
       </figure>
     </div>
@@ -192,7 +192,7 @@
 
   <section id="how" class="band screen" aria-labelledby="h-how">
     <div class="wrap">
-      <h2 class="h2" id="h-how">Every change takes the same five steps</h2>
+      <h2 class="h2" id="h-how">Every change takes five main steps</h2>
       <p class="prose">Every agent follows the same rules, so many agents can share one repository.</p>
       <figure class="journey-figure">
         <svg class="journey-track" id="journeyTrack" aria-hidden="true"></svg>
@@ -241,7 +241,8 @@
       <div class="faq">
         <details><summary>Do I need a farm?</summary><p>Not at first. The plugin and the head office work on your laptop. A farm helps once three or four agents run at the same time, or when you want the work to go on after you close your laptop.</p></details>
         <details><summary>Which agents does it run?</summary><p>Claude Code and Codex, each on its own subscription. On a farm, murmur removes the Anthropic and OpenAI API key variables from the environment it starts agents in, so an agent does not switch to paid API use by accident. Do not set up any other API credentials on the farm.</p></details>
-        <details><summary>Can I add another agent or cloud?</summary><p>Yes, as a pull request. murmur ships only the agents and machines we have run for real. Adding another one is mostly a small preset and a test. <a class="mm-link" href="https://github.com/magik-ai/murmur/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> says how.</p></details>
+        <details><summary>Can I add another agent or cloud?</summary><p>Yes, as a pull request. murmur ships only the agents and machines we have tested on real projects. Adding another one is mostly a small preset and a test. <a class="mm-link" href="https://github.com/magik-ai/murmur/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> says how.</p></details>
+        <details><summary>Can farm agents do anything on the machine?</summary><p>Yes. To work with nobody at the keyboard, farm agents run with Claude Code's permission prompts and Codex's sandbox switched off, so they can run any command the farm's user can. Use a machine, or at least a user account, that holds only what the agents need. <a class="mm-link" href="https://github.com/magik-ai/murmur/blob/main/SECURITY.md">SECURITY.md</a> says more.</p></details>
         <details><summary>Does it need GitHub?</summary><p>Yes. The agents work through GitHub pull requests and GitHub's merge queue, and the head office is a private GitHub repository.</p></details>
         <details><summary>Where does the dashboard live?</summary><p>On the farm, next to the agents it shows. On your own computer, it opens at a local address. On a cloud machine, you reach it through an SSH tunnel or your own Tailscale network.</p></details>
         <details><summary>Can anyone reach my farm?</summary><p>By default, the dashboard listens only on the farm itself. The installer can open it to your Tailscale network instead. murmur never opens it to the internet, and every change made on it needs the dashboard token.</p></details>
@@ -253,7 +254,7 @@
   <section class="final tail" aria-labelledby="h-final">
     <div class="wrap">
       <h2 class="h2" id="h-final">Start with one repository</h2>
-      <p class="prose">Open Claude Code in the repository you want to set up. <code class="mm-inline-code">/murmur:init</code> asks seven questions and never overwrites your files. <code class="mm-inline-code">/murmur:doctor</code> then checks the setup.</p>
+      <p class="prose">Open Claude Code in the repository you want to set up. <code class="mm-inline-code">/murmur:init</code> asks seven questions and never replaces a file you already have. <code class="mm-inline-code">/murmur:doctor</code> then checks the setup.</p>
       <div class="install" data-install>
         <div role="tablist" aria-label="How to start">
           <button role="tab" id="t2-plugin" aria-selected="true" aria-controls="p2-plugin">In Claude Code</button>

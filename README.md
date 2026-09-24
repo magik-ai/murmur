@@ -30,12 +30,14 @@ It works with Claude Code and Codex, on your laptop or on a machine you own.
 With murmur, every agent:
 
 - has a name, so you can see who did what;
-- claims its branch before it starts, so two agents never change the same code;
+- claims its branch in the head office before it starts, so no two agents work
+  on the same branch;
 - gets its work reviewed by a different agent;
-- merges only when `main` with the change on top still passes the tests.
+- merges only after `main` with the change on top passes the tests (GitHub's
+  merge queue checks this).
 
-You get one dashboard that shows every agent, and the work can go on overnight
-while you sleep.
+With a farm (an always-on machine for your agents), you also get one dashboard
+that shows every agent, and the work can go on overnight while you sleep.
 
 ## Why murmur
 
@@ -98,8 +100,8 @@ Open Claude Code inside the repository you want to set up, then run:
 /murmur:doctor
 ```
 
-`/murmur:init` asks seven questions. Press Enter to keep a default. It never
-overwrites your files. If you already have a `CLAUDE.md` or `AGENTS.md`, it
+`/murmur:init` asks seven questions. Answer `ok` to keep a default. It never
+replaces a file you already have. If you have a `CLAUDE.md` or `AGENTS.md`, it
 adds a short pointer at the end. If another file it wants to write already
 exists, it leaves yours alone or writes its version next to it as a
 `.murmur-new` file for you to compare.
@@ -109,7 +111,30 @@ exists, it leaves yours alone or writes its version next to it as a
 If a `/murmur:` command is not found right after the install, run
 `/reload-plugins` or start a new Claude Code session.
 
-### 2. Add a farm (optional)
+### 2. Run your first team
+
+In Claude Code, describe a goal and ask for a team, for example:
+
+```text
+fan this out: add a dark mode switch to the settings page
+```
+
+The orchestrate skill splits the goal into lanes: one agent per task, each
+with its own files and its own branch. It shows you the plan and waits for your
+go before it starts anything. Without a farm, the lanes run as local sessions
+on your laptop. [Chapter 4 of the handbook](docs/04-orchestration.md) explains
+the whole flow.
+
+### 3. Add a head office (optional)
+
+The head office gives agents names, branch claims and messages that work
+across sessions and machines. It is a private GitHub repository that the `hq`
+tool reads and writes. To set it up, follow
+[the hq install steps](hq/README.md#install). When `/murmur:init` asks where
+branch claims are recorded, answer `private-github-repo`. If you already
+answered, set `coordination = "private-github-repo"` in `.murmur/config.toml`.
+
+### 4. Add a farm (optional)
 
 You do not need a farm on day one. Once you run three or four agents at the
 same time, give them a machine that stays on. There are two ways:
@@ -141,9 +166,12 @@ Each job has one owner, and nobody does two jobs:
 | You | Set the goal, answer questions, decide what ships |
 | Orchestrator | Splits the goal into tasks, so each agent gets its own files |
 | Lanes | One agent per task: from the first commit to a reviewed pull request |
-| Conductor | Merges finished work into `main` and can stop any merge |
+| Conductor | Merges finished work into `main` after you say yes, and can stop any merge |
 
-Every change goes through the same five steps:
+You decide what merges. Lanes never merge their own work.
+
+Every change goes through five main steps. The handbook's
+[golden workflow](docs/02-golden-workflow.md) breaks them into ten smaller ones.
 
 1. **Claim a branch.** Other agents see the claim and stay away.
 2. **Work alone**, in a separate copy of the repository (a git worktree).
@@ -162,8 +190,9 @@ Every change goes through the same five steps:
 | Head office | A private GitHub repository |
 | Price | Free and open source (MIT). You pay only for your subscriptions and your machine |
 
-murmur ships only engines and machines that have been tested for real. To add
-another agent engine or cloud provider, see [CONTRIBUTING.md](CONTRIBUTING.md).
+murmur ships only the engines and machines that have been tested on real
+projects. To add another agent engine or cloud provider, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 
@@ -193,6 +222,16 @@ Claude Code and Codex. Each one uses its own subscription. The farm removes
 <code>ANTHROPIC_API_KEY</code> and <code>OPENAI_API_KEY</code> from each
 agent's environment, so an agent does not switch to paid API use by accident.
 Do not set up any other API credentials on the farm.
+</details>
+
+<details>
+<summary><b>Can agents on a farm do anything on that machine?</b></summary>
+<br>
+Yes. To work without a person at the keyboard, farm agents run with Claude
+Code's permission prompts switched off and with Codex's sandbox switched off.
+They can run any command the farm's user can. Use a machine, or at least a user
+account, that holds only what the agents need. <a href="SECURITY.md">SECURITY.md</a>
+lists what murmur does and does not protect against.
 </details>
 
 <details>

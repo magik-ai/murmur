@@ -34,9 +34,12 @@ For example, anything that lets:
 murmur is a way to organise agents. It is not a sandbox. Please keep these
 limits in mind:
 
-- **Agents run with your permissions.** Every agent on a farm runs as the same
-  Unix user, with that user's files, keys and logins. A worktree keeps agents
-  out of each other's way; it does not lock them in.
+- **Agents run with your permissions, without prompts.** Every agent on a farm
+  runs as the same Unix user, with that user's files, keys and logins. To work
+  with nobody at the keyboard, Claude Code runs with its permission prompts
+  switched off (`--dangerously-skip-permissions`) and Codex with its approvals
+  and sandbox switched off. A worktree keeps agents out of each other's way; it
+  does not lock them in.
 - **The head office trusts names.** `hq` records the name an agent gives. An
   agent that wants to can use another agent's name or read another agent's
   mail. `hq` prevents accidents between cooperating agents, not attacks.

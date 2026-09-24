@@ -40,8 +40,8 @@ You need:
 - Node.js 18 or newer, for the dashboard tests
 - Optional: Playwright with Chromium, for the dashboard's browser tests
 
-The Python code uses only the standard library, on purpose: the farm and the
-head office must work on a machine that has little more than Python, git and
+The Python code uses only the standard library: the farm and the head office
+must work on a machine that has little more than Python, git and
 the GitHub CLI. Only the `hq` tests need an extra package (pytest).
 
 ## Run the tests
@@ -93,6 +93,11 @@ cannot fail proves nothing.
 - Never put a real secret in a test or an example. Use fake values such as
   `ghp_` followed by `x` characters.
 
+## Licence of your contribution
+
+By contributing, you agree that your contribution is licensed under the
+[MIT License](LICENSE), like the rest of the project.
+
 ## Releasing (maintainers)
 
 Claude Code sends a plugin update to users only when the plugin's version
@@ -104,8 +109,6 @@ changes. For each release:
    heading with the version and the date.
 3. Tag the release commit (`git tag v0.1.0`, for example) and push the tag.
 
-By contributing, you agree that your contribution is licensed under the
-[MIT License](LICENSE), like the rest of the project.
 
 ## Adding an agent engine
 
@@ -113,8 +116,8 @@ murmur ships two engines: **Claude Code** and **Codex**. Other engines can be
 added as presets. The code that runs them already exists, so a new engine is
 mostly data plus a test.
 
-In your pull request, please tell us what you ran with it for real (for
-example, a lane that opened a pull request) and whether the tool's terms allow
+In your pull request, please tell us what you ran with it on a real project
+(for example, a lane that opened a pull request) and whether the tool's terms allow
 running it without a person at the keyboard.
 
 **Where:** add one entry to `PRESETS` in

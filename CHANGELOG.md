@@ -12,7 +12,7 @@ The first public release. It contains:
 
 - `/murmur:init` sets up a repository for team work. It asks seven questions
   and writes a rules file for agents, the tracker rules, a pull request template
-  and a lessons file. It never overwrites an existing file.
+  and a lessons file. It never replaces a file you already have.
 - `/murmur:doctor` checks the setup and reports what is missing.
 - `/murmur:farm` creates a farm on a DigitalOcean Droplet from your laptop. It
   buys the Droplet only after you type the monthly price back, installs murmur
