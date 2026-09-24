@@ -1,154 +1,190 @@
 # Unattended runs
 
-## What an unattended run is
+An unattended run is one long session that works while nobody watches. It
+takes work that is already open, drives each piece to a clear finish, and
+hands back one report. murmur calls this night mode, because the usual case is
+a run you start in the evening and read about in the morning. The steps are
+in the [`night-mode` skill](../plugin/skills/night-mode/SKILL.md). Claude Code
+loads it when you say "night mode", "unattended run" or "finish this while I
+sleep".
 
-An unattended run is one long session, nobody watching, that drives work that
-is already open to a defined finish and hands back a single report.
+Every piece of work ends in one of three states:
 
-The finish is one of three things. Production, meaning merged, deployed, and
-verified by observing the real behaviour. Preview, meaning a running
-environment plus instructions for what to press and what should happen.
-Blocked, meaning a named reason and what picking it up again would take.
+| Finish | What it means |
+| --- | --- |
+| Production | Merged, deployed, and checked by watching the real behaviour |
+| Preview | A running environment, plus what to press and what should happen |
+| Blocked | A named reason, and what picking it up again would take |
 
-Nothing rests in "in progress". An overnight run that produces five
-half-finished things has cost a night and returned nothing anyone can act on.
+Nothing rests in "in progress". A night that leaves five half-finished pieces
+has cost a night and produced nothing anyone can act on.
+
+Words used below: a lane is one agent doing one task on its own branch.
+`<OWNER>` is the person whose product it is, `<TRACKER>` is wherever your team
+tracks work, and `<FARM>` is your always-on machine that runs agents, if you
+have one ([chapter 12](12-the-machine.md)).
 
 ## What it is not
 
-It is not permission to start new work. It is not a lifted safety rule. It is
-not "keep going until the context runs out".
-
-It is also not a guarantee that anything ran at all, which is a real failure
-mode worth its own section below.
+It is not permission to start new work. It does not lift any safety rule. It
+is not "keep going until the context runs out". And it does not guarantee
+that anything ran at all: an alarm inside the session dies silently when the
+session ends (see below).
 
 ## Freeze the scope before you start
 
-The scope is whatever is already open at the moment the command arrives:
-tickets in <TRACKER> carrying this agent's label, its open changes, its
-running lanes, plus anything <OWNER> named in the same sentence.
+The scope is whatever is already open when the run starts:
+
+- tickets in `<TRACKER>` that carry this agent's label;
+- its open pull requests;
+- its running lanes;
+- anything `<OWNER>` named in the same message.
 
 Write that list down before touching anything. Nothing new starts without
-<OWNER>'s word. The one exception is repairing something that blocks a finish
-inside the frozen scope.
+`<OWNER>`'s word. The only exception is repairing something that blocks a
+finish inside the frozen scope.
 
-The reason is drift. An agent working alone finds an adjacent improvement at
+The reason is drift. An agent working alone finds a nearby improvement at
 every step, and each one looks small. Without a frozen list, the morning
 report describes a night of interesting work and an unchanged product.
 
 ## The heartbeat
 
-An agent left alone stops noticing that it has stopped. It waits on something,
-the something never arrives, and no one is there to see the silence.
+An agent left alone does not notice when it has stopped. It waits for
+something, the something never comes, and nobody sees that it went quiet.
 
-The fix is a clock. Wake every fifteen to twenty minutes and run the same
-checklist, skipping nothing. The checklist itself is kept in one place only,
-section 3 of
-[`plugin/skills/night-mode/SKILL.md`](../plugin/skills/night-mode/SKILL.md).
+The fix is a clock. Every fifteen to twenty minutes, the agent wakes and runs
+the same checklist, skipping nothing: mail, running lanes, the merge queue,
+the last deploy, any watchers, the tracker, and one line in the night journal.
+The checklist text is in section 3 of the night-mode skill. The
+[night-mode brief](../templates/briefs/night-mode.md) carries the same
+checklist, ready to hand to an agent.
 
-Two properties matter more than the contents. The checklist is identical every
-time, so nothing depends on judgment at four in the morning. And it writes one
-journal line every tick, even when the answer is "quiet", so the night leaves a
-readable history rather than a memory.
+Two properties matter more than the contents:
 
-## Decide alone, and log what was contested
+- The checklist is the same every time, so nothing depends on judgement at
+  four in the morning.
+- It writes one journal line on every tick, even when the answer is "quiet".
+  So the night leaves a record that anyone can read.
 
-The value of the run is decisions taken without waiting. A question the agent
-could have answered itself is a night spent waiting.
+## Choose what wakes the agent, and say so
 
-Some decisions still need to be visible. A product choice, something hidden or
-deferred, a scope trade, or touching someone else's work: each gets a line in
-the journal, a comment on the ticket, and a place near the top of the report.
+Pick one of four heartbeat modes before the first tick, and write the choice
+in the night journal:
 
-Every contested decision also records how to undo it. A decision <OWNER>
-cannot reverse over coffee is not a decision they can review.
+| Mode | What wakes the agent | Pick it when |
+| --- | --- | --- |
+| alarm | A timer inside this session | The window and machine stay awake all night |
+| lane | A headless lane on `<FARM>` | You have a farm, and the session may close |
+| schedule | A cron job or hosted schedule | You have no farm and no machine that stays awake |
+| none | Nothing: one long stretch, then a handover | The scope fits in one session |
 
-## The walls autonomy never lifts
+A headless lane is an agent that runs without a window, and its whole job is
+to rerun the checklist.
 
-Being alone raises the authority to decide. It raises nothing else.
+### An alarm dies with the session
 
-Never bypass a required check with admin rights. Never merge red and never
-step around the merge queue. Never touch a branch another agent has claimed.
-Never mutate production without approval for that exact action. Never print a
-secret value. Never disable a shipped capability as a fix, because that is a
-product decision.
+Say this in the first message of the run, not in a footnote.
 
-Review before merge gets no night discount: whatever gate the work normally
-passes, it passes now. The house writing rules still apply at four in the
-morning.
+A timer created inside a session lives only as long as that session. Close
+the window, let the machine sleep or lose the network, and the ticks stop.
+There is no error. The run just ends without telling anyone.
 
-And the merge law is whatever <OWNER> said last that evening. If the standing
-rule is "nothing merges without my yes", an unattended run does not lift it.
+Two options are sturdier:
 
-## The alarm dies with the session, and you must say so
+- **A headless lane.** A worker on `<FARM>` whose whole job is the checklist,
+  on a loop. It survives your window closing and reports like any other lane.
+  With no farm, the same worker can run as a headless session on your own
+  machine, but then it stops when that machine does.
+- **A schedule outside the session.** A cron entry or a hosted scheduled run
+  starts a fresh agent at each interval, with the same checklist. It takes
+  longer to set up, and it survives a sleeping machine.
 
-This is the honest caveat, and it belongs in the first message of the run, not
-in a footnote.
-
-A timer created inside the session lives exactly as long as the session. Close
-the window, let the machine sleep, or drop the network, and the ticks stop.
-There is no error. The run simply ends without telling anyone.
-
-Two sturdier options exist.
-
-A headless lane: a worker on <FARM> whose entire job is the checklist on a
-loop. It survives your window closing and reports like any other lane.
-
-A schedule outside the session: a cron entry or a hosted scheduled run that
-starts a fresh agent each interval with the same checklist. Slower to set up,
-and it survives a sleeping machine.
-
-Whichever you choose, name it in the opening message so <OWNER> knows what
+Whichever you choose, name it in the opening message, so `<OWNER>` knows what
 kind of night this is.
 
-## The incident behind it
+### The incident behind it
 
-One night, five lanes each finished their work and waited to be collected.
+One night, five lanes finished their work and waited to be collected. The
+collector was an alarm inside a session on a laptop. The laptop went to sleep,
+and the ticks stopped without a sound. In the morning, five finished pieces of
+work sat untouched: nothing merged, nothing deployed, nothing reported.
 
-The collector was an alarm living inside a session on a laptop. The laptop
-went to sleep. The ticks stopped, silently. In the morning, five completed
-pieces of work sat untouched: nothing merged, nothing deployed, nothing
-reported, and a night gone.
+The lanes had done everything asked of them. The part that failed was the part
+meant to watch, and it failed by producing nothing, which nobody checks for.
+Two fixes came out of it:
 
-The lanes had done everything asked of them. The single point of failure was
-the part that was supposed to be watching, and it failed in the way nobody
-checks for, by producing no output at all.
+- The collector does not live in a window you close.
+- The heartbeat writes where other people can see it, so missing lines are
+  visible too.
 
-Two fixes came out of it. The collector does not live inside the window you
-close. And the heartbeat writes to a place other people can see, so an absence
-of lines is itself visible.
+## Decide alone, and log every contested call
+
+The value of the run is decisions made without waiting. A question the agent
+could answer itself is a night spent waiting.
+
+Some decisions must still be visible: a product choice, something hidden or
+deferred, a scope trade, or work on someone else's pull request. Each one gets
+a line in the journal, a comment on the ticket, and a place in the morning
+report.
+
+Each contested decision also records how to undo it. If `<OWNER>` cannot
+easily undo a decision in the morning, they cannot really review it.
+
+A stuck item gets one more attempt with a new idea. After two failed attempts,
+write it up as blocked and move on to the next item.
+
+## Rules that never lift
+
+Being alone raises the agent's authority to decide. It raises nothing else.
+
+- Never bypass a required check with admin rights.
+- Never merge red, and never step around the merge queue.
+- Never touch a branch another agent has claimed.
+- Never change production without approval for that exact action.
+- Never print a secret value.
+- Never switch off a working feature as a fix. That is a product decision.
+- Review before merge is not skipped at night. Whatever review the work
+  normally passes, it passes now.
+- The house writing rules still apply at four in the morning.
+
+The merge rule is whatever `<OWNER>` said last that evening. If the standing
+rule is "nothing merges without my yes", night mode does not lift it. "Finish
+it yourself" lifts it only for the scope that was named.
 
 ## The morning report
 
-One report, written for someone who was asleep: what shipped, with links; what
-is waiting for <OWNER> and the exact thing to press; what did not land and
-whose move is next; the contested decisions and how to undo them; anything
-found that is worth a rule; a small table of numbers.
+One report, written for someone who was asleep:
 
-The short version goes to <OWNER> directly. The long version goes into the
-parent ticket, so the rest of the team can read it without opening a pull
-request.
+1. What shipped, with links.
+2. What is waiting for `<OWNER>`, and the exact thing to press.
+3. What did not land, and whose move is next.
+4. The contested decisions, and how to undo each one.
+5. Anything found that is worth a rule.
+6. A small table of numbers.
+7. Links: pull requests, environments, tickets and the journal.
 
-## The procedure lives in a skill
+The short version goes to `<OWNER>` directly. The long version goes into the
+parent ticket as a comment, so the rest of the team can read it without
+opening a pull request.
 
-This chapter is the reasoning. The runnable procedure is
-[`plugin/skills/night-mode/SKILL.md`](../plugin/skills/night-mode/SKILL.md):
-the first ten minutes, the exact heartbeat text to paste, the finish table,
-the report shape, and what to do if the session ends early.
+## The procedure lives in the skill
 
-Keep one copy. A procedure that exists in a chapter and in a skill will drift,
-and the stale copy is the one somebody follows at three in the morning.
+This chapter gives the reasons. The steps are in the night-mode skill: the
+first ten minutes, the heartbeat text to paste, the finish table, the report
+shape, and what to do if the session ends early. To hand a run to an agent,
+fill in the [night-mode brief](../templates/briefs/night-mode.md).
+
+Keep one copy of the procedure. A procedure written in both a chapter and a
+skill drifts apart, and the stale copy is the one somebody follows at three in
+the morning.
 
 ## Adopt it in a day
 
-1. Run one short daytime rehearsal first: one ticket, two hours, you nearby.
-2. Copy the heartbeat checklist out of the night-mode skill into whatever
-   wakes the agent.
-3. Open a journal file and require one line per tick, even a quiet one.
+1. Rehearse once in the daytime: one ticket, two hours, you nearby.
+2. Copy the heartbeat checklist from the night-mode skill into whatever wakes
+   the agent.
+3. Open a journal file, and require one line per tick, even a quiet one.
 4. Decide up front which of the three finishes each scope item is aiming at.
-5. Optional, when you have a machine or a scheduler outside your session: move
-   the alarm there before the first real overnight run.
-
-
-## Pick the heartbeat mode on purpose
-
-There are four ways to be woken up during a run: an alarm inside the session, a headless lane on a farm, a schedule outside the session, or nothing at all. The first is the easiest and the most fragile, because it dies when the window closes or the machine sleeps. Say which one you are using before the first tick and write it down. The skill lists the four and when each fits.
+5. When you have a farm or a scheduler outside your session, move the alarm
+   there before the first real overnight run.
