@@ -91,8 +91,8 @@
 .mm-status[data-tone="live"]::before { background: var(--lamp); -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><circle cx='6' cy='6' r='3.3' fill='black'/></svg>"); mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><circle cx='6' cy='6' r='3.3' fill='black'/></svg>"); }
 
 /* ----------------------------------------------------------------- tile */
-/* The owner's rule: the label on the top edge, the value on the top edge, the note on the
-   bottom edge, so a row of tiles never jumps. */
+/* The label and the value sit on the top edge and the note on the bottom edge, so a row
+   of tiles never jumps. */
 .mm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); }
 .mm-tile {
   display: grid;
@@ -163,7 +163,7 @@
 /* Every control is 36 px tall, sits on paper-raised inside a line-strong border (3 to 1),
    and turns its border accent when focused. Nothing is square: the smallest corner is
    radius-xs. The select draws its own chevron, 12 px, inset 12 px from the edge, with the
-   text stopping 36 px short of it, so the two never touch. */
+   text stopping 36 px from the edge, so the two never touch. */
 .mm-field { display: grid; gap: 6px; min-width: 0; align-content: start; }
 .mm-field > label, .mm-field__label { font: 550 12.5px/16px var(--font-sans); color: var(--ink); }
 .mm-field__hint { font-size: 12px; line-height: 16px; color: var(--ink-muted); }
