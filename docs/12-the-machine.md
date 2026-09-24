@@ -206,10 +206,11 @@ Both are your own accounts. Every branch an agent pushes and every pull request 
 your GitHub login. That is why the head office exists: it tells the agents apart when GitHub
 cannot.
 
-The Claude login must be a subscription, not an API key. The fleet removes `ANTHROPIC_API_KEY`
-and `OPENAI_API_KEY` from the environment whenever it starts an agent, so an agent does not
-switch to paid API use by accident. Do not set up any other API credentials on the farm, such as
-`ANTHROPIC_AUTH_TOKEN`, an `apiKeyHelper` in Claude Code's settings, `CODEX_API_KEY`, or a Codex
+The Claude login must be a subscription, not an API key. Whenever the fleet starts a Claude Code
+or Codex agent, it removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`,
+`CODEX_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` and `CLAUDE_CODE_USE_FOUNDRY`
+from its environment, so an agent does not switch to paid API use by accident. Do not set up other
+API credentials on the farm either, such as an `apiKeyHelper` in Claude Code's settings or a Codex
 login made with an API key.
 
 Next, register a project and start the first agent. The installer prints the commands, and

@@ -1534,6 +1534,62 @@ with world() as (room, calls):
                   for line in calls.read_text().splitlines()), calls.read_text())
 
 print()
+print("a claude or codex lane runs on its subscription login only")
+
+# Each launcher a spawn writes is run by bash with every variable that would move the lane onto an
+# API key or a cloud provider, and the fake engine writes down the environment it was handed. A
+# generic engine runs on its own key, so its launcher must leave that key alone.
+AWAY_FROM_SUBSCRIPTION = {
+    "ANTHROPIC_API_KEY": "sk-ant-api-not-real", "ANTHROPIC_AUTH_TOKEN": "not-real",
+    "OPENAI_API_KEY": "sk-not-real", "CODEX_API_KEY": "not-real",
+    "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1", "CLAUDE_CODE_USE_FOUNDRY": "1"}
+KEYED_CATALOG = """
+[keyedcli]
+label    = "A CLI that runs on its own key"
+engine   = "generic"
+bin      = "keyedcli"
+auth_env = "ANTHROPIC_AUTH_TOKEN"
+run      = "{bin} -p {task}"
+source   = "added"
+"""
+
+
+def lane_env(room, lane, engine, *extra):
+    """The environment the engine of a freshly spawned lane was started with, as a dict."""
+    done = fleet("spawn", "--project", "demo", "--lane", lane, "--engine", engine, *extra,
+                 "--task", "t", "--force")
+    runs = list((room / "state" / "logs").glob(lane + "-*.run.sh"))
+    if done.returncode != 0 or not runs:
+        return {"spawn failed": done.stdout + done.stderr}
+    subprocess.run(["bash", str(runs[0])], env=dict(os.environ, **AWAY_FROM_SUBSCRIPTION),
+                   capture_output=True, timeout=60)
+    seen = room / ("env-" + lane)
+    lines = seen.read_text().splitlines() if seen.exists() else ["engine never ran="]
+    return dict(line.split("=", 1) for line in lines if "=" in line)
+
+
+with world(KEYED_CATALOG, {"keyedcli": {"enabled": True, "health": "ok"}}) as (room, calls):
+    project(room)
+    _dump = 'env > "%s/env-$FAKE_LANE"\nexit 0\n' % room
+    for _tool in ("claude", "codex", "keyedcli"):
+        _fake(room / "bin" / _tool, _dump)
+    (room / "state" / "secrets").mkdir()
+    (room / "state" / "secrets" / "keyedcli.key").write_text("the-generic-engines-own-key\n")
+    for _lane, _engine, _extra in (("envclaude", "claude", ("--account", "default")),
+                                   ("envcodex", "codex", ())):
+        os.environ["FAKE_LANE"] = _lane
+        _seen = lane_env(room, _lane, _engine, *_extra)
+        check(f"a {_engine} lane's engine gets none of the variables that bill elsewhere",
+              "spawn failed" not in _seen and "engine never ran" not in _seen
+              and not set(AWAY_FROM_SUBSCRIPTION) & set(_seen),
+              str(sorted(set(AWAY_FROM_SUBSCRIPTION) & set(_seen)) or _seen))
+    os.environ["FAKE_LANE"] = "envkeyed"
+    _seen = lane_env(room, "envkeyed", "keyedcli")
+    check("a generic lane's engine still gets its own key",
+          _seen.get("ANTHROPIC_AUTH_TOKEN") == "the-generic-engines-own-key", str(_seen)[:300])
+    os.environ.pop("FAKE_LANE", None)
+
+print()
 print("a generic lane settles on its engine's exit code")
 
 # A bad key or an unknown model, as most CLIs report it: one plain line on stdout, then exit 1.

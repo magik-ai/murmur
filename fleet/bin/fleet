@@ -50,6 +50,12 @@ CODEX_DEFAULT_EFFORT="${CODEX_DEFAULT_EFFORT:-medium}"
 # Never let a stray API key divert billing off the subscription (both engines
 # run on their subscription: Claude OAuth, Codex "Logged in using ChatGPT").
 unset ANTHROPIC_API_KEY OPENAI_API_KEY 2>/dev/null || true
+# A lane runs as a systemd unit, which does not inherit this shell, so the claude and codex
+# launchers unset these themselves: every variable that would move Claude Code or Codex off the
+# subscription login, onto an API key or a cloud provider. A generic engine's launcher keeps them,
+# because its own key is how that engine runs.
+SUBSCRIPTION_ONLY_UNSET="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN OPENAI_API_KEY CODEX_API_KEY"
+SUBSCRIPTION_ONLY_UNSET+=" CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY"
 
 _proj() { # $1 project, $2 field (dotted for a sub-table, e.g. `ports.vite_base`)
   "$PY" - "$1" "$2" <<'PY'
@@ -706,7 +712,7 @@ PY
 export PATH="\$HOME/.local/bin:\$PATH"
 export FLEET_STATE="$FLEET_STATE"
 export FLEET_CONFIG="$FLEET_CONFIG"
-unset OPENAI_API_KEY
+unset $SUBSCRIPTION_ONLY_UNSET
 cd "$wt" || exit 1
 # </dev/null is MANDATORY: codex exec otherwise blocks forever reading stdin.
 # --ignore-user-config: workers must NOT load ~/.codex/config.toml wholesale. Every MCP server a
@@ -730,7 +736,7 @@ RUN
 export PATH="\$HOME/.local/bin:\$PATH"
 export FLEET_STATE="$FLEET_STATE"
 export FLEET_CONFIG="$FLEET_CONFIG"
-unset ANTHROPIC_API_KEY
+unset $SUBSCRIPTION_ONLY_UNSET
 $claude_env
 cd "$wt" || exit 1
 "$CLAUDE_BIN" -p "\$(cat "$log.task")" \\

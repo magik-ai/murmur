@@ -83,11 +83,13 @@ sudo systemctl daemon-reload
 
 ### Logins
 
-- Log in on a **subscription**, not an API key. fleet removes `ANTHROPIC_API_KEY` and
-  `OPENAI_API_KEY` from every lane, so a lane does not switch to paid API use by accident. Do not
-  set up any other API credentials on the farm, such as `ANTHROPIC_AUTH_TOKEN`, an `apiKeyHelper`
-  in Claude Code's settings, `CODEX_API_KEY`, or a Codex login made with an API key. The limit
-  that matters is the subscription's own usage windows, and your interactive sessions share them.
+- Log in on a **subscription**, not an API key. fleet removes `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, `CODEX_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`,
+  `CLAUDE_CODE_USE_VERTEX` and `CLAUDE_CODE_USE_FOUNDRY` from every Claude Code and Codex lane, so
+  a lane does not switch to paid API use by accident. Do not set up other API credentials on the
+  farm either, such as an `apiKeyHelper` in Claude Code's settings or a Codex login made with an
+  API key. The limit that matters is the subscription's own usage windows, and your interactive
+  sessions share them.
 - Logging in is interactive. Do it once over ssh with a terminal: `ssh -t <FARM_HOST> claude`,
   then type `/login`. For Codex, tunnel the login callback back to the farm:
   `ssh -L 1455:localhost:1455 -t <FARM_HOST> codex login`.
