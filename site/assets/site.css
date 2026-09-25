@@ -276,14 +276,22 @@ footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
 .pieces__inner .h2 { margin: 0; }
 .pieces__stage { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 9fr); gap: clamp(32px, 4vw, 56px); align-items: center; }
 .pieces__steps { display: grid; gap: clamp(16px, 3vh, 30px); margin: 0; padding: 0; list-style: none; }
-.piece { opacity: 0.34; transition: opacity 320ms ease-out; }
-.piece.is-on { opacity: 1; }
 /* The name and its tag share one line, and the text under them is three lines at most, so the
    column of three stays as tall as the screen beside it. */
 .piece__title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 6px; }
 .piece__title .mm-tag { margin: 0; }
 .piece p { margin: 0; font-size: 16px; line-height: 26px; color: var(--ink-muted); }
 .piece__shot { display: none; }
+/* While the stage is pinned, the lit part is in full ink and the two waiting their turn step
+   back to the muted ink. That still reads at 5.5:1 or more on the paper, so every part stays
+   legible (WCAG 1.4.3), where fading them made them 2:1. */
+@media (min-width: 1025px) and (min-height: 561px) {
+  .piece__title, .piece p { transition: color 320ms ease-out; }
+  .piece .mm-tag { transition: border-color 320ms ease-out; }
+  .piece:not(.is-on) .piece__title { color: var(--ink-muted); }
+  .piece:not(.is-on) .mm-tag { border-color: var(--line); }
+  .piece.is-on p { color: var(--ink); }
+}
 .pieces__screen { position: relative; aspect-ratio: 16 / 10; max-width: 100%; }
 .screen-frame { position: absolute; inset: 0; opacity: 0; transition: opacity 420ms ease-out; }
 .screen-frame.is-on { opacity: 1; }
@@ -292,14 +300,13 @@ footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
 .pip { position: relative; width: 44px; height: 4px; padding: 0; border: 0; border-radius: 999px; background: var(--line); overflow: hidden; cursor: pointer; }
 .pip i { position: absolute; inset: 0; background: var(--accent); transform-origin: left; transform: scaleX(0); }
 .pip:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-@media (prefers-reduced-motion: reduce) { .piece, .screen-frame { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .piece__title, .piece p, .piece .mm-tag, .screen-frame { transition: none; } }
 /* A narrow or short window gets the parts as a plain list, each with its screen under it. */
 @media (max-width: 1024px), (max-height: 560px) {
   .pieces { height: auto; padding-block: 56px; }
   .pieces__sticky { position: static; height: auto; overflow: visible; }
   .pieces__stage { grid-template-columns: 1fr; }
   .pieces__steps { gap: 48px; }
-  .piece { opacity: 1; }
   .piece__shot { display: block; margin-top: 18px; }
   .pieces__screen, .pieces__progress { display: none; }
 }
