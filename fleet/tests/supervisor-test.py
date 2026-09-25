@@ -188,6 +188,16 @@ delivered_b = any(json.load(open(f)).get("outcome") == "met"
 check("B delivered once its file appeared", delivered_b)
 check("B did NOT respawn after delivering", sum("lane-b" in c for c in open(calls).read().splitlines()) == 1)
 
+# Without FLEET_BIN a respawn runs this checkout's own bin/fleet, which exists wherever install.sh
+# linked the launcher (--prefix), not a ~/.local/bin/fleet that may not.
+_own = subprocess.run(
+    [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import supervisor; "
+     "print(supervisor.FLEET)", os.path.dirname(os.path.abspath(SUP))],
+    env={k: v for k, v in env.items() if k != "FLEET_BIN"}, capture_output=True, text=True)
+check("without FLEET_BIN the daemon respawns through its own checkout's bin/fleet",
+      _own.stdout.strip() == os.path.join(
+          os.path.dirname(os.path.dirname(os.path.abspath(SUP))), "bin", "fleet"))
+
 print("\nRESULT:", "ALL PASS" if ok else "FAILURES ABOVE")
 subprocess.run(["rm", "-rf", ROOT])
 sys.exit(0 if ok else 1)

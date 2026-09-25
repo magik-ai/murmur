@@ -166,8 +166,8 @@ The installer prints what it did:
 | `--no-skills` | do not link the orchestrator skill into `~/.claude/skills` or `~/.codex/skills` |
 | `--local` | single machine: record `FLEET_DASH_BIND=127.0.0.1` in `~/.config/fleet/env`, and skip the laptop advice |
 
-With `--prefix`, also set `FLEET_BIN` in `~/.config/fleet/env` to the new path. The supervisor
-daemon respawns lanes through `~/.local/bin/fleet` unless `FLEET_BIN` names another one.
+The supervisor daemon respawns lanes through the `bin/fleet` of its own clone, so `--prefix` needs
+nothing else. `FLEET_BIN` in `~/.config/fleet/env` names another `fleet` command.
 
 ### The env file
 
@@ -790,7 +790,7 @@ Every setting below is optional and has a working default. Put it in `~/.config/
 | `FLEET_DAEMON_INTERVAL` | `60` | seconds between two passes of the supervisor daemon |
 | `FLEET_RESPAWN_MAX` | `10` | the most respawns per lane before it is marked `gave_up` |
 | `FLEET_RESPAWN_COOLDOWN` | `600` | the fewest seconds between two respawns of one lane |
-| `FLEET_BIN` | `~/.local/bin/fleet` | the `fleet` command the supervisor daemon respawns lanes with. Set it after `install.sh --prefix` |
+| `FLEET_BIN` | `bin/fleet` in the daemon's own clone | the `fleet` command the supervisor daemon respawns lanes with |
 | `FLEET_DOCTL_CONTEXT` | `murmur` | the `doctl` login context used for DigitalOcean |
 
 `CLAUDE_BIN` and `CODEX_BIN` in your shell's environment win over both settings. In this file,

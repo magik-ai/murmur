@@ -39,7 +39,10 @@ except Exception:
 STATE = os.environ.get("FLEET_STATE", os.path.expanduser("~/.fleet"))
 STATE_DIR = os.path.join(STATE, "state")
 BRIEF_DIR = os.path.join(STATE, "briefs")
-FLEET = os.environ.get("FLEET_BIN", os.path.expanduser("~/.local/bin/fleet"))
+# The fleet command a respawn runs: this checkout's own, so a launcher linked somewhere other than
+# ~/.local/bin (install.sh --prefix) makes no difference. FLEET_BIN points it elsewhere.
+FLEET = os.environ.get("FLEET_BIN") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "fleet")
 DEFAULT_COOLDOWN = int(os.environ.get("FLEET_RESPAWN_COOLDOWN", "600"))   # s between respawns
 DEFAULT_MAX = int(os.environ.get("FLEET_RESPAWN_MAX", "10"))              # backstop per lane
 # The CLI writes a lane's state record and THEN starts its systemd unit, so for a moment a
