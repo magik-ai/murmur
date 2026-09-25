@@ -16,7 +16,7 @@ Words this guide uses:
   messages, through the `hq` command. It is optional.
 - **sweep**: the clean-up job that removes finished worktrees on a timer.
 - **supervisor daemon**: the service that starts a lane again when it ends before it delivered.
-  It only acts on lanes that have a restart policy. The dashboard calls it the agent runner.
+  It only acts on lanes that have a restart policy. The dashboard calls it the lane restarter.
 
 The handbook's [glossary](../../docs/00-start-here.md#words-this-handbook-uses) has the rest.
 Replace `<FARM_HOST>` (the farm's ssh host alias), `<PROJECT>`, `<ORG>/<REPO>`, `<LANE>` and
@@ -437,9 +437,9 @@ or with no head office configured, the tab says so and shows the command that fi
 - **Power**: the power setting, and three actions for the whole farm: **Throttle**
   (`fleet mode balanced`), **Drain** (`fleet drain`) and **Resume** (`fleet resume`). Each one
   shows what it will do before you confirm. See [section 9](#9-power-modes-and-capacity).
-- **Services**: the agent runner (the supervisor daemon, which restarts only the lanes that have
-  a restart policy) and the sweep timer, with start, stop and restart. Stopping the agent runner
-  stops no running lane. The dashboard's own row is read-only: restart it from a terminal.
+- **Services**: the lane restarter (the supervisor daemon, which restarts only the lanes that have
+  a restart policy) and the sweep timer, with start, stop and restart. Stopping the lane
+  restarter stops no running lane. The dashboard's own row is read-only: restart it from a terminal.
 - **Hosting**: your machines and the hosting providers (see
   [section 10](#10-machines-and-hosting)).
 - **Accounts**: the subscriptions and their login state. Add and remove them, or refresh their
@@ -475,7 +475,7 @@ stay at a terminal:
 
 A lane is one pass: the engine reads its brief once and exits. If it exits before it delivered,
 something has to notice and start it again. That is the supervisor daemon. The dashboard calls
-it the **agent runner**. Stopping it stops no running lane: each lane is its own unit.
+it the **lane restarter**. Stopping it stops no running lane: each lane is its own unit.
 
 ```bash
 fleet daemon start        # install and start the user unit fleet-daemon.service
@@ -1028,7 +1028,7 @@ true.
 | `/api/version` | the page's build |
 | `/api/identities` | each code name's mark |
 | `/api/health` | one row per prerequisite: `ok`, `missing`, `off` or `error`, each with a fix |
-| `/api/services` | the agent runner, the sweep timer and the dashboard: state, since when, and what each does |
+| `/api/services` | the lane restarter, the sweep timer and the dashboard: state, since when, and what each does |
 | `/api/metrics` | load, memory, disk, GPU, temperatures and the capacity verdict |
 | `/api/mode` | the power setting, what it resolves to, and its caps |
 | `/api/sweep` | whether the sweep timer is on, the seconds to its next pass, and the last result |

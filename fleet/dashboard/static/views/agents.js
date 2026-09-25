@@ -341,8 +341,8 @@ function table(rows, context) {
 /* -------------------------------------------------------------- drawer */
 
 /* Stopping a lane and retiring it are two different things, and which of them is on offer is
-   the lane's own business: a lane with a restart policy is started again by the runner under
-   a new name, so stopping it is stopping this pass. A lane with no policy has one ending. */
+   the lane's own business: a lane with a restart policy is started again by the lane restarter
+   under a new name, so stopping it is stopping this pass. A lane with no policy has one ending. */
 function endings(row) {
   const policy = String((row && row.restart) || "").trim();
   if (policy && policy !== "none") {
@@ -351,14 +351,14 @@ function endings(row) {
         id: "stop",
         label: "Stop this pass",
         retire: false,
-        says: `This ends the pass that is running now. The runner will start this lane again `
+        says: `This ends the pass that is running now. The lane restarter will start this lane again `
           + `under a new name, because its restart policy is ${policy}.`,
       },
       {
         id: "retire",
         label: "Retire this lane",
         retire: true,
-        says: "This ends the lane and takes its restart policy away, so the runner will not "
+        says: "This ends the lane and takes its restart policy away, so the lane restarter will not "
           + "start it again. Its worktree and its branch are left where they are.",
       },
     ];
@@ -379,7 +379,7 @@ async function endLane(slug, choice, context) {
   context.paint();
   try {
     const answer = await apiPost("/api/agents/kill", { slug, retire: choice.retire });
-    const again = answer && answer.restart ? `The runner will start it again: ${answer.restart}.` : "";
+    const again = answer && answer.restart ? `The lane restarter will start it again: ${answer.restart}.` : "";
     toast([(answer && answer.detail) || `${slug} was asked to stop.`, again].filter(Boolean).join(" "));
     local.confirm = "";
     await context.refresh("/api/fleet");

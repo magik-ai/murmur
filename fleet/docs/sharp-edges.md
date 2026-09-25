@@ -300,14 +300,14 @@ office takes longer than a page can wait. At a terminal, `hq feed` is still the 
 
 **Mechanism.** The Power section of the Machine tab has two buttons whose names undersell them.
 **Drain** runs `fleet game-mode on`. It salvages every live lane (commits its uncommitted work and
-pushes its branch), stops the agent runner (`fleet-daemon.service`) so that nothing is started
+pushes its branch), stops the lane restarter (`fleet-daemon.service`) so that nothing is started
 again, and kills the lanes to free their memory. **Resume** runs `fleet game-mode off`. It starts
-the agent runner again, and the runner starts every lane that has a restart policy and has not
+the lane restarter again, and it starts every lane that has a restart policy and has not
 delivered, from its brief. So one click on Resume can put many agents back on the machine within
 a minute or two, spending subscription.
 
 **The guard.** Neither button acts on the first press. Drain's confirmation names the lanes it
-will salvage and stop. Resume's confirmation says that the agent runner starts again and will
+will salvage and stop. Resume's confirmation says that the lane restarter starts again and will
 respawn the lanes with a restart policy, spending subscription. Both run as jobs you can watch
 (edge 15). The dashboard keeps running through both: it never stops itself.
 

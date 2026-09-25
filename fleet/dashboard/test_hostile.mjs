@@ -994,7 +994,7 @@ for (const width of [700, 1024, 1280, 1440]) {
    mentioned when there is none. */
 {
   const services = (state) => JSON.stringify({ at: new Date().toISOString(), stale_since: null, error: null,
-    services: [{ id: "agent_runner", label: "Agent runner", state, since: Date.now() / 1000 - 600, actions: ["start", "stop", "restart"] }] });
+    services: [{ id: "agent_runner", label: "Lane restarter (fleet daemon)", state, since: Date.now() / 1000 - 600, actions: ["start", "stop", "restart"] }] });
   const read = async (overrides) => {
     const { page, context } = await open({ hash: "#/board", overrides });
     const seen = await page.evaluate(() => ({
@@ -1008,12 +1008,12 @@ for (const width of [700, 1024, 1280, 1440]) {
   const on = await read({ "/api/services": services("active") });
   check("a working farm reads Farm on, and says nothing about room", on.farm === "Farm on" && on.room, JSON.stringify(on));
   const off = await read({ "/api/services": services("inactive") });
-  /* `fleet spawn` needs no agent runner: only restarts and gated lanes stop with it. */
-  check("a stopped agent runner reads Restarts off, says new agents still start, and what to do",
+  /* `fleet spawn` needs no lane restarter: only restarts and gated lanes stop with it. */
+  check("a stopped lane restarter reads Restarts off, says new agents still start, and what to do",
     off.farm === "Restarts off" && /New agents still start/.test(off.why) && /Start it/.test(off.why),
     JSON.stringify(off));
   const empty = await read({ "/api/services": JSON.stringify({ at: new Date().toISOString(), stale_since: null, error: null, services: [] }) });
-  check("a farm that lists no agent runner is not called on", empty.farm !== "Farm on", JSON.stringify(empty));
+  check("a farm that lists no lane restarter is not called on", empty.farm !== "Farm on", JSON.stringify(empty));
   const failed = await read({ "/api/services": (handler) => handler.fulfill({ status: 500, contentType: "application/json", body: '{"error":"no user service manager"}' }) });
   check("a farm whose services cannot be read is not called on", failed.farm !== "Farm on", JSON.stringify(failed));
   const noMode = await read({ "/api/services": services("active"),

@@ -208,14 +208,14 @@ function confirmBody(context, action) {
           }, h("span", { class: "mono" }, lane.slug),
             h("span", { class: "muted" }, lane.restart ? ` restarts as ${lane.restart}` : " has no restart policy")))) : null,
           h("p", { key: "two" },
-            "It stops the agent runner. A lane with no restart policy loses whatever salvage "
+            "It stops the lane restarter. A lane with no restart policy loses whatever salvage "
             + "could not push."),
           h("p", { key: "three" }, "This page keeps running."),
         ];
       }
       return [
         h("p", { key: "one" },
-          "The agent runner starts again and will respawn every until-pr and until-merged lane, "
+          "The lane restarter starts again and will respawn every until-pr and until-merged lane, "
           + "spending subscription."),
         lanes.length
           ? h("ul", { class: "m-lanes", key: "lanes" }, lanes.map((lane) => h("li", { key: lane.slug },

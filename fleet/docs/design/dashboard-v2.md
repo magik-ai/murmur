@@ -114,7 +114,7 @@ Stop and Restart where `fleet` has the verb:
 
 | Service | What is read | Commands |
 |---|---|---|
-| Agent runner | `fleet-daemon.service` | `fleet daemon start`, `fleet daemon stop` |
+| Lane restarter (fleet daemon) | `fleet-daemon.service` | `fleet daemon start`, `fleet daemon stop` |
 | Sweep timer | `fleet-sweep.timer` | `fleet autosweep on`, `fleet autosweep off` |
 | This dashboard | `fleet-dashboard.service`, else its tmux session, and its listening socket | none: the row is read-only and shows `fleet dashboard restart` |
 
@@ -204,8 +204,8 @@ so the numbers do not change.
    button is "Throttle the farm and stop new agents" (`fleet mode balanced`), and its confirm
    names the CPU and memory caps from the farm's own power profile. Drain runs
    `fleet game-mode on`. Its confirm lists by name the lanes it will salvage and stop, and says
-   that it stops the agent runner and that a lane with no restart policy loses whatever salvage
-   could not push. Resume runs `fleet game-mode off`. Its confirm says that the agent runner
+   that it stops the lane restarter and that a lane with no restart policy loses whatever salvage
+   could not push. Resume runs `fleet game-mode off`. Its confirm says that the lane restarter
    starts again and respawns every until-pr and until-merged lane, which spends subscription.
 4. **The token never appears on the page.** The page cannot rotate it either.
    `fleet dashboard token` prints it, and `fleet dashboard restart` restarts the server.
@@ -221,9 +221,9 @@ so the numbers do not change.
    Actions that share a resource share a key, so Drain and Resume can never run at once. A
    finished record is kept for a day.
 8. **Stop versus Retire** comes from the lane's restart field. With a restart policy, the drawer
-   offers "Stop this pass", whose confirm says the runner will start the lane again under a new
-   name, and "Retire this lane", which ends it for good. With no policy it offers only "Stop this
-   lane". The worktree and the branch stay either way.
+   offers "Stop this pass", whose confirm says the lane restarter will start the lane again under
+   a new name, and "Retire this lane", which ends it for good. With no policy it offers only "Stop
+   this lane". The worktree and the branch stay either way.
 9. **Not used.** This number covered the runner of a verification queue, which the dashboard does
    not have.
 10. **Not used.** This number covered that queue's logs.

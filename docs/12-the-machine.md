@@ -293,10 +293,10 @@ The page has three tabs.
   a separate copy.
 - **Machine** is where you change the farm after setup:
   - **Power**: throttle the farm to give the machine back to you, drain it (save every agent's
-    work to git and stop them all), or resume it (start the agent runner again, which restarts
+    work to git and stop them all), or resume it (start the lane restarter again, which restarts
     the agents that have a restart policy). Each action says what it will do before it does it.
-  - **Services**: start and stop the agent runner (`fleet daemon`) and the sweep timer. The
-    agent runner only restarts lanes that have a restart policy. Stopping it stops those
+  - **Services**: start and stop the lane restarter (`fleet daemon`) and the sweep timer. The
+    lane restarter only restarts lanes that have a restart policy. Stopping it stops those
     restarts, not the agents that are running.
   - **Accounts**: add a subscription. You pick the engine and a name, and the page gives you the
     exact command to run in a terminal. Then it notices the login by itself.

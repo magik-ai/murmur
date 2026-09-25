@@ -1217,7 +1217,7 @@ def select_models_request(body):
 
 # ---------------------------------------------------------------- services
 #
-# Three rows in the machine's control room: the agent runner, the sweep timer, and this
+# Three rows in the machine's control room: the lane restarter, the sweep timer, and this
 # dashboard. Every fact here costs a process, so all three are read by the 45 second refresher
 # and NEVER on a request: a page redrawing every few seconds would otherwise ask systemd a few
 # thousand questions an hour.
@@ -1231,7 +1231,7 @@ def select_models_request(body):
 # which falls through to status, prints "autosweep OFF" and changes nothing. A row that says the
 # sweep is off and hands over a command that does nothing reads as a broken farm.
 SERVICE_UNITS = (
-    {"id": "agent_runner", "label": "Agent runner", "unit": DAEMON_UNIT,
+    {"id": "agent_runner", "label": "Lane restarter (fleet daemon)", "unit": DAEMON_UNIT,
      "what": "respawns a lane that carries a restart policy until it delivers",
      "stopped": "stopped, so no lane is respawned when it ends before delivering",
      "verb": "fleet daemon", "start": ["daemon", "start"], "stop": ["daemon", "stop"],
@@ -2415,7 +2415,7 @@ def agent_msg(body):
 # ---------------------------------------------------------------- stopping a lane
 #
 # `fleet kill` stops the lane's unit and marks its record killed. `--retire` also writes the
-# lane-scoped marker the supervisor honours, so the runner never respawns it and any sibling the
+# lane-scoped marker the supervisor honours, so it never respawns the lane and any sibling the
 # storm already spawned is stopped too. Which of the two a page should offer is decided by the
 # lane's restart policy, and that policy travels back with the answer so the page can say what
 # the press actually did.
@@ -2444,8 +2444,8 @@ def agent_kill(body):
     if retire:
         sentence = "This lane is stopped and retired. Nothing will respawn it."
     elif restart:
-        sentence = ("This pass is stopped. The runner will respawn this lane under a new name, "
-                    f"because its policy is {restart}.")
+        sentence = ("This pass is stopped. The lane restarter will respawn this lane under a new "
+                    f"name, because its policy is {restart}.")
     else:
         sentence = "This lane is stopped. It carries no restart policy, so nothing respawns it."
     return 200, {"ok": True, "slug": slug, "retired": retire, "restart": restart,
@@ -2458,7 +2458,7 @@ def agent_kill(body):
 # Three actions, labelled as what they do. There is no spawn-only pause verb on this farm, so the
 # control that stops new agents is `fleet mode balanced`, which also caps the CPU and memory of
 # every agent already running. Draining is `fleet game-mode on`: it salvages and kills every live
-# lane and stops the agent runner. Resuming is `fleet game-mode off`, and the runner it starts
+# lane and stops the lane restarter. Resuming is `fleet game-mode off`, and the restarter it starts
 # respawns every until-pr and until-merged lane, which spends subscription.
 
 POWER_THROTTLE_TIMEOUT = 30    # writes a cgroup and answers
@@ -2533,14 +2533,14 @@ def power_preview(action):
         payload = {
             "label": "Drain the farm",
             "sentence": f"This salvages and then stops the {len(lanes)} lane(s) below, and stops "
-                        "the agent runner so nothing is respawned.",
+                        "the lane restarter so nothing is respawned.",
             "warnings": ["A lane with no restart policy loses whatever salvage could not push.",
                          "This dashboard keeps running through all of it."],
         }
     else:
         payload = {
             "label": "Resume the farm",
-            "sentence": "This starts the agent runner again, and it will respawn every until-pr "
+            "sentence": "This starts the lane restarter again, and it will respawn every until-pr "
                         "and until-merged lane from its brief, which spends subscription.",
             "warnings": [],
         }

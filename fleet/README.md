@@ -113,7 +113,7 @@ The dashboard is a web page with three tabs:
 
 From the page you can stop or retire a lane, send a lane a message, send head office mail, change
 the power setting, and throttle, drain or resume the whole farm. You can also start and stop the
-sweep timer and the supervisor daemon, which the page calls the agent runner. The daemon only
+sweep timer and the supervisor daemon, which the page calls the lane restarter. The daemon only
 restarts lanes that have a restart policy: stopping it stops no running lane. You can add or
 remove subscriptions, models, projects and machines too. A few things stay at a terminal: spawning
 a lane, `fleet clean` and `fleet sweep`, storing a key for an engine you added

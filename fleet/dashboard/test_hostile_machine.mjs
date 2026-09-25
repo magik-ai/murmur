@@ -174,8 +174,8 @@ const READ_ONLY = JSON.stringify({
     /demo-api-3f2a/.test(confirm), confirm.slice(0, 200));
   check("machine: the drain confirm says what is lost",
     /restart policy/.test(confirm) && /salvage could not push/.test(confirm), confirm.slice(0, 300));
-  check("machine: the drain confirm says the agent runner stops",
-    /stops the agent runner/.test(confirm), confirm.slice(0, 300));
+  check("machine: the drain confirm says the lane restarter stops",
+    /stops the lane restarter/.test(confirm), confirm.slice(0, 300));
   check("machine: the drain confirm says this page keeps running",
     /page keeps running/.test(confirm), confirm.slice(0, 300));
   await page.click("[data-confirm='drain']");
@@ -265,7 +265,7 @@ const READ_ONLY = JSON.stringify({
       const found = rows.find((node) => node.innerText.startsWith(word));
       return found ? [...found.querySelectorAll("td")].map((cell) => cell.innerText) : [];
     };
-    return { runner: pick("agent runner"), dashboard: pick("This dashboard") };
+    return { runner: pick("Lane restarter"), dashboard: pick("This dashboard") };
   });
   check("machine: a service says when it last changed",
     seen.runner.length > 2 && /ago/.test(seen.runner[2]) && !/not known/.test(seen.runner[2]),

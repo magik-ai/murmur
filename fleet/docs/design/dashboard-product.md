@@ -40,7 +40,7 @@ moves to a bar across the top under 600 px. The page opens on the Board.
 
 The header is the same on every tab. From left to right:
 
-- the farm's state: Farm on, Farm paused or Restarts off (the agent runner is stopped, so no
+- the farm's state: Farm on, Farm paused or Restarts off (the lane restarter is stopped, so no
   lane is restarted; new agents still start), with the reason on hover;
 - a capacity pill, only when there is no room for another agent;
 - the sweep countdown;

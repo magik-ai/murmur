@@ -328,9 +328,9 @@ function paintSweep() {
 }
 
 /* The header says whether the farm is working: on, paused, or restarts off. Restarts off is the
-   agent runner stopped: new agents still start (`fleet spawn` does not need it), but no lane is
-   restarted and no gated lane fires. Paused is the power setting on Paused, so nothing new
-   starts; on is everything else. */
+   lane restarter (`fleet daemon`) stopped: new agents still start (`fleet spawn` does not need
+   it), but no lane is restarted and no gated lane fires. Paused is the power setting on Paused,
+   so nothing new starts; on is everything else. */
 function paintFarmState() {
   const node = document.getElementById("farmState");
   if (!node) return;
@@ -344,10 +344,10 @@ function paintFarmState() {
   const paused = Boolean(mode) && (mode.setting === "hard" || (mode.setting === "auto" && mode.effective === "hard"));
   let meaning = "pause";
   let word = "Farm";
-  let why = "The farm has not said whether its agent runner is running.";
+  let why = "The farm has not said whether its lane restarter is running.";
   if (runner && runner.state !== "active") {
     [meaning, word] = ["pause", "Restarts off"];
-    why = "The agent runner is stopped. New agents still start and running ones keep going, but no "
+    why = "The lane restarter is stopped. New agents still start and running ones keep going, but no "
       + "lane is restarted, and no lane waiting on another one starts. Start it on the Machine tab.";
   } else if (paused) {
     [meaning, word] = ["pause", "Farm paused"];
@@ -359,7 +359,7 @@ function paintFarmState() {
     [meaning, word] = ["run", "Farm on"];
     why = `The agents may start and run. Power is ${powerLabel(mode.setting === "auto" ? mode.effective : mode.setting)}.`;
   } else if (runner) {
-    why = "The agent runner is active, but the power setting has not answered, so it may be Paused.";
+    why = "The lane restarter is active, but the power setting has not answered, so it may be Paused.";
   }
   node.className = `pill ${meaning}`;
   node.querySelector(".pill-text").textContent = word;
