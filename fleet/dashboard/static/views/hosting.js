@@ -697,10 +697,20 @@ function ownFields(context) {
 function loginStep(context, preset) {
   if (preset.id === "ssh") {
     stopPoll();
+    /* Nothing is copied to the machine: the check logs in with this farm's own key, so the
+       machine has to accept that key first. */
+    const key = String((context.res("/api/machines").data || {}).machines_key || "");
     return [
       stepHead(3, "Log in", "A machine of your own needs no provider login."),
       h("p", { class: "muted", key: "own" },
-        "This farm reaches it with its own key, which the check below installs and uses."),
+        "This farm logs in to it with its own key, and the check below copies nothing to the "
+        + "machine. So the machine must accept that key first. On the machine, as the user "
+        + "above, run:"),
+      key
+        ? commandRow(`mkdir -p ~/.ssh && echo '${key}' >> ~/.ssh/authorized_keys`, "own-key",
+          "own-key")
+        : h("p", { class: "muted", key: "no-key" },
+          "The key is shown here once this farm has listed its machines."),
     ];
   }
   const state = String(preset.login_state || "");

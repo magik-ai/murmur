@@ -4694,6 +4694,15 @@ class HostingSnapshotTest(HostingCase):
             dashboard.hosting_refresh()
         self.assertEqual(dashboard.hosting_machines()["provider_error"], "")
 
+    def test_the_farms_machines_key_reaches_the_page(self):
+        # A machine of your own must accept this key before the check can log in to it.
+        machines = json.loads(self.machines_file.read_text())
+        machines["machines_key"] = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPUBLIC murmur-farm-x"
+        self.machines_file.write_text(json.dumps(machines))
+        with self.farm():
+            dashboard.hosting_refresh()
+        self.assertEqual(dashboard.hosting_machines()["machines_key"], machines["machines_key"])
+
     def test_a_listing_that_is_not_json_is_a_sentence_and_not_a_traceback(self):
         self.machines_file.write_text("doctl: command not found\n")
         self.hosts_file.write_text("[]\n")

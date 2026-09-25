@@ -941,6 +941,15 @@ for (const [opener, picker, controls] of [
     `${own.button} | ${afterCards.slice(0, 200)}`);
   check("hosting: and its review shows the one command that will run",
     /fleet machines add --name/.test(own.command), own.command);
+  /* Nothing copies a key to a machine of your own, so the dialog must not say it does. It shows
+     the farm's key and the line that adds it on the machine. */
+  const keyLine = await page.evaluate(() =>
+    (document.querySelector("#drawer [data-own-key]") || {}).textContent || "");
+  check("hosting: a machine of your own is handed the farm's key to accept, not told it is installed",
+    keyLine === "mkdir -p ~/.ssh && echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMACHINESKEYOFTHISFARMSTUB "
+      + "murmur-farm-stub' >> ~/.ssh/authorized_keys"
+    && !/installs/.test(own.text) && /copies nothing to the machine/.test(own.text),
+    `${keyLine} | ${own.text.slice(0, 300)}`);
   await page.fill("#drawer [data-machine-name]", "loft");
   await page.fill("#drawer [data-target]", "farm@192.0.2.55");
   await page.fill("#drawer [data-port]", "2222");

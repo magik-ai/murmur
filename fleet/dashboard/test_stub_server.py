@@ -870,6 +870,10 @@ MACHINE_FIELDS = ("name", "provider", "user", "address", "size", "monthly_usd", 
                   "tunnel_command")
 
 
+# The public half of the farm's own machines key, as `fleet machines list --json` sends it.
+MACHINES_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMACHINESKEYOFTHISFARMSTUB murmur-farm-stub"
+
+
 def machines_payload(state, **extra):
     rows = machines_for(state)
     # As the farm counts it: a destroyed droplet, and a failed row the provider never made a
@@ -879,7 +883,7 @@ def machines_payload(state, **extra):
                 and not (row["state"] == "failed" and not row["provider_id"]))
     return envelope(this=dict(THIS_FARM), total_monthly_usd=total,
                     machines=[{field: row.get(field) for field in MACHINE_FIELDS}
-                              for row in rows], **extra)
+                              for row in rows], machines_key=MACHINES_KEY, **extra)
 
 
 def machine_named(name):

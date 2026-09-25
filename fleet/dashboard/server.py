@@ -2677,7 +2677,8 @@ def hosting_refresh():
     # is kept as `provider_error`.
     _hosting_list(_hosting_machines_snapshot, ["machines", "list", "--json"],
                   "fleet machines list",
-                  {"this": {}, "total_monthly_usd": 0, "machines": [], "provider_error": ""},
+                  {"this": {}, "total_monthly_usd": 0, "machines": [], "provider_error": "",
+                   "machines_key": ""},
                   rename={"provider_error": "error"})
     _hosting_list(_hosting_hosts_snapshot, ["hosts", "list", "--json"], "fleet hosts list",
                   {"providers": []})
@@ -2710,7 +2711,8 @@ def hosting_machines():
         "this": this if isinstance(this, dict) else {},
         "total_monthly_usd": snapshot.get("total_monthly_usd") or 0,
         "machines": machines if isinstance(machines, list) else [],
-        "provider_error": str(snapshot.get("provider_error") or "")})
+        "provider_error": str(snapshot.get("provider_error") or ""),
+        "machines_key": str(snapshot.get("machines_key") or "")})
 
 
 def hosting_hosts():

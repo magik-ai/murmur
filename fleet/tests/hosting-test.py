@@ -776,6 +776,13 @@ class OwnMachine(Farm):
         self.assertIn("-p", self.argvs("ssh")[0])
         self.assertIn("2222", self.argvs("ssh")[0])
 
+    def test_the_listing_carries_the_key_a_machine_of_your_own_must_accept(self):
+        # Nothing is copied to the machine, so the page shows this key for the person to add.
+        key = self.listing()["machines_key"]
+        self.assertTrue(key.startswith("ssh-ed25519 "), key)
+        with open(os.path.join(self.state, "machines", "id_ed25519.pub"), encoding="utf-8") as h:
+            self.assertEqual(key, h.read().strip())
+
     def test_a_port_reaches_the_commands_a_person_runs(self):
         self.ok("add", "--name", "laptop", "--target", "me@192.0.2.20", "--port", "2222",
                 FAKE_SSH_CAPACITY="1")

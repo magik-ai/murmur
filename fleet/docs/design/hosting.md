@@ -267,10 +267,12 @@ ssh -N -L 7878:127.0.0.1:7878 farm@<address>
 
 **Your own machine.** `fleet machines add --name <name> --target user@host [--port <port>]`
 registers the machine and checks it over SSH. Nothing is bought, and nothing is copied to the
-machine, so it must already accept this farm's machines key. If SSH works and the fleet is not
-installed yet, the row is `needs-login` and shows the finish command. With `--port`, the finish
-and tunnel commands carry `-p <port>`. Forget drops the row. Destroy is refused, because this farm
-did not buy the machine.
+machine, so it must already accept this farm's machines key. `fleet machines list --json` carries
+its public half as `machines_key`, and the Add a machine dialog shows it with the line that adds it
+to `~/.ssh/authorized_keys` on the machine. If SSH works and the fleet is not installed yet, the
+row is `needs-login` and shows the finish command. With `--port`, the finish and tunnel commands
+carry `-p <port>`. Forget drops the row. Destroy is refused, because this farm did not buy the
+machine.
 
 **Commands.** The page, the skill and the terminal run the same code:
 
@@ -371,7 +373,7 @@ since when it is old. So an expired login never costs the page its machine table
 
 | Route | Answer |
 |---|---|
-| `GET /api/machines` | `{at, stale_since, error, pending, this: {name, address}, total_monthly_usd, machines: [...], provider_error}` |
+| `GET /api/machines` | `{at, stale_since, error, pending, this: {name, address}, total_monthly_usd, machines: [...], provider_error, machines_key}` |
 | `GET /api/hosts` | `{at, stale_since, error, pending, providers: [...]}` |
 
 `pending` is true until the first pass has run. `error` is the refresher's sentence when a
