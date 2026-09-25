@@ -9,6 +9,7 @@ FLEET_CONFIG, and fake CLIs first on PATH (tests/fakes/core) record every call i
 """
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -995,6 +996,30 @@ class Installer(Scratch):
         said = self.installed_on(15.6)
         self.assertNotIn("memory limits sized", said)
         self.assertEqual(self.policy(), self.example_policy())
+
+
+class InstallerHelp(unittest.TestCase):
+    """`--help` prints the comment at the top of farm/install.sh, word for word, also when the
+    script arrives on stdin (`curl ... | bash -s -- --help`), where there is no file to read."""
+
+    def header(self):
+        with open(INSTALL, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+        end = lines.index("set -euo pipefail")
+        return "".join(re.sub(r"^# ?", "", line) + "\n" for line in lines[1:end])
+
+    def test_help_through_a_pipe_prints_the_header_comment(self):
+        with open(INSTALL, "rb") as script:
+            done = subprocess.run(["bash", "-s", "--", "--help"], stdin=script,
+                                  capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, self.header())
+
+    def test_help_from_the_file_prints_the_same_words(self):
+        done = subprocess.run(["bash", INSTALL, "--help"], capture_output=True, text=True,
+                              timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, self.header())
 
 
 class DashboardUnit(Scratch):

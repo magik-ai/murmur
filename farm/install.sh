@@ -33,6 +33,45 @@
 # macOS: not supported as a farm yet; run the agents on a Linux box and drive it over ssh.
 set -euo pipefail
 
+# The same words as the comment above, printed from here: under `curl ... | bash -s -- --help`
+# there is no file to read them back from.
+usage() {
+  cat <<'USAGE'
+murmur farm installer: turn a fresh Ubuntu or Debian box into a machine that runs agents.
+
+  curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash
+
+or, from a clone of the repository:
+
+  gh repo clone magik-ai/murmur && bash murmur/farm/install.sh
+
+It is idempotent: run it again after a change and it only does what is missing. Everything
+runs as your ordinary user; sudo is asked for only to install packages. It does five things:
+
+  1. system packages: git, tmux, python3 (3.11 or newer is required), curl, GitHub's CLI
+  2. user services that survive logout (loginctl enable-linger), uv, the Claude Code CLI
+  3. clones murmur (it carries the fleet and the head office CLI), installs both under ~/.local/bin
+  4. asks a few questions (head office repository, your code name, ssh alias, dashboard reach),
+     writes the config, and runs the dashboard as a user service (fleet-dashboard.service)
+  5. prints the Claude login only you can do, and the commands for the first agent
+
+Flags:
+  --yes            never ask: every question takes its default (the head office repository, or
+                   --hq-repo; your code name; the ssh alias), a single machine unless --remote
+  --hq-repo O/N    the head office repository to join (owner/name), instead of the default
+                   <your GitHub login>/agent-hq-office; created if it does not exist
+  --org NAME       GitHub owner (user or org) that holds the murmur repository; default magik-ai
+  --no-tailscale   never offer to install Tailscale
+  --remote         this box is driven from your laptop: the dashboard bind is left as it is
+                   (loopback from first boot, or what /murmur:farm wrote), no Tailscale is
+                   offered here, and the last line is the ssh tunnel that reaches it
+  -h, --help       this text
+
+Windows: install WSL2 with Ubuntu first (wsl --install), then run this inside it.
+macOS: not supported as a farm yet; run the agents on a Linux box and drive it over ssh.
+USAGE
+}
+
 ORG="magik-ai"
 HQ_REPO=""
 YES=0
@@ -46,7 +85,7 @@ while [ $# -gt 0 ]; do
     --remote) REMOTE=1; OFFER_TAILSCALE=0;;
     --hq-repo) [ $# -ge 2 ] || { echo "--hq-repo needs owner/name" >&2; exit 2; }
                HQ_REPO="$2"; shift;;
-    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) usage; exit 0;;
     *) echo "unknown flag: $1 (see --help)" >&2; exit 2;;
   esac
   shift

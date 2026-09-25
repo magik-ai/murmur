@@ -214,7 +214,8 @@ curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.s
 | `--no-tailscale` | Never offers Tailscale |
 | `--remote` | For a machine you drive from your laptop: the dashboard stays local, and the script prints the ssh tunnel command |
 
-The comment at the top of [`farm/install.sh`](../farm/install.sh) lists every flag.
+Add `--help` the same way to print every flag. The comment at the top of
+[`farm/install.sh`](../farm/install.sh) holds the same text.
 
 ### Reach the farm by name
 
