@@ -266,16 +266,35 @@ class InstalledCopy(unittest.TestCase):
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
                        cwd=cwd or self.project, env=env, check=True, capture_output=True)
 
-    def pushed_setup(self):
-        """init with the defaults, committed on main and pushed to a bare origin."""
+    def origin(self):
+        """A bare repository as origin, and a first commit on main pushed to it."""
         origin = self.tmp / "origin.git"
         self.git("init", "-q", "--bare", str(origin), cwd=self.tmp)
         self.git("remote", "add", "origin", str(origin))
-        self.apply_report()
-        self.git("add", "-A")
-        self.git("commit", "-q", "-m", "Set up murmur")
+        self.git("commit", "-q", "--allow-empty", "-m", "First")
         self.git("branch", "-M", "main")
         self.git("push", "-q", "-u", "origin", "main")
+        return origin
+
+    def pushed_setup(self):
+        """init with the defaults, committed on main and pushed to origin; init's report."""
+        self.origin()
+        report = self.apply_report()
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "Set up murmur")
+        self.git("push", "-q")
+        return report
+
+    def whole_setup(self):
+        """pushed_setup with every blank in CLAUDE.md filled in, and that pushed too."""
+        blanks = self.pushed_setup()["CLAUDE.md"]["placeholders"]
+        law = self.project / "CLAUDE.md"
+        text = law.read_text()
+        for blank in blanks:
+            text = text.replace(blank, "Ada")
+        law.write_text(text + "\nA handler returns `Result<T>`.\n")
+        self.git("commit", "-q", "-am", "Fill in the blanks")
+        self.git("push", "-q")
 
     def doctor(self, *programs):
         """The doctor's rows as {check: (state, detail)}, its status and its exit code. The PATH
@@ -313,6 +332,100 @@ class InstalledCopy(unittest.TestCase):
             "missing", "neither claude nor codex is on the path, the agents run in one of them"))
         self.assertNotIn("claude", rows)
         self.assertEqual((status, code), ("setup-required", 1))
+
+    def test_doctor_follows_the_setup_from_apply_to_the_base_branch_at_origin(self):
+        origin = self.origin()
+        blanks = self.apply_report()["CLAUDE.md"]["placeholders"]
+        rows, status, code = self.doctor("uv", "gh", "claude")
+        self.assertEqual((status, code), ("warnings", 0))
+        for check in ("init files", "generated files", "CLAUDE.md", "murmur-new files"):
+            self.assertEqual(rows[check][0], "ok", check)
+        self.assertEqual(rows["AGENTS.md"][0], "optional")
+        # The doctor counts the same blanks init listed.
+        self.assertEqual(rows["placeholders"], (
+            "warning", f"{len(blanks)} still to fill in CLAUDE.md: {', '.join(blanks[:4])} and "
+                       f"{len(blanks) - 4} more; replace each one, or delete its line"))
+        state, detail = rows["setup pushed"]
+        self.assertEqual(state, "warning")
+        self.assertIn("not committed: .claude/generated-files.txt, .claude/tracker.md", detail)
+        self.assertIn(".murmur/contract.md, CLAUDE.md, docs/GOTCHAS.md;", detail)
+        self.assertTrue(detail.endswith(
+            "; lanes start from origin/main, so commit and push the setup"), detail)
+
+        # Pushed on a branch of its own, and not merged yet: main at origin has no contract.
+        self.git("switch", "-q", "-c", "murmur-setup")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "Set up murmur")
+        self.git("push", "-q", "-u", "origin", "murmur-setup")
+        rows, _status, _code = self.doctor("uv", "gh", "claude")
+        not_yet = ("warning", "origin/main has no .murmur/contract.md as of the last fetch; lanes "
+                              "start from origin/main, so commit and push the setup")
+        self.assertEqual(rows["setup pushed"], not_yet)
+
+        # Merged from another clone: the doctor never fetches, so it sees the merge only after
+        # this clone has fetched it.
+        other = self.tmp / "other"
+        self.git("clone", "-q", "-b", "main", str(origin), str(other), cwd=self.tmp)
+        self.git("merge", "-q", "--no-ff", "-m", "Merge the setup", "origin/murmur-setup",
+                 cwd=other)
+        self.git("push", "-q", "origin", "main", cwd=other)
+        self.assertEqual(self.doctor("uv", "gh", "claude")[0]["setup pushed"], not_yet)
+        self.git("fetch", "-q")
+        rows, _status, _code = self.doctor("uv", "gh", "claude")
+        self.assertEqual(rows["setup pushed"],
+                         ("ok", "committed, and origin/main has .murmur/contract.md"))
+
+    def test_doctor_warns_of_what_init_left_undone_and_never_calls_it_setup_required(self):
+        self.whole_setup()
+        rows, status, code = self.doctor("uv", "gh", "claude")
+        # A single letter in angle brackets is no blank, and neither is the template's comment
+        # or a role word.
+        self.assertEqual(rows["placeholders"], ("ok", "none left in CLAUDE.md"))
+        self.assertEqual((status, code), ("current", 0), rows)
+        # Without the list of generated files the guard is off, which is the person's to choose.
+        (self.project / ".claude" / "generated-files.txt").unlink()
+        rows, status, code = self.doctor("uv", "gh", "claude")
+        self.assertEqual(rows["generated files"], (
+            "optional", ".claude/generated-files.txt is not there, so the guard is off"))
+        self.assertEqual((status, code), ("current", 0), rows)
+        # Codex reads AGENTS.md, and this repository has none.
+        rows, status, code = self.doctor("uv", "gh", "codex")
+        self.assertEqual(rows["AGENTS.md"], (
+            "warning", "not there, and codex is on the path: Codex reads AGENTS.md, never "
+                       "CLAUDE.md; run murmur_init.py apply --agents-md"))
+        self.assertEqual((status, code), ("warnings", 0))
+
+        github = self.project / ".github"
+        (github / "PULL_REQUEST_TEMPLATE.md").rename(github / "pull_request_template.md")
+        (self.project / "docs" / "GOTCHAS.md").unlink()
+        law = self.project / "CLAUDE.md"
+        law.write_text(law.read_text().split("<!-- murmur:contract -->")[0])
+        (self.project / "AGENTS.md").write_text("# Ours\n")
+        (self.project / ".gitignore").write_text(".claude/\n")
+        (self.project / ".claude" / "tracker.md.murmur-new").write_text("newer rules\n")
+        (self.project / "docs" / "notes.md.murmur-new").write_text("newer notes\n")
+        rows, status, code = self.doctor("uv", "gh", "codex")
+        self.assertEqual((status, code), ("warnings", 0))
+        again = "run murmur_init.py apply again, or /murmur:init"
+        # The pull request template counts wherever GitHub finds one.
+        self.assertEqual(rows["init files"], ("warning", f"missing: docs/GOTCHAS.md; {again}"))
+        self.assertEqual(rows["CLAUDE.md"],
+                         ("warning", f"no pointer to .murmur/contract.md; {again}"))
+        self.assertEqual(rows["AGENTS.md"], (
+            "warning", f"no pointer to .murmur/contract.md, so Codex never reads it; {again}"))
+        # One of them git ignores, and it is found by its name.
+        self.assertEqual(rows["murmur-new files"], (
+            "warning", "2 waiting: .claude/tracker.md.murmur-new, docs/notes.md.murmur-new; "
+                       "compare each with the file beside it and keep one"))
+        self.assertTrue(rows["setup pushed"][1].startswith("not committed: AGENTS.md, CLAUDE.md;"),
+                        rows["setup pushed"])
+
+        # init again puts back what it writes, and the pointers; the rest is the person's.
+        self.apply_report()
+        rows, _status, _code = self.doctor("uv", "gh", "codex")
+        for check in ("init files", "generated files", "CLAUDE.md", "AGENTS.md"):
+            self.assertEqual(rows[check][0], "ok", check)
+        self.assertEqual(rows["murmur-new files"][0], "warning")
 
 
 if __name__ == "__main__":
