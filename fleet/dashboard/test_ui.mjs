@@ -377,7 +377,7 @@ ok("a failure is turned into a sentence and a command, never a trace", () => {
   const refused = api.normaliseError(new api.ApiError(403, { error: "no token" }, "/api/projects"));
   assert.match(refused.title, /cannot read/);
   const tool = api.normaliseError(new api.ApiError(500, { error: "gh is not installed" }, "/api/fleet"));
-  assert.equal(tool.command, "sudo apt install gh");
+  assert.equal(tool.command, "install gh 2.40 or newer: https://github.com/cli/cli#installation");
   for (const shaped of [offline, missing, refused, tool]) {
     assert.ok(!/ at |Error:|\.js:\d/.test(shaped.body), "an error body must not carry a stack trace");
   }

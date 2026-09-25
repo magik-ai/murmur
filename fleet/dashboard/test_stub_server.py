@@ -492,7 +492,7 @@ HEALTH_READY = [
 
 HEALTH_ERROR = [
     {"id": "gh", "label": "gh", "state": "missing", "detail": "gh is not installed, so checks on a change cannot be read.",
-     "fix": "sudo apt install gh"},
+     "fix": "install the GitHub CLI: https://cli.github.com"},
     {"id": "tmux", "label": "tmux", "state": "ok", "detail": "version 3.4", "fix": ""},
     {"id": "systemd_user", "label": "systemd user manager", "state": "ok", "detail": "running", "fix": ""},
     {"id": "linger", "label": "linger", "state": "missing",
