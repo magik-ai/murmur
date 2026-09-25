@@ -234,6 +234,27 @@ SECTIONS = [
 ]
 
 
+# What stands in a fresh CLAUDE.md for each section the contract holds, so that every rule is
+# written once and a reference such as "the Golden Workflow" still finds its section.
+MOVED = "This section is in [`.murmur/contract.md`](.murmur/contract.md)."
+
+
+def without_contract_sections(template: str) -> str:
+    """The template with each of SECTIONS cut down to its heading and the MOVED line."""
+    keep: list[str] = []
+    moved = False
+    for line in template.splitlines():
+        if line.startswith("## "):
+            moved = line.strip() in SECTIONS
+            keep.append(line)
+            if moved:
+                keep.extend(["", MOVED, ""])
+            continue
+        if not moved:
+            keep.append(line)
+    return "\n".join(keep) + "\n"
+
+
 def build_contract(config: dict, template: str) -> str:
     base = config["base_branch"]
     tracker = config["tracker"]
@@ -368,7 +389,8 @@ def cmd_apply(root: Path, use_defaults: bool = False) -> int:
     if (root / "CLAUDE.md").is_file():
         add_pointer(root, Path("CLAUDE.md"), base, report)
     else:
-        fresh = fill_template(law, config) + "\n" + pointer_block(base) + "\n"
+        fresh = (fill_template(without_contract_sections(law), config) + "\n"
+                 + pointer_block(base) + "\n")
         place(root, Path("CLAUDE.md"), fresh, "managed", report)
         report[-1]["note"] = "from the template, some placeholders still to fill"
     if (root / "AGENTS.md").is_file():

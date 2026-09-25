@@ -37,7 +37,7 @@ file you already have: the last column says what it does instead.
 | Template | Written to | If that file already exists |
 |---|---|---|
 | `CLAUDE.md`, sections 0, 2, 3 and 7, under your answers | `.murmur/contract.md` | A differing version is written beside it, as `.murmur-new` |
-| `CLAUDE.md`, with repository, product and tracker filled in | `CLAUDE.md`, only when you have none | Your file is kept, and four lines pointing to the contract are added at its end |
+| `CLAUDE.md`, with repository, product and tracker filled in, and sections 0, 2, 3 and 7 each replaced by a line pointing to the contract | `CLAUDE.md`, only when you have none | Your file is kept, and four lines pointing to the contract are added at its end |
 | `trackers/<your tracker>.md` | `.claude/tracker.md` | A differing version is written beside it, as `.murmur-new` |
 | `PULL_REQUEST_TEMPLATE.md` | `.github/PULL_REQUEST_TEMPLATE.md` | Left as it is |
 | `GOTCHAS.md` | `docs/GOTCHAS.md` | Left as it is |

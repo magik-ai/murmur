@@ -59,6 +59,28 @@ class InstalledCopy(unittest.TestCase):
         for heading in sections:
             self.assertIn(heading + "\n", contract)
 
+    def test_a_fresh_claude_md_leaves_the_contracts_sections_to_the_contract(self):
+        # Every rule is written once: the four sections are in .murmur/contract.md, and a fresh
+        # CLAUDE.md keeps only their headings, each with one line that points there.
+        tree = ast.parse((self.plugin / "scripts" / "murmur_init.py").read_text())
+        sections = next(ast.literal_eval(node.value) for node in tree.body
+                        if isinstance(node, ast.Assign)
+                        and [getattr(t, "id", "") for t in node.targets] == ["SECTIONS"])
+        template = (self.plugin / "templates" / "CLAUDE.md").read_text()
+        result = self.run_script("murmur_init.py", "apply", "--defaults")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        law = (self.project / "CLAUDE.md").read_text()
+        contract = (self.project / ".murmur" / "contract.md").read_text()
+        pointer = "This section is in [`.murmur/contract.md`](.murmur/contract.md)."
+        for heading in sections:
+            body = template.split(heading + "\n", 1)[1].split("\n## ", 1)[0].strip()
+            first_rule = body.splitlines()[0]
+            self.assertIn(heading + "\n\n" + pointer + "\n", law, heading)
+            self.assertNotIn(first_rule, law, heading)
+            self.assertIn(first_rule, contract, heading)
+        self.assertIn("Agent work in this repository follows `.murmur/contract.md`.", law)
+        self.assertIn("## 1. Repo and contract map", law)
+
     def test_the_copy_holds_everything_the_scripts_read(self):
         self.assertTrue((self.plugin / "templates" / "CLAUDE.md").is_file())
         self.assertTrue((self.plugin / "hooks" / "generated-files.example.txt").is_file())

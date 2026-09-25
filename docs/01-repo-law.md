@@ -162,10 +162,11 @@ kebab-case, and code follows its language. Link out for anything longer.
    With the murmur plugin, run `/murmur:init`. It writes `.murmur/contract.md`
    with the template's core sections (core contract, the ten gates, commits,
    don'ts) filled in from your answers. If you have no `CLAUDE.md`, it also
-   writes one from the template. If you have one, it adds a four-line pointer
-   to the contract at its end. It adds the same pointer to `AGENTS.md`, if you
-   keep one. If a rule then appears in both files, keep it in the contract and
-   delete it from `CLAUDE.md`.
+   writes one from the template, with those four sections pointing to the
+   contract. If you have one, it adds a four-line pointer to the contract at
+   its end. It adds the same pointer to `AGENTS.md`, if you keep one. If a rule
+   then appears in both files, keep it in the contract and delete it from
+   `CLAUDE.md`.
 2. Replace every placeholder that is left.
 3. Cut the reading list to five entries or fewer, and add the sentence saying
    everything else is read on demand.
