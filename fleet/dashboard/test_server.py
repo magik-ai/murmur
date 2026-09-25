@@ -4789,6 +4789,17 @@ class HostingWriteTest(HostingCase):
                              ["machines", "plan", "--provider", "do-droplet", "--name",
                               "nursery", "--size", "s-4vcpu-8gb", "--region", "fra1", "--json"])
 
+    def test_a_machine_name_follows_the_clis_own_rule(self):
+        # 31 characters is the most `fleet machines` accepts, so a longer name is refused here,
+        # in the same words, before a job is started that could only fail.
+        with self.farm() as box:
+            status, payload = dashboard.machines_check({"name": "a" + "b" * 31})
+            self.assertEqual(status, 400, payload)
+            self.assertIn("2 to 31 characters", payload["error"])
+            self.assertEqual(box.calls.read_text(), "")
+            status, payload = dashboard.machines_check({"name": "a" + "b" * 30})
+            self.done(status, payload)
+
     def test_a_refusing_plan_is_a_sentence_and_never_a_traceback(self):
         with self.farm(FLEET_FAKE_FAIL="fleet machines plan: doctl is not logged in"):
             status, payload = dashboard.machines_plan(
