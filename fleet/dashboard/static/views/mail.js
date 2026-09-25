@@ -173,11 +173,17 @@ function conversationRow(row, context) {
 
 function conversationsPane(context, rows) {
   const shown = shownNames(searched(rows));
+  /* The farm lists at most this many conversations a pass. An office that may hold more says
+     so, because a conversation left off the list would read as one with nothing in it. */
+  const cutAt = Number((context.res("/api/mail/boxes").data || {}).boxes_cut_at) || 0;
   return card({ class: "mail-pane conversations-pane", key: "conversations" },
     h("div", { class: "pane-head" },
       h("h2", null, "Conversations"),
       h("div", { class: "spacer" }),
       h("span", { class: "muted" }, String(rows.length))),
+    cutAt ? h("p", { class: "readonly-note", key: "cut", "data-boxes-cut": "" },
+      `The office has at least ${cutAt} conversations, and this page lists ${cutAt}. `
+      + "Any older ones are left out.") : null,
     h("div", { class: "pane-tools" },
       h("input", {
         id: "mailSearch",

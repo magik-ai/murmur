@@ -3427,6 +3427,21 @@ class DashboardMailTest(unittest.TestCase):
                 box.older = older
                 yield box
 
+    def test_a_big_office_is_listed_whole_or_said_to_be_cut(self):
+        # A hundred mailboxes used to be the whole list, and any beyond it vanished in silence.
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        many = [{"number": n, "title": f"inbox: agent-{n}", "updatedAt": now} for n in range(150)]
+        with self.office(boxes=many, comments={}) as box:
+            dashboard.mail_refresh()
+            self.assertIn(f"--limit {dashboard.MAIL_BOXES_LIMIT} ", box.calls.read_text())
+            payload = dashboard.mail_boxes()
+        self.assertEqual(len(payload["boxes"]), 150)
+        self.assertEqual(payload["boxes_cut_at"], 0)
+        with mock.patch.object(dashboard, "MAIL_BOXES_LIMIT", 150), \
+                self.office(boxes=many, comments={}):
+            dashboard.mail_refresh()
+            self.assertEqual(dashboard.mail_boxes()["boxes_cut_at"], 150)
+
     def test_a_pass_over_the_office_builds_boxes_and_threads_without_touching_hq_inbox(self):
         with self.office() as box:
             dashboard.mail_refresh()

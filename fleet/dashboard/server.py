@@ -3086,7 +3086,11 @@ FEED_LINE = re.compile(r"^(?P<at>.+?)\s\s+\[(?P<kind>[a-z]+)\]\s*(?P<text>.*)$")
 WHO_LINE = re.compile(r"^(?P<name>\S+)\s+(?P<state>live|STALE)\s+updated\s+"
                       r"(?P<age>[\d.]+)h ago\s*(?P<task>.*)$")
 
-_mail_snapshot = _blank_snapshot(boxes=[], threads={}, seen={})
+_mail_snapshot = _blank_snapshot(boxes=[], threads={}, seen={}, boxes_cut_at=0)
+# The most inbox issues one pass lists: the number hq itself lists to find a mailbox. When the
+# office answers with that many, it may hold more, and the Mail tab says so (boxes_cut_at),
+# because a mailbox that falls off the list would read as a quiet one.
+MAIL_BOXES_LIMIT = 1000
 
 
 
@@ -3142,7 +3146,8 @@ def _gh_json(args, timeout=MAIL_GH_TIMEOUT):
 
 
 def mail_fetch_boxes(office):
-    """The office's inbox issues, one box per NAME.
+    """(boxes, cut_at): the office's inbox issues, one box per NAME, and the listing's limit when
+    the office answered with that many issues (0 when it answered with fewer).
 
     An office can hold two issues titled `inbox: winston`; it happens when a name is registered
     twice. They are one mailbox to everybody who uses them, and the dashboard used to draw that
@@ -3151,7 +3156,8 @@ def mail_fetch_boxes(office):
     freshest of them.
     """
     rows = _gh_json(["issue", "list", "--repo", office, "--state", "all", "--label", "inbox",
-                     "--limit", "100", "--json", "number,title,updatedAt"])
+                     "--limit", str(MAIL_BOXES_LIMIT), "--json", "number,title,updatedAt"])
+    cut_at = MAIL_BOXES_LIMIT if len(rows or []) >= MAIL_BOXES_LIMIT else 0
     boxes = {}
     for row in rows or []:
         if not isinstance(row, dict):
@@ -3173,7 +3179,7 @@ def mail_fetch_boxes(office):
             box["updated_at"] = stamp
     for box in boxes.values():
         box["numbers"] = sorted(set(box["numbers"]), reverse=True)
-    return list(boxes.values())
+    return list(boxes.values()), cut_at
 
 
 def mail_fetch_box_thread(office, box, since):
@@ -3272,11 +3278,13 @@ def mail_refresh():
     since = _iso(time.time() - MAIL_WINDOW_HOURS * 3600)
     cutoff = parse_iso(since)
     try:
-        boxes = mail_fetch_boxes(office)
+        boxes, cut_at = mail_fetch_boxes(office)
     except Exception as exc:
         with _snapshot_lock:
             _snapshot_failed(_mail_snapshot, str(exc)[:200])
         return
+    with _snapshot_lock:
+        _mail_snapshot["boxes_cut_at"] = cut_at
     # Every box starts from the thread already held, so the list of mailboxes is on screen
     # before the first thread is asked for.
     threads = {box["name"]: previous.get(box["name"], []) for box in boxes}
@@ -3346,7 +3354,8 @@ def mail_boxes():
     if unavailable:
         return {"unavailable": unavailable[0], "fix": unavailable[1]}
     snapshot = mail_snapshot()
-    return _envelope(snapshot, {"boxes": snapshot.get("boxes") or []})
+    return _envelope(snapshot, {"boxes": snapshot.get("boxes") or [],
+                                "boxes_cut_at": snapshot.get("boxes_cut_at") or 0})
 
 
 def mail_thread(box, since=""):

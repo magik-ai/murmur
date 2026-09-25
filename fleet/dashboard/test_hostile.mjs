@@ -1306,6 +1306,23 @@ for (const [hash, name] of [["#/mail", "mail"], ["#/machine", "machine"]]) {
   await context.close();
 }
 
+/* An office with as many mailboxes as one pass lists may hold more, and the list says so: a
+   mailbox left off it would read as one with nothing in it. */
+{
+  const boxes = await (await fetch(`${BASE}/api/mail/boxes`)).json();
+  const { page, context, thrown } = await open({
+    hash: "#/mail",
+    overrides: { "/api/mail/boxes": JSON.stringify({ ...boxes, boxes_cut_at: 1000 }) },
+  });
+  const note = await page.evaluate(() =>
+    (document.querySelector("[data-boxes-cut]") || {}).textContent || "");
+  check("an office with as many mailboxes as the page lists says it may hold more",
+    note === "The office has at least 1000 conversations, and this page lists 1000. Any older ones are left out.",
+    note);
+  check("the note about a long mailbox list breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
 /* The page signs mail with FLEET_DASH_HQ_AGENT, which /api/config reports as hq_agent. The
    composer and the echo of a sent message must name that, not a fixed "dashboard". */
 {

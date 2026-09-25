@@ -281,7 +281,9 @@ or `hq feed` at a terminal is faster.
 number of mailboxes only grows. Reading the office takes one call for the list and one call per
 mailbox. So the first pass after the dashboard starts takes as long as a hundred calls on an office
 of a hundred names. Later passes skip every mailbox nobody has written to since the last pass, so
-a quiet office costs about one call a pass. The dashboard reads at most 100 mailbox issues.
+a quiet office costs about one call a pass. The dashboard reads at most 1000 mailbox issues, as
+many as `hq` lists to find a mailbox. When the office answers with that many, the Mail tab says
+it may hold more.
 
 **The guard.** The list of mailboxes appears as soon as it arrives, and each thread as it is
 read, so the tab fills in front of you instead of staying empty until the last one. The health
