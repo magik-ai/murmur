@@ -203,6 +203,8 @@ fleet projects                                                   # the registere
 
 - `add-project` clones `https://github.com/<ORG>/<REPO>.git` when the path holds no checkout
   yet, then adds a table to `~/.config/fleet/projects.toml`.
+- The name must be a plain name: letters, digits, `.`, `_` or `-`, starting with a letter or
+  digit. `fleet spawn` refuses any other project name, so `add-project` refuses it too.
 - Registering a name again with the same settings changes nothing. With different settings it is
   refused, so the file never holds two tables for one project.
 - `--branch` (default `main`) is the base branch that lanes start from.
