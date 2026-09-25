@@ -1571,6 +1571,16 @@ with world() as (room, calls):
     check("claude accepts opus[1m], and its run.sh quotes it",
           _one.returncode == 0 and _runs and '--model "opus[1m]"' in _runs[0].read_text(),
           _one.stdout + _one.stderr)
+    check("a lane on another model than sonnet falls back to sonnet when its own is overloaded",
+          _runs and "--fallback-model sonnet" in _runs[0].read_text(),
+          _runs[0].read_text() if _runs else "no run.sh")
+    _plain = fleet("spawn", "--project", "demo", "--lane", "c3", "--engine", "claude",
+                   "--account", "default", "--task", "t", "--force")
+    _runs = list((room / "state" / "logs").glob("c3-*.run.sh"))
+    check("a lane on the default sonnet is given no fallback onto the model it already runs",
+          _plain.returncode == 0 and _runs and '--model "sonnet"' in _runs[0].read_text()
+          and "--fallback-model" not in _runs[0].read_text(),
+          _runs[0].read_text() if _runs else _plain.stdout + _plain.stderr)
     _son = fleet("spawn", "--project", "demo", "--lane", "c2", "--engine", "claude",
                  "--account", "default", "--model", "sonnet[1m]", "--task", "t", "--force")
     check("and sonnet[1m], warning because it is not on",
