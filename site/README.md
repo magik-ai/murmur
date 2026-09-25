@@ -15,6 +15,7 @@ The landing page for murmur: one static page with no build step.
 | `assets/shots/` | Screenshots of the plugin and the dashboard, light and dark |
 | `assets/*.svg`, `assets/*.png`, `favicon.ico`, `site.webmanifest` | The marks, the icons and the social preview image |
 | `.assetsignore` | Files kept off the published site, such as this README |
+| `_headers` | The response headers every page and file gets. Wrangler reads it and does not publish it |
 
 `murmur.css` and `flock.js` are copies of the files in
 [`design/starling-almanac/components/`](../design/starling-almanac/components). Keep them
