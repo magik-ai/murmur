@@ -1,5 +1,6 @@
 import contextlib
 import datetime
+import gc
 import glob
 import http.client
 import importlib.util
@@ -17,6 +18,7 @@ import types
 import unittest
 import urllib.error
 import urllib.request
+import warnings
 from unittest import mock
 
 
@@ -198,6 +200,26 @@ class DashboardServerTest(unittest.TestCase):
                     {"error": "not found"},
                 )
 
+
+    def test_agent_detail_reads_the_full_task_and_closes_the_files(self):
+        # The detail reads a lane's task and last answer from its log files. It used to leave
+        # each file for the garbage collector to close, one ResourceWarning per read.
+        with tempfile.TemporaryDirectory() as state:
+            pathlib.Path(state, "state").mkdir()
+            pathlib.Path(state, "logs").mkdir()
+            pathlib.Path(state, "state", "demo-web-1.json").write_text(json.dumps(
+                {"slug": "demo-web-1", "project": "demo", "lane": "web", "status": "done"}))
+            pathlib.Path(state, "logs", "demo-web-1.task").write_text("the whole task " * 10)
+            pathlib.Path(state, "logs", "demo-web-1.last").write_text("the last answer")
+            with mock.patch.object(dashboard, "STATE", state), \
+                    warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", ResourceWarning)
+                detail = dashboard.agent_detail("demo-web-1")
+                gc.collect()
+        self.assertEqual(detail["task"], "the whole task " * 10)
+        self.assertEqual(detail["result_text"], "the last answer")
+        self.assertEqual([str(w.message) for w in caught
+                          if issubclass(w.category, ResourceWarning)], [])
 
     def test_accounts_snapshot_serves_without_blocking_and_keeps_shape(self):
         # The endpoint serves whatever the 10-minute refresher last produced and never touches

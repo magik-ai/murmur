@@ -2243,7 +2243,8 @@ def agent_detail(slug):
 
     def read(ext, cap=40000):
         try:
-            return open(os.path.join(logs, slug + ext)).read()[:cap]
+            with open(os.path.join(logs, slug + ext)) as handle:
+                return handle.read(cap)
         except Exception:
             return None
 
@@ -4071,7 +4072,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 known = _job_secrets()
                 self._send(200, json.dumps([_scrub_agent(s, known) for s in agents()]))
             elif path in ("/", "/index.html"):
-                self._send(200, open(INDEX, "rb").read(), "text/html; charset=utf-8")
+                with open(INDEX, "rb") as handle:
+                    page = handle.read()
+                self._send(200, page, "text/html; charset=utf-8")
             else:
                 self._send(404, "not found", "text/plain")
         except BrokenPipeError:
