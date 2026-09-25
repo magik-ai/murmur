@@ -216,7 +216,7 @@ note "uv $(uv --version | awk '{print $2}')"
 
 if ! have claude; then
   note "installing Claude Code (the agent CLI)"
-  curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 || die "Claude Code did not install; see https://docs.anthropic.com/en/docs/claude-code/setup"
+  curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 || die "Claude Code did not install; see https://code.claude.com/docs/en/setup"
   export PATH="$HOME/.local/bin:$PATH"
 fi
 have claude && note "claude $(claude --version 2>/dev/null | head -1)"

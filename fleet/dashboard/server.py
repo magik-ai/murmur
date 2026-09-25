@@ -735,7 +735,7 @@ def _check_claude():
 
 
 def _check_codex():
-    return _engine_row("codex", "install the Codex CLI: https://developers.openai.com/codex",
+    return _engine_row("codex", "install the Codex CLI: https://learn.chatgpt.com/docs/codex/cli",
                        bool(_engine_path("claude")))
 
 
