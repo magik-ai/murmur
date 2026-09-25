@@ -338,7 +338,7 @@ Three things the page never does:
 fleet capacity          # can the farm take another agent, and if not, why not
 fleet status            # every agent, plus the machine's load and memory
 fleet dashboard status  # is the dashboard running, and where it listens
-hq whoami               # the name this session would sign with
+hq who                  # the head office answers, and lists the sessions
 gh auth status          # the GitHub login
 ```
 
