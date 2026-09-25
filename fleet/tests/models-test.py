@@ -1636,6 +1636,25 @@ with world(KEYED_CATALOG, {"keyedcli": {"enabled": True, "health": "ok"}}) as (r
     os.environ.pop("FAKE_LANE", None)
 
 print()
+print("head office mail in a lane's first prompt")
+
+# hq answers an empty inbox with "inbox empty (nothing after <time>; ...)", never with silence.
+# Only the bare words were matched, so that line reached every lane's prompt as if it were mail.
+with world() as (room, calls):
+    project(room)
+    (room / "config" / "policy.toml").write_text("[hq]\nenabled = true\n")
+    _fake(room / "bin" / "hq", 'if [ "$1" = inbox ]; then\n'
+          '  echo "inbox empty (nothing after 2026-09-24T08:00:00Z; re-show with --recent 6)"\n'
+          'fi\nexit 0\n')
+    _done = fleet("spawn", "--project", "demo", "--lane", "quietmail", "--engine", "codex",
+                  "--task", "t", "--force")
+    _tasks = list((room / "state" / "logs").glob("quietmail-*.task"))
+    _task = _tasks[0].read_text() if _tasks else ""
+check("an empty head office inbox is not pasted into the lane's prompt as mail",
+      _done.returncode == 0 and _task and "AGENT-HQ MAIL" not in _task
+      and "inbox empty" not in _task, (_done.stdout + _done.stderr)[-300:] or _task[-300:])
+
+print()
 print("a generic lane settles on its engine's exit code")
 
 # A bad key or an unknown model, as most CLIs report it: one plain line on stdout, then exit 1.

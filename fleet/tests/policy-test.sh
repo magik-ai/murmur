@@ -33,6 +33,7 @@ eval "$(sed -n '/^_commit_identity() {/,/^}$/p' "$FLEET_BIN")"
 eval "$(sed -n '/^_proj() {/,/^}$/p' "$FLEET_BIN")"
 eval "$(sed -n '/^_load_env_file() {/,/^}$/p' "$FLEET_BIN")"
 eval "$(sed -n '/^_port_slot() {/,/^}$/p' "$FLEET_BIN")"
+eval "$(sed -n '/^_hq_mail() {/,/^}$/p' "$FLEET_BIN")"
 
 # A fake `hq` on PATH, so "is head office installed" is a property of this test, not of the box.
 mkdir -p "$ROOT/hqbin"
@@ -124,6 +125,18 @@ git -C "$ROOT/hookrepo" config --worktree hq.agent lane-own
 printf '%s\n' "$push_one" \
   | (cd "$ROOT/hookrepo" && HQ_AGENT=caller PATH="$ROOT/hookbin:$PATH" "$ROOT/claims-hook")
 is "the lane's own worktree hq.agent wins" "$(tail -n 1 "$ROOT/hq-agent" 2>/dev/null)" "lane-own"
+
+echo "=== the head office mail a lane starts with ==="
+
+# hq answers an empty inbox with "inbox empty (nothing after <time>; ...)". Only the bare words
+# were matched, so that line was folded into every lane's prompt as if it were mail.
+mkdir -p "$ROOT/mailbin"
+inbox_says() { printf '#!/bin/sh\ncat <<EOF\n%s\nEOF\n' "$1" > "$ROOT/mailbin/hq"; chmod +x "$ROOT/mailbin/hq"; }
+inbox_says 'inbox empty (nothing after 2026-09-24T08:00:00Z; `hq inbox --recent 6` re-shows the last six hours without moving the cursor)'
+is "an empty inbox puts no mail in the prompt" "$(PATH="$ROOT/mailbin:$PATH" _hq_mail vivaldi)" ""
+inbox_says $'--- 2026-09-24T08:01:00Z\nThe schema lane merged; rebase before you touch migrations.'
+is "real mail is kept, word for word" "$(PATH="$ROOT/mailbin:$PATH" _hq_mail vivaldi)" \
+  $'--- 2026-09-24T08:01:00Z\nThe schema lane merged; rebase before you touch migrations.'
 
 echo "=== the commit identity a lane pushes under ==="
 
