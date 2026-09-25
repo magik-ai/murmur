@@ -462,7 +462,7 @@ exit 1
 
 
 class ServicesTest(unittest.TestCase):
-    """The control room's three rows: the agent runner, the sweep timer and this dashboard.
+    """The control room's three rows: the lane restarter, the sweep timer and this dashboard.
     Every one of them costs a process to read, so the refresher reads them and the route serves
     what it left."""
 
@@ -492,6 +492,9 @@ class ServicesTest(unittest.TestCase):
         by_id = {row["id"]: row for row in rows}
         self.assertEqual(by_id["agent_runner"]["state"], "active")
         self.assertEqual(by_id["sweep_timer"]["state"], "failed")
+        # The daemon restarts lanes that have a restart policy; it does not run every agent, so
+        # its row must not be called the agent runner.
+        self.assertEqual(by_id["agent_runner"]["label"], "Lane restarter (fleet daemon)")
         for row in rows:
             self.assertTrue(row["detail"], row["id"])
             self.assertNotIn("Traceback", row["detail"])
@@ -938,7 +941,7 @@ class PowerTest(unittest.TestCase):
         self.assertEqual(payload["lane_count"], 2)
         self.assertEqual(payload["lanes"][1]["restart"], "until-pr")
         text = " ".join([payload["sentence"]] + payload["warnings"])
-        self.assertIn("agent runner", text)
+        self.assertIn("lane restarter", text)
         self.assertIn("loses", text)
 
     def test_the_throttle_preview_names_the_caps(self):

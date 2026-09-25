@@ -67,7 +67,7 @@ diff.
 its pull request (a draft one if it is blocked). So "resume, never relaunch"
 and "stop a lane only after its change has merged" apply to lanes you can
 resume, such as local sessions. With `--restart until-pr` or
-`--restart until-merged`, and the farm's agent runner on (`fleet daemon start`),
+`--restart until-merged`, and the farm's lane restarter on (`fleet daemon start`),
 fleet starts a lane again if it ends before it delivers. That is a relaunch:
 the saved brief runs again on a new branch, with a fresh context. Review fixes
 are then made by another agent, which lacks the first lane's context, so write

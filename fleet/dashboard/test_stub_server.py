@@ -593,7 +593,7 @@ ADDED_ACCOUNTS = {}
 # `fix`, the command that puts it right from a terminal. A stub that answered `note`, `command`
 # and `changed_at` let the page read three keys nothing on a real farm sends.
 SERVICE_ROWS = [
-    {"id": "agent_runner", "label": "agent runner", "unit": "fleet-daemon.service",
+    {"id": "agent_runner", "label": "Lane restarter (fleet daemon)", "unit": "fleet-daemon.service",
      "actions": ["start", "stop", "restart"], "verb": "fleet daemon", "fix": "fleet daemon start",
      "what": "respawns a lane that carries a restart policy until it delivers"},
     {"id": "sweep_timer", "label": "sweep timer", "unit": "fleet-sweep.timer",
@@ -673,7 +673,7 @@ def power_preview(action):
         payload = {
             "label": "Drain the farm",
             "sentence": f"This salvages and then stops the {len(lanes)} lane(s) below, and "
-                        "stops the agent runner so nothing is respawned.",
+                        "stops the lane restarter so nothing is respawned.",
             "warnings": ["A lane with no restart policy loses whatever salvage could not push.",
                          "This dashboard keeps running through all of it."],
             "lanes": lanes,
@@ -681,7 +681,7 @@ def power_preview(action):
     elif action == "resume":
         payload = {
             "label": "Resume the farm",
-            "sentence": "This starts the agent runner again, and it will respawn every until-pr "
+            "sentence": "This starts the lane restarter again, and it will respawn every until-pr "
                         "and until-merged lane from its brief, which spends subscription.",
             "warnings": [],
             "lanes": [row for row in lanes if row["restart"]],
@@ -1493,7 +1493,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(400, {"error": "an action is one of throttle, drain, resume"})
             detail = {"throttle": "capping the farm and stopping new agents",
                       "drain": "salvaging and stopping every lane",
-                      "resume": "starting the agent runner again"}[action]
+                      "resume": "starting the lane restarter again"}[action]
             return self._json(200, {"ok": True,
                                     "job": job_new(action, detail, fails=self.state() == "error")})
         if parsed.path == "/api/accounts/add":

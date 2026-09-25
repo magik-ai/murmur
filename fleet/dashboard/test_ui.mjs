@@ -774,7 +774,7 @@ await okAsync("a service row carries when it changed, what it does and what fixe
   }
   const ids = body.services.map((row) => row.id);
   assert.ok(ids.includes("agent_runner"),
-    "the agent runner keeps the server's own id, which the header looks it up by");
+    "the lane restarter keeps the server's own id, agent_runner, which the header looks it up by");
 });
 
 await okAsync("a login row carries the sentence that says what to do about it", async () => {
