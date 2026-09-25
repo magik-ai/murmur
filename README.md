@@ -137,7 +137,7 @@ Then commit the files `/murmur:init` wrote and push them, through a pull
 request if `main` needs one. Agents start their branches from GitHub, so
 they do not see a setup that exists only on your laptop.
 
-Using Codex? Follow [INSTALL.md](INSTALL.md) instead: it links the same skills
+Using Codex? Follow [INSTALL.md](INSTALL.md) instead: it writes the same skills
 into Codex and sets up the repository with the same scripts.
 
 ### 2. Run your first team

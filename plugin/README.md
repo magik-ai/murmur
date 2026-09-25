@@ -38,8 +38,9 @@ branches from GitHub.
 
 An agent can do all of this for you, in Claude Code or in Codex: give it the
 line `Install murmur for this repo: https://github.com/magik-ai/murmur` and it
-follows [INSTALL.md](../INSTALL.md). For Codex, which has no plugins, the same
-skills are linked into `~/.codex/skills` by `plugin/scripts/murmur_skills.py`.
+follows [INSTALL.md](../INSTALL.md). For Codex, `plugin/scripts/murmur_skills.py`
+writes the same skills into `~/.agents/skills`, where Codex calls them
+`$murmur-init`, `$murmur-doctor` and so on.
 
 ## Updating
 
