@@ -186,7 +186,7 @@ line, and the session starts normally.
 | `.github/PULL_REQUEST_TEMPLATE.md` | A pull request template | Left alone |
 | `docs/GOTCHAS.md` | The lessons file: symptom, cause, prevention | Left alone |
 | `.claude/generated-files.txt` | The list of generated files, for the guard hook | Left alone |
-| `CLAUDE.md` | Written from a template when you have none; it has placeholders to fill in | Four lines are added at the end, once, pointing to the contract |
+| `CLAUDE.md` | Written from a template when you have none, with the contract's four sections left to the contract; it has placeholders to fill in | Four lines are added at the end, once, pointing to the contract |
 | `AGENTS.md` | Not created | Four lines are added at the end, once, pointing to the contract |
 
 Apart from `.murmur/config.toml`, which holds your answers, init never

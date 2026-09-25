@@ -78,8 +78,9 @@ It prints a JSON report with one entry per file. These are the files:
 - `.github/PULL_REQUEST_TEMPLATE.md`, `docs/GOTCHAS.md` (the lessons file) and
   `.claude/generated-files.txt` (the list of generated files that agents must
   not edit by hand): written only when they do not exist yet.
-- `CLAUDE.md`: written from a template when the repository has none. It still
-  has placeholders to fill in.
+- `CLAUDE.md`: written from a template when the repository has none. The four
+  sections the contract holds are each replaced by one line that points to it.
+  It still has placeholders to fill in.
 - An existing `CLAUDE.md` or `AGENTS.md` gets four lines appended that point to
   the contract.
 
