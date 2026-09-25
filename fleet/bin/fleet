@@ -1521,7 +1521,7 @@ sys.path.insert(0, os.path.join(os.environ.get("FLEET_HOME", ""), "lib"))
 try:
     import salvage
 except Exception:
-    salvage = None  # a missing salvage module must never wedge the janitor
+    salvage = None  # the sweep still runs; rescue() keeps what it cannot push
 GRACE = 900
 archive_dir = Path(STATE, "state-archive", time.strftime("%Y-%m"))
 
@@ -1614,6 +1614,25 @@ def unit_is_inactive(slug):
     return result.stdout.strip() in ("inactive", "failed", "unknown") or result.returncode in (3, 4)
 
 
+def rescue(worktree, slug, label):
+    """Push the commits only this worktree holds, before it goes. Returns "" when it may be
+    removed, or the reason it must stay: removing it would delete the only copy."""
+    if salvage is None:
+        result = git("rev-list", "--count", "HEAD", "--not", "--remotes=origin", cwd=worktree)
+        if result.returncode:
+            return "cannot count its unpushed commits: " + (result.stderr.strip() or "git failed")
+        count = result.stdout.strip() or "0"
+        if count != "0":
+            return f"{count} unpushed commit(s), and lib/salvage.py did not load to push them"
+        return ""
+    saved, detail = salvage.salvage(worktree, slug)
+    if saved:
+        print(f"  SALVAGED  {label}  — {detail}")
+    elif saved is not None:
+        return f"its unpushed commits could not be pushed: {detail}"
+    return ""
+
+
 _prcache = {}
 def pr_state(branch):
     if not branch:
@@ -1654,6 +1673,9 @@ for record_path in glob.glob(os.path.join(STATE, "state", "*.json")):
             stale_for = now - os.path.getmtime(record_path)
         except OSError:
             stale_for = 0
+        if stale_for > GRACE and dry:
+            print(f"  would quarantine  unreadable record {os.path.basename(record_path)}")
+            continue
         if stale_for > GRACE:
             month = time.strftime("%Y-%m", time.localtime())
             attic = os.path.join(STATE, "state-archive", month)
@@ -1779,10 +1801,11 @@ for tree in trees:
             print(f"  KEEP    {branch}  — forced-removal snapshot failed: {exc}")
             kept += 1
             continue
-    if salvage and not dry:
-        _saved, _detail = salvage.salvage(worktree, slug_by_path.get(real_worktree) or Path(worktree).name)
-        if _saved:
-            print(f"  SALVAGED  {branch}  — {_detail}")
+    why = rescue(worktree, slug_by_path.get(real_worktree) or Path(worktree).name, branch)
+    if why:
+        print(f"  KEEP    {branch}  — merged, but {why}")
+        kept += 1
+        continue
     result = git("worktree", "remove", "--force", worktree)
     if result.returncode:
         print(f"  KEEP    {branch}  — git worktree remove failed: {result.stderr.strip()}")
@@ -1832,11 +1855,12 @@ for record_path, record in records:
             except (InspectionError, OSError, tarfile.TarError) as exc:
                 print(f"  keep record {record.get('slug','')} — snapshot failed: {exc}")
                 continue
-        if salvage and not dry:
-            _saved, _detail = salvage.salvage(worktree, record.get("slug") or Path(worktree).name)
-            if _saved:
-                print(f"  SALVAGED  {record.get('slug','')} — {_detail}")
         if not dry:
+            why = rescue(worktree, record.get("slug") or Path(worktree).name,
+                         record.get("slug", ""))
+            if why:
+                print(f"  keep record {record.get('slug','')} — {why}")
+                continue
             result = git("worktree", "remove", "--force", worktree)
             if result.returncode:
                 print(f"  keep record {record.get('slug','')} — removal failed: "

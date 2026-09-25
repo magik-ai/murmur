@@ -53,7 +53,7 @@ request was merged is done, and its worktree goes. The card of a finished lane i
 |---|---|
 | open pull request | worktree and card kept for as long as the pull request is open |
 | pushed branch | the branch is on GitHub, so the worktree can go |
-| committed, never pushed | the sweep pushes the commits to `refs/fleet-salvage/<slug>` before it removes the worktree |
+| committed, never pushed | the sweep pushes the commits to `refs/fleet-salvage/<slug>` before it removes the worktree, and keeps the worktree if that push fails |
 | uncommitted changes, tracked or untracked | kept, and reported, until somebody runs `fleet sweep --force` (which saves them first) |
 | files your `.gitignore` covers | none |
 

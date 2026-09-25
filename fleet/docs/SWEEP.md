@@ -59,7 +59,9 @@ otherwise. Two more rules apply before a worktree is removed:
   alike. Files your `.gitignore` covers do not count. Only `fleet sweep
   --force` removes such a worktree, and it saves the changes first.
 - **Commits that were never pushed are rescued first.** The sweep pushes them
-  to `refs/fleet-salvage/<slug>` on `origin`, then removes the worktree.
+  to `refs/fleet-salvage/<slug>` on `origin`, then removes the worktree. If
+  that push fails, the worktree and its branch stay until a later pass can
+  push.
 
 ### Part B: cards
 
@@ -101,8 +103,9 @@ checkout, and on GitHub if it was pushed.
   once its last commit is part of `origin/<base>`. After a squash merge that
   never happens, so delete the ref yourself when you no longer need it:
   `git push origin --delete refs/fleet-salvage/<slug>`. If the push to the
-  salvage ref is refused, the sweep removes the worktree anyway, so this is a
-  safety net and not a place to keep work.
+  salvage ref fails, the sweep keeps the worktree and the branch and prints
+  `KEEP <branch> — merged, but its unpushed commits could not be pushed`. The
+  ref is a safety net, not a place to keep work.
 - **Everything else** in a removed worktree is gone: ignored files, build
   output, installed dependencies.
 
@@ -124,7 +127,8 @@ A record that stays unreadable for 15 minutes (going by its file time) is not
 being written. The sweep moves it to
 `~/.fleet/state-archive/<YYYY-MM>/<name>.json.corrupt` and carries on with the
 same pass. It keeps the file because it may be the only trace of what that
-lane did.
+lane did. `fleet sweep --dry-run` moves nothing: it prints
+`would quarantine  unreadable record <name>.json` instead.
 
 If that move fails, the sweep aborts again and prints the reason:
 

@@ -18,22 +18,28 @@ def _git(cwd, *args):
 
 
 def unpushed_shas(worktree, remote="origin"):
-    """Commits on HEAD reachable from NO ref on <remote> — genuinely unpushed. Empty if all pushed
-    or on any git error (a detached/broken HEAD has nothing we can safely rescue)."""
+    """Commits on HEAD reachable from NO ref on <remote>: genuinely unpushed. Empty when all are
+    pushed; None when git cannot tell (a broken worktree), which is not the same as "none"."""
     result = _git(worktree, "rev-list", "HEAD", "--not", f"--remotes={remote}")
     if result.returncode:
-        return []
+        return None
     return [line for line in result.stdout.split() if line]
 
 
 def salvage(worktree, slug, remote="origin"):
-    """Push HEAD to refs/fleet-salvage/<slug> iff it carries unpushed commits.
-    Returns (saved: bool, detail: str). No-op (False) when there is nothing unpushed."""
+    """Push HEAD to refs/fleet-salvage/<slug> when it carries unpushed commits.
+
+    Returns (saved, detail). saved is True when the commits are now on <remote>, and None when
+    there was nothing unpushed. It is False when there may be commits that are NOT on <remote>:
+    the push failed, git could not list them, or the slug is unsafe. The caller must then keep
+    the worktree and its branch, because they hold the only copy."""
     if not slug or os.path.basename(slug) != slug:
         return False, f"unsafe slug {slug!r}"
     shas = unpushed_shas(worktree, remote)
+    if shas is None:
+        return False, "git could not list the unpushed commits"
     if not shas:
-        return False, "nothing unpushed"
+        return None, "nothing unpushed"
     ref = f"{SALVAGE_NS}/{slug}"
     result = _git(worktree, "push", "--force", remote, f"HEAD:{ref}")
     if result.returncode:

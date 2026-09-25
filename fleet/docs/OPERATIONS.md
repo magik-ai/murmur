@@ -539,7 +539,7 @@ What happens to work in a worktree:
 | the lane is still running | nothing |
 | an open pull request | keeps the worktree and the card for as long as the pull request is open |
 | uncommitted changes, including new files that git does not ignore | keeps the worktree until someone runs `fleet sweep --force` |
-| commits that were never pushed | pushes them to `refs/fleet-salvage/<slug>` on `origin`, then removes the worktree |
+| commits that were never pushed | pushes them to `refs/fleet-salvage/<slug>` on `origin`, then removes the worktree; if the push fails, keeps it |
 | a pushed branch | removes the local worktree; the branch stays on GitHub |
 | GitHub does not answer | keeps everything, and prints `GitHub state is UNKNOWN` |
 

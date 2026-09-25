@@ -34,6 +34,12 @@ SH
 cat > "$TMP/bin/gh" <<SH
 #!/bin/sh
 [ -f "$TMP/gh-fail" ] && exit 1
+# A branch named in gh-merged has a merged pull request; every other branch has none.
+for arg in "\$@"; do
+  if [ -f "$TMP/gh-merged" ] && grep -qxF -- "\$arg" "$TMP/gh-merged"; then
+    printf '[{"number": 7, "state": "MERGED"}]\n'; exit 0
+  fi
+done
 printf '[]\n'
 SH
 chmod +x "$TMP/bin/systemctl" "$TMP/bin/tmux" "$TMP/bin/gh"
@@ -285,6 +291,11 @@ chk "a record torn just now still aborts the pass and deletes nothing" \
   '[ -d "$SWEEP_ROOT/blocked" ] && printf "%s" "$FRESH_OUT" | grep -q ABORT'
 
 touch -d "3 hours ago" "$SWEEP_STATE/state/fresh-tear.json"
+DRY_OUT=$(FLEET_STATE="$SWEEP_STATE" "$FLEET" sweep --project testproj --force --dry-run 2>&1)
+chk "a dry run only says it would quarantine a long-torn record" \
+  '[ -f "$SWEEP_STATE/state/fresh-tear.json" ] &&
+   [ -z "$(find "$SWEEP_STATE/state-archive" -name fresh-tear.json.corrupt)" ] &&
+   printf "%s" "$DRY_OUT" | grep -q "would quarantine  unreadable record fresh-tear.json"'
 FLEET_STATE="$SWEEP_STATE" "$FLEET" sweep --project testproj --force >/dev/null 2>&1
 QUAR=$(find "$SWEEP_STATE/state-archive" -name 'fresh-tear.json.corrupt' -print -quit 2>/dev/null)
 chk "a record torn for longer than GRACE is archived, not deleted" \
@@ -293,6 +304,49 @@ chk "a record torn for longer than GRACE is archived, not deleted" \
 SECOND=$(FLEET_STATE="$SWEEP_STATE" "$FLEET" sweep --project testproj --force 2>&1)
 chk "the janitor is unwedged on the next pass and clears the backlog" \
   '! printf "%s" "$SECOND" | grep -q ABORT && [ ! -d "$SWEEP_ROOT/blocked" ]'
+
+echo "== the sweep never deletes a merged lane's only copy of its commits =="
+# The pull request merged, then the lane committed again and never pushed. The sweep pushes that
+# commit to refs/fleet-salvage/ first; when the push fails, the worktree and branch stay.
+mkmerged() { # name: a merged lane with one commit only its worktree holds
+  git -C "$TMP/proj" worktree add -q -b "fleet/$1" "$SWEEP_ROOT/$1" main
+  git -C "$SWEEP_ROOT/$1" push -q -u origin "fleet/$1" 2>/dev/null
+  git -C "$SWEEP_ROOT/$1" commit -q --allow-empty -m "$1: after the merge"
+  echo "fleet/$1" >> "$TMP/gh-merged"
+}
+cat > "$TMP/origin.git/hooks/pre-receive" <<SH
+#!/bin/sh
+[ -f "$TMP/refuse-salvage" ] || exit 0
+while read -r _old _new ref; do
+  case "\$ref" in refs/fleet-salvage/*) echo "salvage refs refused here" >&2; exit 1;; esac
+done
+SH
+chmod +x "$TMP/origin.git/hooks/pre-receive"
+mkmerged unpushed
+UNPUSHED_SHA=$(git -C "$SWEEP_ROOT/unpushed" rev-parse HEAD)
+touch "$TMP/refuse-salvage"
+OUT=$(FLEET_STATE="$SWEEP_STATE" "$FLEET" sweep --project testproj 2>&1)
+rm "$TMP/refuse-salvage"
+chk "a failed salvage push keeps the worktree and the branch, and says why" \
+  '[ -d "$SWEEP_ROOT/unpushed" ] &&
+   git -C "$TMP/proj" rev-parse -q --verify refs/heads/fleet/unpushed >/dev/null &&
+   echo "$OUT" | grep -q "KEEP    fleet/unpushed .*could not be pushed" &&
+   ! echo "$OUT" | grep -q "removed fleet/unpushed"'
+OUT=$(FLEET_STATE="$SWEEP_STATE" "$FLEET" sweep --project testproj 2>&1)
+chk "once the push works, the commit is salvaged before the worktree goes" \
+  '[ ! -d "$SWEEP_ROOT/unpushed" ] && echo "$OUT" | grep -q "SALVAGED  fleet/unpushed" &&
+   git -C "$TMP/proj" ls-remote origin "refs/fleet-salvage/*" | grep -q "$UNPUSHED_SHA"'
+
+NO_SALVAGE="$TMP/fleet-without-salvage"
+mkdir -p "$NO_SALVAGE/bin" "$NO_SALVAGE/lib"
+cp "$FLEET" "$NO_SALVAGE/bin/fleet"
+cp "$(dirname "$FLEET")"/../lib/*.py "$NO_SALVAGE/lib/"
+rm "$NO_SALVAGE/lib/salvage.py"
+mkmerged no-module
+OUT=$(FLEET_STATE="$SWEEP_STATE" "$NO_SALVAGE/bin/fleet" sweep --project testproj 2>&1)
+chk "without lib/salvage.py a lane with unpushed commits is kept" \
+  '[ -d "$SWEEP_ROOT/no-module" ] &&
+   echo "$OUT" | grep -q "KEEP    fleet/no-module .*salvage.py did not load"'
 
 echo
 [ "$ok" = 1 ] && echo "RESULT: ALL PASS" || echo "RESULT: FAILURES"
