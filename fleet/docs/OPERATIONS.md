@@ -210,7 +210,8 @@ fleet projects                                                   # the registere
 
 **Ports.** Each lane gets three ports: one for a dev server (`vite`), one for an API (`uvicorn`)
 and one for an end-to-end runner (`e2e`). The lane's instructions name them. Each port is a base
-plus the number of agents running when the lane starts. `--port-base` (default 5200) sets the dev
+plus a slot: the lowest slot whose three ports no running lane holds, so two running lanes never
+share a port, and a lane that ends frees its slot. `--port-base` (default 5200) sets the dev
 server base, which `add-project` writes as `port_base`. The API and end-to-end bases default to
 8100 and 6100. Set all three per project in a `[<PROJECT>.ports]` table with `vite_base`,
 `api_base` and `e2e_base`; `vite_base` there wins over `port_base`. Give each project its own

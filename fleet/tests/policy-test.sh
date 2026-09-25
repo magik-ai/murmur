@@ -32,6 +32,7 @@ eval "$(sed -n '/^_hq_gate() {/,/^}$/p' "$FLEET_BIN")"
 eval "$(sed -n '/^_commit_identity() {/,/^}$/p' "$FLEET_BIN")"
 eval "$(sed -n '/^_proj() {/,/^}$/p' "$FLEET_BIN")"
 eval "$(sed -n '/^_load_env_file() {/,/^}$/p' "$FLEET_BIN")"
+eval "$(sed -n '/^_port_slot() {/,/^}$/p' "$FLEET_BIN")"
 
 # A fake `hq` on PATH, so "is head office installed" is a property of this test, not of the box.
 mkdir -p "$ROOT/hqbin"
@@ -147,9 +148,34 @@ is "and for the API base too" "$(_proj withports ports.api_base)" "9000"
 is "and the e2e base" "$(_proj withports ports.e2e_base)" "7000"
 is "a project without the table reports nothing, so the caller can fall back" \
    "$(_proj plain ports.vite_base)" ""
-is "the legacy port_base spelling is still readable" "$(_proj plain port_base)" "5300"
+is "a plain port_base, as add-project writes it, is readable" "$(_proj plain port_base)" "5300"
 is "an unregistered project is empty, not an error" "$(_proj nosuch ports.vite_base)" ""
 is "a sub-table itself never prints as a value" "$(_proj withports ports)" ""
+
+echo "=== the port slot a new lane gets ==="
+
+# A lane takes base + slot for its dev server, API and e2e ports. The slot is the lowest one no
+# running lane holds. It used to be the count of running lanes: with lanes on slots 0 and 1, the
+# first ending made the count 1, and the next lane took slot 1, the ports of the one still running.
+SLOTS="$ROOT/slots"; mkdir -p "$SLOTS/state"
+lane_at() { # name status vite api e2e
+  printf '{"slug": "%s", "status": "%s", "ports": {"vite": %s, "uvicorn": %s, "e2e": %s}}' \
+    "$1" "$2" "$3" "$4" "$5" > "$SLOTS/state/$1.json"
+}
+slot() { FLEET_STATE="$SLOTS" _port_slot 5200 8100 6100; }
+is "no running lane: slot 0" "$(slot)" "0"
+lane_at a running 5200 8100 6100
+lane_at b running 5201 8101 6101
+is "two running lanes: the next is slot 2" "$(slot)" "2"
+lane_at a pr_open 5200 8100 6100
+is "the first lane ended: its slot is free again, not the second lane's" "$(slot)" "0"
+lane_at c starting 5200 8100 6100
+lane_at d running 5202 9000 7000
+is "a port another project's lane holds is skipped too" "$(slot)" "3"
+printf '[broken' > "$SLOTS/state/torn.json"
+is "an unreadable record does not stop the pick" "$(slot)" "3"
+FLEET_STATE="$SLOTS" _port_slot x 8100 6100 >/dev/null 2>&1
+is "a port base that is not a number is refused" "$?" "2"
 
 echo "=== the shipped example registry ==="
 
