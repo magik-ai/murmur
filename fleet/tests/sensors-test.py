@@ -149,6 +149,26 @@ def main():
           mode.resolve_effective("auto", 90, {"auto_eff": "full"}, mode.DEFAULT_AUTO) == "soft")
     check("FLEET_NVIDIA_SMI is read", mode.M.gpu() is not None, str(mode.M.gpu()))
 
+    print("--- a 0 in a profile means no cap ---")
+    # TOML has no null, so policy.toml says "uncapped" with 0. For memory that used to become
+    # MemoryHigh=1M, which squeezes every agent into reclaim.
+    zero = pathlib.Path(state) / "zero-config"
+    zero.mkdir()
+    (zero / "policy.toml").write_text("[mode.soft]\ncpu_quota_pct = 0\nmem_high_pct = 0\n")
+    mode = load("mode", {"FLEET_CONFIG": str(zero), "FLEET_STATE": state,
+                         "FLEET_NVIDIA_SMI": "", "PATH": "/nonexistent"})
+    sent = []
+    real_run = mode.subprocess.run
+    mode.subprocess.run = lambda argv, **kwargs: sent.append(argv)
+    try:
+        mode._apply("soft", mode._policy()[0])
+    finally:
+        mode.subprocess.run = real_run
+    props = sent[0][4:] if sent else []
+    check("mem_high_pct = 0 removes the memory cap", "MemoryHigh=" in props, str(props))
+    check("and cpu_quota_pct = 0 removes the CPU cap", "CPUQuota=" in props, str(props))
+    os.environ["FLEET_CONFIG"] = str(config)
+
     print(f"\nRESULT pass={len(PASS)} fail={len(FAIL)}")
     return 1 if FAIL else 0
 

@@ -125,11 +125,13 @@ def _policy():
                         profs[name][k] = over[k]
         except Exception:
             pass
-    # TOML has no null, so an uncapped profile is written as cpu_quota_pct = 0; treat
-    # 0 (or None) as "no cap". A literal 0% quota would FREEZE the slice, so never emit it.
+    # TOML has no null, so an uncapped profile is written with 0: cpu_quota_pct = 0 or
+    # mem_high_pct = 0. Treat 0 (or None) as "no cap". A literal 0% quota would FREEZE the slice,
+    # and a 0% memory share would squeeze every agent, so neither is ever sent.
     for name in profs:
-        if not profs[name]["cpu_quota_pct"]:
-            profs[name]["cpu_quota_pct"] = None
+        for key in ("cpu_quota_pct", "mem_high_pct"):
+            if not profs[name].get(key):
+                profs[name][key] = None
     return profs, auto
 
 

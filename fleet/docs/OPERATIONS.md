@@ -652,7 +652,8 @@ fleet mode full|soft|balanced|hard
 - Above its memory share, the kernel reclaims memory from the agents. They slow down, but they are
   not killed.
 - `[mode]` and `[mode.<name>]` in `policy.toml` change the thresholds and the profiles
-  (`cpu_quota_pct`, `cpu_weight`, `allow_spawn`, `mem_high_pct`).
+  (`cpu_quota_pct`, `cpu_weight`, `allow_spawn`, `mem_high_pct`). A `cpu_quota_pct` or
+  `mem_high_pct` of 0 means no cap.
 
 ### Draining the farm
 
