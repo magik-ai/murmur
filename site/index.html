@@ -71,9 +71,9 @@
 
         <div class="install" data-install>
           <div role="tablist" aria-label="How to start">
-            <button role="tab" id="t-agent" aria-selected="true" aria-controls="p-agent">Ask your agent</button>
-            <button role="tab" id="t-plugin" aria-selected="false" aria-controls="p-plugin" tabindex="-1">In Claude Code</button>
-            <button role="tab" id="t-farm" aria-selected="false" aria-controls="p-farm" tabindex="-1">On Ubuntu or Debian</button>
+            <button role="tab" id="t-agent" aria-selected="true" aria-controls="p-agent" aria-describedby="n-agent">Ask your agent</button>
+            <button role="tab" id="t-plugin" aria-selected="false" aria-controls="p-plugin" aria-describedby="n-plugin" tabindex="-1">In Claude Code</button>
+            <button role="tab" id="t-farm" aria-selected="false" aria-controls="p-farm" aria-describedby="n-farm" tabindex="-1">On Ubuntu or Debian</button>
           </div>
           <div role="tabpanel" id="p-agent" aria-labelledby="t-agent">
             <div class="cmd">
@@ -96,6 +96,11 @@ https://github.com/<wbr><span class="nowrap">magik-ai</span>/murmur</pre>
               <button class="mm-button mm-button--quiet mm-button--small" data-copy="curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash">Copy</button>
             </div>
           </div>
+        </div>
+        <div class="install-notes">
+          <p class="install-note" id="n-agent">Works in Claude Code or Codex. Your agent installs what is missing.</p>
+          <p class="install-note is-off" id="n-plugin">Needs git, the GitHub CLI and uv (see the <a class="mm-link" href="https://github.com/magik-ai/murmur/blob/main/docs/getting-started.md">step-by-step setup</a>). If a command is not found, run <code class="mm-inline-code">/reload-plugins</code>.</p>
+          <p class="install-note is-off" id="n-farm">Ubuntu 22.04+ or Debian 12+ with systemd. Run it as your normal user, not root.</p>
         </div>
         <p class="sr-only" aria-live="polite" id="copied"></p>
 
@@ -269,9 +274,9 @@ https://github.com/<wbr><span class="nowrap">magik-ai</span>/murmur</pre>
       <p class="prose">Open Claude Code or Codex in the repository you want to set up and paste the line below. Your agent checks your computer, installs what is missing and asks you only what needs you. It never replaces a file you already have. Starting from a new computer? The <a href="https://github.com/magik-ai/murmur/blob/main/docs/getting-started.md">step-by-step setup</a> covers a Mac, Windows and Linux.</p>
       <div class="install" data-install>
         <div role="tablist" aria-label="How to start">
-          <button role="tab" id="t2-agent" aria-selected="true" aria-controls="p2-agent">Ask your agent</button>
-          <button role="tab" id="t2-plugin" aria-selected="false" aria-controls="p2-plugin" tabindex="-1">In Claude Code</button>
-          <button role="tab" id="t2-farm" aria-selected="false" aria-controls="p2-farm" tabindex="-1">On Ubuntu or Debian</button>
+          <button role="tab" id="t2-agent" aria-selected="true" aria-controls="p2-agent" aria-describedby="n2-agent">Ask your agent</button>
+          <button role="tab" id="t2-plugin" aria-selected="false" aria-controls="p2-plugin" aria-describedby="n2-plugin" tabindex="-1">In Claude Code</button>
+          <button role="tab" id="t2-farm" aria-selected="false" aria-controls="p2-farm" aria-describedby="n2-farm" tabindex="-1">On Ubuntu or Debian</button>
         </div>
         <div role="tabpanel" id="p2-agent" aria-labelledby="t2-agent">
           <div class="cmd">
@@ -294,6 +299,11 @@ https://github.com/<wbr><span class="nowrap">magik-ai</span>/murmur</pre>
             <button class="mm-button mm-button--quiet mm-button--small" data-copy="curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash">Copy</button>
           </div>
         </div>
+      </div>
+      <div class="install-notes">
+        <p class="install-note" id="n2-agent">Works in Claude Code or Codex. Your agent installs what is missing.</p>
+        <p class="install-note is-off" id="n2-plugin">Needs git, the GitHub CLI and uv (see the <a class="mm-link" href="https://github.com/magik-ai/murmur/blob/main/docs/getting-started.md">step-by-step setup</a>). If a command is not found, run <code class="mm-inline-code">/reload-plugins</code>.</p>
+        <p class="install-note is-off" id="n2-farm">Ubuntu 22.04+ or Debian 12+ with systemd. Run it as your normal user, not root.</p>
       </div>
     </div>
   </section>

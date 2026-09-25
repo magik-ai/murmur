@@ -112,6 +112,13 @@ img, svg, canvas { max-width: 100%; }
    never moves the command beside it. */
 .install .cmd .mm-button { flex: none; justify-content: center; min-width: 64px; height: 24px; margin-top: -1px; }
 
+/* One line under the box says what the chosen way needs. It may run wider than the box, so on
+   a wide screen each note stays one line. The lines share one cell like the panels, so the
+   space they take stays the same whichever tab is chosen. */
+.install-notes { display: grid; margin-top: 10px; }
+.install-note { grid-area: 1 / 1; margin: 0; font-size: 14px; line-height: 22px; color: var(--ink-muted); }
+.install-note.is-off { visibility: hidden; }
+
 /* --------------------------------------------------------------- sections */
 /* One block per screen: every block of the story is at least the window's height with its
    content in the middle, so a screen never ends halfway through the next heading. The padding

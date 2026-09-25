@@ -46,17 +46,16 @@
         other.setAttribute("aria-selected", String(on));
         other.tabIndex = on ? 0 : -1;
         var panel = document.getElementById(other.getAttribute("aria-controls"));
-        /* Both panels keep their place, the one not chosen is only invisible: the box is as tall
-           as its tallest panel either way, so switching moves nothing on the page. */
+        var note = document.getElementById(other.getAttribute("aria-describedby"));
+        /* Every panel, and every line under the box, keeps its place: the ones not chosen are
+           only invisible. The box is as tall as its tallest panel either way, so switching
+           moves nothing on the page. */
         if (panel) {
           panel.classList.toggle("is-off", !on);
           panel.setAttribute("aria-hidden", String(!on));
           panel.inert = !on;
         }
-      });
-      var which = /farm/.test(tab.id) ? "farm" : "plugin";
-      Array.prototype.forEach.call(box.querySelectorAll("[data-foot]"), function (foot) {
-        foot.hidden = foot.getAttribute("data-foot") !== which;
+        if (note) note.classList.toggle("is-off", !on);
       });
     }
     Array.prototype.forEach.call(tabs, function (tab, index) {
