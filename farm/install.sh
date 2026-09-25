@@ -59,6 +59,11 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # A terminal a person can answer on. /dev/tty exists on every box; it opens only when this run
 # has a controlling terminal (a person at ssh -t, or at curl | bash), never in a headless run.
 have_tty() { (: </dev/tty) 2>/dev/null; }
+# The long output of apt, the fleet install and the dashboard goes to logs in this user's own
+# folder. A fixed name in /tmp would belong to the first user who ran the installer, and a second
+# user on the same machine could not write it.
+LOGS="${XDG_CACHE_HOME:-$HOME/.cache}/murmur"
+mkdir -p "$LOGS"
 
 # Questions read from the terminal even when the script itself arrives on stdin (curl | bash).
 ask() { # ask VAR "prompt" "default"
@@ -111,7 +116,7 @@ missing=()
 for pkg in git tmux python3 curl ca-certificates; do dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg"); done
 if [ ${#missing[@]} -gt 0 ]; then
   note "installing: ${missing[*]}"
-  sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq "${missing[@]}" >/tmp/murmur-apt.log 2>&1 || { tail -5 /tmp/murmur-apt.log; die "apt could not install ${missing[*]}"; }
+  sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq "${missing[@]}" >"$LOGS/apt.log" 2>&1 || { tail -5 "$LOGS/apt.log"; die "apt could not install ${missing[*]}"; }
 fi
 # Ubuntu 22.04 ships 3.10. Its python3 stays as it is (apt runs on it); the line below adds 3.11
 # from the deadsnakes PPA and puts it first on PATH through /usr/local/bin, which the fleet's
@@ -129,7 +134,7 @@ if ! have gh; then
   sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
     | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-  sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq gh >>/tmp/murmur-apt.log 2>&1 || { tail -5 /tmp/murmur-apt.log; die "apt could not install gh"; }
+  sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq gh >>"$LOGS/apt.log" 2>&1 || { tail -5 "$LOGS/apt.log"; die "apt could not install gh"; }
 fi
 note "gh $(gh --version | head -1 | awk '{print $3}')"
 
@@ -199,11 +204,11 @@ else
   ask single "Is this the only machine, with you working on it directly? (yes = dashboard stays local)" "yes"
 fi
 if [ "$single" = "yes" ] || [ "$single" = "y" ]; then
-  (cd "$FLEET_SRC" && ./install.sh --local >/tmp/murmur-fleet-install.log 2>&1) || { tail -20 /tmp/murmur-fleet-install.log; die "fleet install failed (log above)"; }
+  (cd "$FLEET_SRC" && ./install.sh --local >"$LOGS/fleet-install.log" 2>&1) || { tail -20 "$LOGS/fleet-install.log"; die "fleet install failed (log above)"; }
 else
-  (cd "$FLEET_SRC" && ./install.sh >/tmp/murmur-fleet-install.log 2>&1) || { tail -20 /tmp/murmur-fleet-install.log; die "fleet install failed (log above)"; }
+  (cd "$FLEET_SRC" && ./install.sh >"$LOGS/fleet-install.log" 2>&1) || { tail -20 "$LOGS/fleet-install.log"; die "fleet install failed (log above)"; }
 fi
-note "fleet: $(grep -c . /tmp/murmur-fleet-install.log) lines of install report in /tmp/murmur-fleet-install.log"
+note "fleet: $(grep -c . "$LOGS/fleet-install.log") lines of install report in $LOGS/fleet-install.log"
 (cd "$HQ_SRC" && python3 bin/hq install >/dev/null) || die "hq install failed"
 note "hq: linked into ~/.local/bin"
 
@@ -337,10 +342,10 @@ fi
 # The dashboard as a user service, so it outlives this login and comes back after a reboot. It
 # reads the bind from $fleet_env, so every choice above is already in place when it starts.
 if systemctl --user show-environment >/dev/null 2>&1; then
-  if "$FLEET_SRC/dashboard/run.sh" enable >/tmp/murmur-dashboard.log 2>&1; then
+  if "$FLEET_SRC/dashboard/run.sh" enable >"$LOGS/dashboard.log" 2>&1; then
     note "dashboard: fleet-dashboard.service enabled and running"
   else
-    note "dashboard: fleet-dashboard.service enabled, not answering yet ($(tail -1 /tmp/murmur-dashboard.log)); check: fleet dashboard status"
+    note "dashboard: fleet-dashboard.service enabled, not answering yet ($(tail -1 "$LOGS/dashboard.log")); check: fleet dashboard status"
   fi
 else
   note "dashboard: no systemd user manager here, so it is not a service; start it with: fleet dashboard start"

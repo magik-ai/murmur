@@ -978,6 +978,19 @@ class Installer(Scratch):
         self.assertEqual(self.policy(), mine)
 
     @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    def test_the_logs_are_in_this_users_own_folder(self):
+        # A fixed name in /tmp belongs to whoever ran the installer first, and a second user on
+        # the same machine could not write it.
+        cache = os.path.join(self.home, "cache")
+        done = self.on_a_terminal("--remote", "--yes", XDG_CACHE_HOME=cache)
+        said = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 0, said)
+        log = os.path.join(cache, "murmur", "fleet-install.log")
+        self.assertIn(f"lines of install report in {log}", said)
+        self.assertTrue(os.path.exists(os.path.join(cache, "murmur", "dashboard.log")), said)
+        self.assertNotIn("/tmp/murmur", said)
+
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
     def test_a_16_gb_machine_keeps_the_example_limits(self):
         said = self.installed_on(15.6)
         self.assertNotIn("memory limits sized", said)
