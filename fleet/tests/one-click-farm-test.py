@@ -1155,17 +1155,36 @@ class DashboardUnit(Scratch):
         self.assertEqual(complaints, [])
         self.assertEqual(done.returncode, 0, done.stderr)
 
-    def run_sh(self, *args, port):
+    def run_sh(self, *args, port, **extra):
         env = dict(os.environ, HOME=self.home, FAKE_LOG=self.fake_log,
                    FLEET_CONFIG=self.config, XDG_CONFIG_HOME=os.path.join(self.home, "config"),
                    FAKE_STATE_DIR=self.fake_state, FAKE_DASH_PORT=str(port),
                    FLEET_DASH_PORT=str(port), FLEET_DASH_SESSION="one-click-test-dashboard",
+                   FLEET_DASH_WAIT="10",
                    PATH=DASH_FAKES + os.pathsep + os.environ.get("PATH", ""))
+        env.update(extra)
         return subprocess.run(["bash", RUN_SH] + list(args), capture_output=True, text=True,
                               timeout=60, env=env, stdin=subprocess.DEVNULL)
 
+    def stand_in(self):
+        """The pid of the stand-in dashboard the fake unit started, or None."""
+        path = os.path.join(self.fake_state, "dashboard.pid")
+        if not os.path.exists(path):
+            return None
+        with open(path, encoding="utf-8") as handle:
+            return int(handle.read().strip())
+
+    def end_stand_in(self):
+        pid = self.stand_in()
+        if pid:
+            try:
+                os.kill(pid, 15)
+            except OSError:
+                pass
+
     def test_enable_installs_the_unit_and_start_starts_it(self):
         port = free_port()
+        self.addCleanup(self.end_stand_in)
         done = self.run_sh("enable", port=port)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         unit = self.read("config", "systemd", "user", "fleet-dashboard.service")
@@ -1183,13 +1202,162 @@ class DashboardUnit(Scratch):
         self.assertIn(["--user", "start", "fleet-dashboard.service"],
                       [argv[1:] for argv in self.calls("systemctl")])
         self.assertEqual([argv for argv in self.calls("tmux") if "new-session" in argv], [])
-        self.assertIn("active", self.run_sh("status", port=port).stdout)
+        status = self.run_sh("status", port=port).stdout
+        self.assertIn("active", status)
+        self.assertIn(f"running on 127.0.0.1:{port}", status)
+        # `start` returned once the dashboard answered with its token stored, so the token is
+        # there on the very next line.
+        token = self.run_sh("token", port=port)
+        self.assertEqual(token.returncode, 0, token.stderr)
+        self.assertEqual(token.stdout.strip(), self.read("config", "fleet", "dash-token").strip())
+
+    def test_an_active_unit_that_does_not_answer_is_not_called_running(self):
+        port = free_port()
+        self.addCleanup(self.end_stand_in)
+        self.assertEqual(self.run_sh("enable", port=port).returncode, 0)
+        # The unit still reads as active, and the kernel still reports the socket, but the
+        # server behind it is gone.
+        pid = self.stand_in()
+        os.kill(pid, 15)
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                break
+            time.sleep(0.1)
+        status = self.run_sh("status", port=port).stdout
+        self.assertIn("active, but no dashboard answers", status)
+        self.assertNotIn("running", status)
+        # A start whose server never comes to listen waits its time, then says so and fails.
+        done = self.run_sh("start", port=port, FLEET_DASH_WAIT="1", FAKE_DASH_SILENT="1")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertNotIn("dashboard up", done.stdout)
+        self.assertIn("no dashboard answered on port", done.stderr)
+        self.assertIn("journalctl --user -u fleet-dashboard.service", done.stderr)
 
     def test_without_the_unit_start_keeps_using_tmux(self):
         done = self.run_sh("start", port=free_port())
         self.assertTrue([argv for argv in self.calls("tmux") if "new-session" in argv])
         self.assertNotIn(["--user", "start", "fleet-dashboard.service"],
                          [argv[1:] for argv in self.calls("systemctl")], done.stdout)
+
+
+def this_machines_address():
+    """A non-loopback IPv4 address this machine can listen on, or None. Nothing is sent: a UDP
+    socket that connects only picks the address its route would leave from."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("198.51.100.1", 9))
+            address = probe.getsockname()[0]
+        with socket.socket() as listener:
+            listener.bind((address, 0))
+    except OSError:
+        return None
+    return None if address.startswith("127.") else address
+
+
+def an_address_this_machine_lacks():
+    """An address from the blocks kept for documentation that this machine cannot listen on."""
+    for address in ("203.0.113.254", "198.51.100.254", "192.0.2.254"):
+        with socket.socket() as probe:
+            try:
+                probe.bind((address, 0))
+            except OSError:
+                return address
+    return None
+
+
+@unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+class DashboardStart(Scratch):
+    """`fleet dashboard start|status|token` with no unit: the real server in a real tmux session,
+    on a tmux server of the test's own. Running means answering, and start waits for it."""
+
+    def setUp(self):
+        super().setUp()
+        # A tmux server of this test's own: TMUX_TMPDIR holds its socket, and TMUX, which would
+        # point every command at the tmux this suite may be running in, is left out.
+        self.tmux_dir = tempfile.mkdtemp(prefix="tmx.")
+        self.addCleanup(shutil.rmtree, self.tmux_dir, ignore_errors=True)
+        # Fakes for what the server asks the machine and must not reach from here (tailscale,
+        # systemctl, gh, hq); tmux, ss and python3 are this machine's own.
+        self.bin = os.path.join(self.home, "bin")
+        os.makedirs(self.bin)
+        for name in ("tailscale", "systemctl"):
+            os.symlink(os.path.join(DASH_FAKES, "_dashboard_fake"), os.path.join(self.bin, name))
+        for name in ("gh", "hq"):
+            path = os.path.join(self.bin, name)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\nexit 1\n")
+            os.chmod(path, 0o755)
+        self.port = free_port()
+        self.env = {key: value for key, value in os.environ.items() if key != "TMUX"}
+        self.env.update(HOME=self.home, FAKE_LOG=self.fake_log, FAKE_STATE_DIR=self.fake_state,
+                        TMUX_TMPDIR=self.tmux_dir, FLEET_CONFIG=self.config,
+                        FLEET_STATE=os.path.join(self.home, "state"),
+                        XDG_CONFIG_HOME=os.path.join(self.home, "config"),
+                        FLEET_DASH_PORT=str(self.port), FLEET_DASH_SESSION="dash-start-test",
+                        PATH=self.bin + os.pathsep + os.environ.get("PATH", ""))
+        self.addCleanup(subprocess.run, ["tmux", "kill-server"], env=self.env,
+                        capture_output=True, timeout=30)
+
+    def run_sh(self, *args, **extra):
+        return subprocess.run(["bash", RUN_SH] + list(args), capture_output=True, text=True,
+                              timeout=120, env=dict(self.env, **extra), stdin=subprocess.DEVNULL)
+
+    def test_start_returns_once_it_answers_and_the_token_is_there(self):
+        done = self.run_sh("start")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn(f"dashboard up on 127.0.0.1:{self.port}", done.stdout)
+        # The very next command finds the token the first start minted.
+        token = self.run_sh("token")
+        self.assertEqual(token.returncode, 0, token.stderr)
+        self.assertEqual(token.stdout.strip(), self.read("config", "fleet", "dash-token").strip())
+        self.assertIn(f"running on 127.0.0.1:{self.port}", self.run_sh("status").stdout)
+        self.assertIn("dashboard stopped", self.run_sh("stop").stdout)
+        for _ in range(50):
+            if self.run_sh("status").stdout.strip() == "stopped":
+                break
+            time.sleep(0.2)
+        self.assertEqual(self.run_sh("status").stdout.strip(), "stopped")
+
+    def test_a_bind_this_machine_lacks_is_not_reported_up_and_says_what_to_do(self):
+        address = an_address_this_machine_lacks()
+        if not address:
+            self.skipTest("this machine can listen on every documentation address")
+        done = self.run_sh("start", FLEET_DASH_BIND=address)
+        said = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 1, said)
+        self.assertNotIn("dashboard up", said)
+        self.assertIn(f"dashboard did NOT come up on {address}:{self.port}", done.stderr)
+        # The server's own reason, kept from the session that closed with it.
+        self.assertIn("It said:", done.stderr)
+        self.assertIn(f"FLEET_DASH_BIND={address} must be an address this machine has",
+                      done.stderr)
+        self.assertEqual(self.run_sh("status", FLEET_DASH_BIND=address).stdout.strip(), "stopped")
+
+    def test_a_session_with_something_else_in_it_is_not_running(self):
+        subprocess.run(["tmux", "new-session", "-d", "-s", "dash-start-test", "sleep", "300"],
+                       env=self.env, check=True, capture_output=True, timeout=30)
+        status = self.run_sh("status").stdout
+        self.assertIn("not answering", status)
+        self.assertNotIn("running on", status)
+        done = self.run_sh("start", FLEET_DASH_WAIT="1")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertNotIn("already running", done.stdout)
+        self.assertIn("no dashboard answers", done.stderr)
+        self.assertIn("fleet dashboard restart", done.stderr)
+
+    def test_a_wide_bind_without_tailscale_starts_and_exits_0(self):
+        address = this_machines_address()
+        if not address:
+            self.skipTest("no non-loopback address to listen on here")
+        # The fake tailscale answers no address, as a box without Tailscale does.
+        done = self.run_sh("start", FLEET_DASH_BIND=address)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn(f"dashboard up on {address}:{self.port}", done.stdout)
+        self.assertIn(f"bound to {address}, so reading needs the token too", done.stdout)
+        self.assertNotIn("reachable on the tailnet", done.stdout)
+        self.run_sh("stop")
 
 
 class DashboardBind(Scratch):
