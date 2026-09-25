@@ -763,7 +763,7 @@ def _check_sweep_timer():
         left = state.get("secs_left")
         when = f"next pass in {int(left // 60)} min" if left is not None else "enabled"
         return "ok", when, ""
-    return "off", "nothing buries dead worktrees or stale cards on this machine", \
+    return "off", "nothing removes merged worktrees or stale cards on this machine", \
         f"systemctl --user enable --now {SWEEP_TIMER_UNIT}"
 
 
@@ -1237,8 +1237,8 @@ SERVICE_UNITS = (
      "verb": "fleet daemon", "start": ["daemon", "start"], "stop": ["daemon", "stop"],
      "fix": "fleet daemon start"},
     {"id": "sweep_timer", "label": "Sweep timer", "unit": SWEEP_TIMER_UNIT,
-     "what": "buries merged worktrees and resolved cards every few minutes",
-     "stopped": "off, so nothing buries merged worktrees or resolved cards",
+     "what": "removes merged worktrees and resolved cards every few minutes",
+     "stopped": "off, so nothing removes merged worktrees or resolved cards",
      "verb": "fleet autosweep", "start": ["autosweep", "on"], "stop": ["autosweep", "off"],
      "fix": "fleet autosweep on"},
 )

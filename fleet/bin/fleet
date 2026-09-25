@@ -2041,107 +2041,91 @@ case "${1:-help}" in
   dashboard) shift; cmd_dashboard "$@";;
   help|--help|-h|*)
     cat <<'H'
-fleet: headless Claude Code and Codex agents on the farm
+fleet: run Claude Code and Codex agents on this machine
 
-  fleet spawn --project X --lane L [--engine claude|codex]
-              [--model M] [--effort low|medium|high|xhigh]
-              [--account NAME|auto]
-              --by <codename> [--icon <emoji>] [--color <hex>]
-              (--issue N | --task "..." | --brief-file f) [--force]
-              [--restart until-pr|until-merged|until-file:<p>] [--done-when <c>]
-              [--issues a,b,c]  — delivery policy; the daemon respawns the lane
-                                until it delivers, and won't call a multi-issue
-                                lane done while any issue is dropped.
-
-              TIERS — each engine dials capability its own way:
-                claude (default)  tier by MODEL:   --model opus | sonnet | haiku
-                codex  (OpenAI)   tier by EFFORT:  --effort xhigh | high | medium | low
-                                  on --model gpt-5.6-sol (the default)
-              Both engines run on their own subscription, never an API key.
-              --account picks the claude subscription account: a NAME from
-              `fleet accounts` pins it, auto (the default) takes one with
-              session and weekly headroom. claude only: codex refuses it.
-  fleet group start NAME --project X --spec FILE
-                                  spawn disjoint lane branches from a TOML group spec
+Lanes (one agent doing one task on its own branch)
+  fleet spawn --project P --lane L (--task "TEXT" | --issue N | --brief-file FILE)
+              [--engine claude|codex] [--model M] [--effort low|medium|high|xhigh]
+              [--account NAME|auto] [--by NAME] [--icon EMOJI] [--color HEX]
+              [--restart until-pr|until-merged|until-file:PATH] [--done-when CONTRACT]
+              [--issues A,B,C] [--after LANE[:pr-open|pr-merged]] [--force]
+                                  start an agent on its own branch and worktree
+  fleet group start NAME --project P --spec FILE
+                                  start the lanes of a group spec, each on its own branch
   fleet group status NAME [--json]
-                                  live lane state, branch heads and changed-file counts
+                                  each lane's state, branch head and number of changed files
   fleet group assemble NAME [--dry-run]
-                                  merge pushed lanes into one integration branch and one PR
-  fleet status|ps [--project X]   table of agents + farm health
-               [--json]           machine-readable: farm + every lane (status,
-                                  outcome, pr, restart, scope). Build tooling on this.
-  fleet metrics                   full telemetry JSON (pretty)
-  fleet capacity                  can we spawn right now?
-  fleet events [--follow]         the append-only event stream — READ THIS instead of
-        [--lane L] [--project X]  polling logs. kinds: spawned, status, delivered,
-        [--since <ts>] [--json]   respawned, dropped-scope. --follow streams (tail -f);
-        [--kind a,b]              --since <unix ts> resumes; filter by lane/project.
-  fleet daemon start|stop         native supervisor: respawns --restart lanes to their
-        |status|tick              outcome, enforces --issues scope. OPT-IN — only ever
-                                  touches lanes with a --restart policy. systemd, one
-                                  instance, survives reboot.
-  fleet logs <slug>               tail an agent's raw stream
-  fleet tail <slug>               compact lane state plus its last message
-  fleet msg <slug> ["text"]       read or append to a lane's checkpoint inbox
-  fleet models                    list and manage routable model engines
-  fleet models discover <id> [--json]
-                                  the models a provider offers, read without a prompt
-  fleet models on|off <id> <model>... [--confirm-cost <model>...]
-                                  switch a provider's models on or off for lanes
-  fleet machines list|plan|create|add|check|adopt|destroy|forget|forget-attempt
-                                  farms you own: this one, droplets it created, your own boxes
-  fleet hosts list|check          where a farm runs: your own machine (ssh) or a DigitalOcean Droplet
-  fleet accounts [list]           Claude subscription accounts: session and weekly use,
-                                  marking the one with the most headroom
-  fleet accounts pick             the account with the most headroom (exit 1 if none)
-  fleet accounts balance          next engine and account with headroom, round-robin
-                                  over claude and codex: prints `claude <name>` or `codex codex`
-  fleet accounts dir NAME|auto    an account's CLAUDE_CONFIG_DIR
-  fleet accounts add NAME         create an account and print its one login line
-  fleet accounts keepalive        refresh any account token that is near expiry
-  fleet kill <slug>               stop an agent
-  fleet kill [--retire] <slug>   stop a lane; --retire also stops respawns for that lane
+                                  merge the group's pushed lanes into one branch and one PR
+  fleet status [--project P] [--json]
+                                  the agents and the machine's health (fleet ps is the same)
+  fleet tail SLUG                 a lane's state and its last message
+  fleet logs SLUG                 follow a lane's raw output
+  fleet msg SLUG [TEXT]           add a message to a lane's inbox, or read the inbox
+  fleet events [--follow] [--since TS] [--lane L] [--project P] [--kind A,B] [--json]
+                                  the lanes' event log; read it instead of polling raw logs
+  fleet kill [--retire] SLUG      stop a lane; --retire also stops the daemon restarting it
+  fleet salvage SLUG              commit and push a lane's unsaved work
+  fleet clean [--project P] [--by NAME] [--dry-run] [--force --by NAME --yes]
+                                  remove the worktrees of finished lanes
+  fleet sweep [--project P] [--dry-run] [--force]
+                                  remove merged worktrees and the board cards of finished lanes
+  fleet autosweep on [MINUTES] | off | status
+                                  run fleet sweep on a timer, every 10 minutes by default
+
+The machine
+  fleet metrics                   the machine's measurements, as JSON
+  fleet capacity                  whether another agent can start now, and if not, why
+  fleet mode [auto|full|soft|balanced|hard]
+                                  show or set the power mode
   fleet drain [status]            save every lane's work and stop the farm, to free its memory
   fleet resume                    start the farm again after a drain
-  fleet salvage <slug>            commit and push a lane's recoverable work before cleaning
-  fleet clean [--project X]       remove FINISHED agents' safe worktrees; unknown flags fail
-              [--by NAME]         scope every selected state, including terminal lanes, by owner
-              [--dry-run]
-              [--force --by NAME --yes]
-                                  running lanes are skipped unless force is scoped to their owner;
-                                  unsaved forced removals require --yes and write an autopsy
-  fleet sweep [--dry-run]         POST-MERGE JANITOR: (A) drop every worktree whose branch
-              [--project X]       is merged into origin/main (+ prune + delete the branch),
-              [--force]           and (B) reap the dashboard CARD of every resolved agent
-                                  (PR merged, killed, or long-finished with no open PR) so
-                                  the board self-cleans. Never touches a live agent, an
-                                  OPEN-PR card, or (without --force) a worktree with
-                                  uncommitted work. autosweep runs this for you.
-  fleet autosweep on [minutes]    run `fleet sweep` on a systemd --user timer (default
-             | off | status       every 10 min) so nobody has to remember to.
-  fleet add-project --name N --repo owner/name [--port-base 5200]
-  fleet projects                  list registered projects
-  fleet identity [<name>]         show every code name's mark (emoji + colour)
-         [--icon E] [--color C]   set one deliberately. A code name has ONE mark:
-                                  it is registered on first spawn and the registry
-                                  wins after that, so all of an orchestrator's
-                                  agents carry the same emoji and colour.
+  fleet daemon start|stop|status|tick
+                                  the supervisor, which restarts lanes that have a --restart policy
   fleet dashboard start|stop|restart|status|token|enable
-                                  `enable` installs the user unit fleet-dashboard.service, so the
-                                  page survives a reboot; start/stop/restart then drive the unit
-                                  web dashboard on 127.0.0.1:7878; FLEET_DASH_BIND widens it
-                                  (and then its token gates reads too). Every write needs the
-                                  bearer token `fleet dashboard token` prints; `restart` is how
-                                  a new bind or token takes effect, and `status` reports the
-                                  socket it is really listening on
-  fleet mode [auto|full|soft|balanced|hard]
-                                  power mode — give the CPU back when you use the machine.
-                                  auto (default): full when the GPU is idle, soft when
-                                  it is busy. soft ~50% CPU keeps spawning;
-                                  balanced ~35% / hard ~20% PAUSE new spawns. Live, no
-                                  root, no restart. No arg shows the current mode.
+                                  the web dashboard, on 127.0.0.1:7878 unless you set otherwise
 
-  Setup and day to day: docs/QUICKSTART.md; the whole rig: docs/OPERATIONS.md.
+Setup
+  fleet add-project --name NAME --repo OWNER/REPO [--path DIR] [--branch main] [--port-base N]
+                                  register a project, and clone it if it is not there yet
+  fleet projects                  list the registered projects
+  fleet identity [NAME] [--icon EMOJI] [--color HEX]
+                                  show each code name's mark, or set one
+  fleet models                    list the model engines, whether each is on, and its health
+  fleet models enable|disable|test ID
+                                  switch an engine on after its health check, off, or check it
+  fleet models auth ID            store an engine's key, read from stdin
+  fleet models discover ID [--json]
+                                  the models a provider offers, read without sending a prompt
+  fleet models on|off ID MODEL... [--confirm-cost MODEL...]
+                                  switch a provider's models on or off for lanes
+  fleet accounts [list]           the Claude accounts, with their session and weekly use
+  fleet accounts pick             the Claude account with the most headroom
+  fleet accounts balance          the next engine and account with headroom, Claude or Codex
+  fleet accounts add NAME         add a Claude account and print the command that logs it in
+  fleet accounts dir NAME|auto    an account's CLAUDE_CONFIG_DIR
+  fleet accounts keepalive        refresh any account login that is close to expiring
+  fleet machines list|plan|create|add|check|adopt|destroy|forget|forget-attempt
+                                  the machines this farm knows: itself, droplets, your own boxes
+  fleet hosts list|check          the places a farm can run, and whether their CLI is ready
+
+Notes
+  Claude lanes choose capability with --model (opus, sonnet, haiku). Codex lanes choose it with
+  --effort, on --model gpt-5.6-sol unless you name another. Both run on their subscription login,
+  never on an API key. --account auto, the default, picks a Claude account with headroom.
+
+  fleet sweep never touches a running lane or a card whose pull request is open. It keeps a
+  worktree with uncommitted work unless you pass --force. fleet clean --force needs --by, and a
+  forced removal of unsaved work also needs --yes.
+
+  Power modes: auto, the default, is full while the GPU is idle and soft while it is busy. soft
+  caps the agents at about half the CPU and still starts new ones. balanced (about 35%) and hard
+  (about 20%) start no new agents. A change takes effect at once, with no restart.
+
+  The dashboard's writes need the token that fleet dashboard token prints. FLEET_DASH_BIND
+  opens it to other addresses, and then its reads need the token too. enable installs a user
+  unit, so the page survives a reboot; restart applies a new address or token.
+
+  Setup and day-to-day use: docs/QUICKSTART.md. Everything else: docs/OPERATIONS.md.
 H
     ;;
 esac
