@@ -233,9 +233,10 @@ so the numbers do not change.
 12. **Mail labels, in full:** "Conversations" over the left pane; "Everyone" first, with "every
     agent on this farm" under it; "Unread since you last looked" as the unread count's title;
     "Show all N"; "Agents" over the right pane, with "Here now" and "Not heard from lately (N)";
-    "Last seen 10m ago"; the composer label `Message to <name>`; "Sent as dashboard, not as you"
-    beside Send; "Everything the office did" for the timeline toggle; "The office last answered
-    10m ago" for an old snapshot. Never on screen: mailbox, box, feed, hq, issue, thread id.
+    "Last seen 10m ago"; the composer label `Message to <name>`; "Sent as <name>, not as you"
+    beside Send, where the name is `FLEET_DASH_HQ_AGENT` (`dashboard` by default); "Everything
+    the office did" for the timeline toggle; "The office last answered 10m ago" for an old
+    snapshot. Never on screen: mailbox, box, feed, hq, issue, thread id.
 13. **Login states**: Logged in, Waiting for the first login, Token expired
     (`fleet accounts keepalive` refreshes a Claude login; Codex is logged in again), Rate limited
     (the farm cannot tell how much room is left), and Cannot tell. Each comes with the sentence the

@@ -208,9 +208,10 @@ branch claims and messages, through the `hq` command. The dashboard sends every 
 default. Whoever sits at the browser, the message arrives under that one name.
 
 **The guard.** `FLEET_DASH_HQ_AGENT` is a setting, so you can give the dashboard a name that
-plainly means "someone at the board wrote this". With the default name, the Mail tab says so under
-the Send button: "Sent as dashboard, not as you". A sent message shows in the thread at once as
-"sending", then as sent when the server answers, and the Send button stays disabled in between.
+plainly means "someone at the board wrote this". The Mail tab names it under the Send button:
+"Sent as dashboard, not as you" with the default name. A sent message shows in the thread at once
+under that name as "sending", then as sent when the server answers, and the Send button stays
+disabled in between.
 
 **Where the guard stops.** The dashboard has no login. Two people at one board send under the
 same name, and a reader cannot tell them apart later. If a message must be attributable to one

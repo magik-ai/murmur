@@ -549,7 +549,7 @@ ok("every word the Mail tab promises is on the page, and no jargon with it", () 
   const source = read("static/views/mail.js");
   for (const label of ["Conversations", "Everyone", "every agent on this farm",
     "Unread since you last looked", "Show all ", "Agents", "Here now",
-    "Not heard from lately (", "Last seen ", "Message to ", "Sent as dashboard, not as you",
+    "Not heard from lately (", "Last seen ", "Message to ", "Sent as ", ", not as you",
     "Everything the office did", "The office last answered "]) {
     assert.ok(source.includes(label), `the mail page never says "${label}"`);
   }

@@ -247,12 +247,19 @@ function messageRow(message, index) {
     h("div", { class: "body" }, message.text || ""));
 }
 
-function echoRow(echo, index) {
-  const identity = mark("dashboard");
+/* The name this page signs office mail with: FLEET_DASH_HQ_AGENT on the farm, which
+   /api/config reports as hq_agent. "dashboard" is the server's own default. */
+function sender(context) {
+  const config = context.res("/api/config").data || {};
+  return String(config.hq_agent || "").trim() || "dashboard";
+}
+
+function echoRow(echo, index, name) {
+  const identity = mark(name);
   return h("div", { class: "msg echo", key: `e${index}:${echo.at}`, "data-echo": echo.state },
     h("div", { class: "who" },
       h("span", { class: `glyph mark-${identity.tone}` }, identity.glyph),
-      h("b", null, "dashboard"),
+      h("b", null, name),
       h("span", { class: "at" }, echo.state === "sending"
         ? "sending"
         : "sent, it will show here at the next refresh")),
@@ -307,7 +314,7 @@ function messages(context, data) {
     }
     out.push(messageRow(message, index));
   });
-  for (const [index, echo] of echoes(all).entries()) out.push(echoRow(echo, index));
+  for (const [index, echo] of echoes(all).entries()) out.push(echoRow(echo, index, sender(context)));
   return out;
 }
 
@@ -412,7 +419,7 @@ function composer(context) {
         onclick: () => send(context, to),
       }, local.sending ? "Sending" : "Send"),
       h("span", { class: "readonly-note" }, allowed
-        ? "Sent as dashboard, not as you"
+        ? `Sent as ${sender(context)}, not as you`
         : access.reason || "This dashboard is read-only.")));
 }
 
