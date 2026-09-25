@@ -1300,7 +1300,12 @@ function removeConfirm(context, rows, name) {
         h("p", { key: "one" }, `This takes ${name} out of this farm's project registry, and nothing else. `
           + `The folder ${row.path || `~/work/${name}`} on this farm stays, and the repository ${row.repo || ""} on `
           + "GitHub stays."),
-        h("p", { key: "two" }, `The port block ${ports(row)} becomes free for the next project.`),
+        /* The dev server block only, as the server says when it answers: the API and e2e
+           bases are the same numbers for every project, so they are not this one's to free. */
+        (row.ports || {}).web != null
+          ? h("p", { key: "two" }, `The dev server port block that starts at ${row.ports.web} `
+            + "becomes free for the next project.")
+          : null,
       ],
     h("div", { class: "row" },
       open ? null : h("button", {

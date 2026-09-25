@@ -126,7 +126,8 @@ Six columns. Every cell is one line, cut with an ellipsis, with the full text in
 | Actions | a GitHub button that opens the repository, and Remove |
 
 Remove asks first. Its confirm says that the folder on the farm and the repository on GitHub both
-stay, and which port block becomes free. It is refused while a lane is open in the project.
+stay, and which dev server port block becomes free (the API and end-to-end bases are shared by
+every project). It is refused while a lane is open in the project.
 
 **No access** comes only from a definite answer. A registered repository that is missing from the
 list gets one `repos/<owner>/<name>` call, and a 404 or 403 there means No access. A listing that

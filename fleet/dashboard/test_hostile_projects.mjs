@@ -1190,6 +1190,12 @@ for (const [typed, full] of [
   check("remove: the confirmation names the row's own folder, and says it and the GitHub repository both stay",
     /The folder \/home\/farm\/work\/sandbox on this farm stays, and the repository your-org\/sandbox on GitHub stays\./.test(confirm),
     confirm.slice(0, 240));
+  /* The server frees the dev server block only; the API and e2e bases are shared by every
+     project, so the confirmation must not promise them. */
+  check("remove: the confirmation frees the dev server block, and names no API or e2e port",
+    /The dev server port block that starts at 5220 becomes free for the next project\./.test(confirm)
+    && !/\bapi\b|\be2e\b/.test(confirm),
+    confirm.slice(0, 400));
   await page.click("[data-confirm='remove-project:sandbox']");
   await page.waitForTimeout(700);
   const posts = requests.filter((request) => request.method === "POST" && request.path === "/api/projects/remove");
