@@ -16,6 +16,7 @@
     finish          GitHub on the box (your terminal), then clone and install, non-interactive
     tailscale       join the box to your tailnet, or fall back to the tunnel and say why
     logins          Claude subscriptions and Codex: the commands for your terminal, verified
+    shim            ~/.local/bin/fleet on this laptop, a wrapper that runs `fleet` on the farm
     open            the dashboard in your browser (a tunnel, or the tailnet address)
     forget-attempt  drop a create whose answer was lost and whose droplet never appeared
     status          where the flow stands and the next step
@@ -95,6 +96,10 @@ UNIT = "fleet-dashboard.service"
 
 MARK_BEGIN = "# >>> murmur farm: written by /murmur:farm, rewritten on every run >>>"
 MARK_END = "# <<< murmur farm <<<"
+# The laptop's `fleet`: the wrapper fleet/README.md describes, which runs fleet on the farm.
+# The mark line says the file is this script's to rewrite; any other `fleet` is left alone.
+SHIM = os.path.join(HOME, ".local", "bin", "fleet")
+SHIM_MARK = "# murmur farm: written by /murmur:farm, rewritten on every run"
 # The port a new droplet's ssh and its firewall answer on.
 SSH_PORT = "22"
 # The address the plan's rehearsal writes into the block: TEST-NET-1 (RFC 5737), which no
@@ -1732,6 +1737,69 @@ def codex_lane(name, args):
         time.sleep(POLL)
 
 
+# ------------------------------------------------------------------------------------ shim
+
+def shim_text(name):
+    """The wrapper for this farm: every argument quoted for the farm's shell, fleet by its full
+    path, and on the ssh line the options every other ssh this script runs for the farm has."""
+    ssh = shlex.join(ssh_words(name, batch=False))
+    return ("#!/usr/bin/env bash\n"
+            f"{SHIM_MARK}\n"
+            f"# Run fleet on the farm {name} over ssh, with every argument quoted for the "
+            "remote shell.\n"
+            'args=(); for a in "$@"; do args+=("$(printf %q "$a")"); done\n'
+            f'exec {ssh} "{FLEET_BIN} ${{args[*]}}"\n')
+
+
+def shim_state(name):
+    """absent; current (this farm's wrapper, as this script writes it now); outdated (murmur's
+    wrapper, for another farm or from an older version); foreign (anything else)."""
+    if not os.path.lexists(SHIM):
+        return "absent"
+    if os.path.islink(SHIM) or not os.path.isfile(SHIM):
+        return "foreign"
+    try:
+        with open(SHIM, encoding="utf-8") as handle:
+            text = handle.read()
+    except (OSError, UnicodeDecodeError):
+        return "foreign"
+    if text == shim_text(name):
+        return "current"
+    return "outdated" if SHIM_MARK in text.splitlines() else "foreign"
+
+
+def cmd_shim(args, state):
+    name, _address = remote_ready(state)
+    found = shim_state(name)
+    if found == "foreign":
+        raise Stop(f"{SHIM} is there already and is not murmur's wrapper, so it was left as it "
+                   f"is. To have `fleet` on this laptop run on {name}, move that file away and "
+                   "run `shim` again; the farm works without it", next="open")
+    if found != "current":
+        os.makedirs(os.path.dirname(SHIM), exist_ok=True)
+        tmp = SHIM + ".murmur.tmp"
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o755)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(shim_text(name))
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, SHIM)
+    state.setdefault("farm", {})["shim"] = name
+    save_state(state)
+    first = shutil.which("fleet")
+    on_path = bool(first) and os.path.realpath(first) == os.path.realpath(SHIM)
+    said = f"`fleet` on this laptop runs on {name}: {SHIM}"
+    if first and not on_path:
+        said += f"; but your PATH finds {first} first, so put {os.path.dirname(SHIM)} before it"
+    elif not on_path:
+        said += f"; {os.path.dirname(SHIM)} is not on your PATH, so add it there"
+    return DONE, {"said": said, "path": SHIM, "changed": found != "current",
+                  "on_path": on_path, "next": next_for(state)}
+
+
 # ---------------------------------------------------------------------- forget-attempt, status
 
 def cmd_forget_attempt(args, state):
@@ -1773,6 +1841,10 @@ def next_step(state, row):
         return "tailscale"
     if not farm.get("logins"):
         return "logins"
+    # The wrapper once for each farm; a `fleet` that is not murmur's is never replaced.
+    name = answers(state).get("name")
+    if farm.get("shim") != name and shim_state(name) != "foreign":
+        return "shim"
     return "open"
 
 
@@ -1833,6 +1905,7 @@ def parser():
     logins.add_argument("--by", help="your code name, for the Codex lane")
     logins.add_argument("--wait", type=float, default=480)
     logins.set_defaults(run=cmd_logins)
+    subs.add_parser("shim").set_defaults(run=cmd_shim)
     subs.add_parser("forget-attempt").set_defaults(run=cmd_forget_attempt)
     subs.add_parser("status").set_defaults(run=cmd_status)
     return ap

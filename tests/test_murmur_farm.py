@@ -264,9 +264,11 @@ class Steps(Laptop):
         waiting = self.farm("logins", expect=2)
         self.assertIn("/home/farm/.local/bin/claude", waiting["run_in_your_terminal"][0])
         self.write_accounts([{"name": "default", "logged_in": True, "email": "p@example.com"}])
-        self.assertEqual(self.farm("logins", expect=0)["next"], "open")
+        self.assertEqual(self.farm("logins", expect=0)["next"], "shim")
+        self.assertEqual(self.farm("status")["next"], "shim")
+        self.assertEqual(self.farm("shim", expect=0)["next"], "open")
         self.assertEqual(self.farm("status")["next"], "open")
-        # Once the logins are done, a reinstall leads straight to open.
+        # Once the logins and the wrapper are done, a reinstall leads straight to open.
         self.assertEqual(self.farm("finish", "--wait", "10", expect=0)["next"], "open")
         opened = self.farm("open", expect=0)
         self.assertTrue(opened["url"].startswith("http://127.0.0.1:"))
@@ -1458,6 +1460,86 @@ class Logins(Laptop):
         spawn = [r for r in self.remote_runs() if " spawn " in r][0]
         self.assertIn("--engine codex", spawn)
         self.assertEqual(len([r for r in self.remote_runs() if r.startswith("npm ")]), 1)
+
+
+# ------------------------------------------------------------------------------------ shim
+
+class Shim(Laptop):
+    """`fleet` on the laptop: the wrapper fleet/README.md describes, written for this farm."""
+
+    def shim(self):
+        return os.path.join(self.home, ".local", "bin", "fleet")
+
+    def logged_in(self):
+        """A farm through logins, one subscription signed in."""
+        self.ready()
+        with open(os.path.join(self.remote, "accounts.json"), "w", encoding="utf-8") as handle:
+            json.dump([{"name": "default", "logged_in": True, "email": "p@example.com"}], handle)
+        self.assertEqual(self.farm("logins", expect=0)["next"], "shim")
+
+    def test_the_wrapper_runs_fleet_on_the_farm_with_every_argument_as_typed(self):
+        self.logged_in()
+        done = self.farm("shim", expect=0)
+        self.assertEqual((done["path"], done["changed"], done["next"]), (self.shim(), True, "open"))
+        self.assertFalse(done["on_path"])                  # ~/.local/bin is not on this PATH
+        self.assertIn("is not on your PATH", done["said"])
+        self.assertTrue(os.access(self.shim(), os.X_OK))
+        task = "Fix the \"login\" form; it's $HOME and ~ in one bug"
+        ran = subprocess.run([self.shim(), "spawn", "--project", "demo", "--lane", "check",
+                              "--engine", "codex", "--by", "person", "--task", task],
+                             env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        call = [c["argv"] for c in self.calls("ssh") if " spawn " in c["argv"][-1]][-1]
+        self.assertEqual(shlex.split(call[-1]), [
+            "/home/farm/.local/bin/fleet", "spawn", "--project", "demo", "--lane", "check",
+            "--engine", "codex", "--by", "person", "--task", task])
+        for option in ("StrictHostKeyChecking=accept-new",
+                       f"UserKnownHostsFile={self.murmur('known_hosts')}"):
+            self.assertIn(option, call)
+        self.assertEqual(call[-6:-1], ["-p", "22", "-l", "farm", "farm"])
+        # Again, with ~/.local/bin on the PATH: nothing changes, and `fleet` is found there.
+        again = self.farm("shim", expect=0,
+                          PATH=os.path.dirname(self.shim()) + os.pathsep + self.env["PATH"])
+        self.assertEqual((again["changed"], again["on_path"]), (False, True))
+
+    def held(self):
+        """What holds the name: a link's target, or a file's text."""
+        if os.path.islink(self.shim()):
+            return os.readlink(self.shim())
+        with open(self.shim(), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_a_fleet_that_is_not_murmurs_is_never_replaced(self):
+        self.logged_in()
+        os.makedirs(os.path.dirname(self.shim()))
+        with open(self.shim(), "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\necho my own fleet\n")
+        # A file of the person's own, then the link fleet/install.sh makes on a farm.
+        for turn in range(2):
+            if turn:
+                os.unlink(self.shim())
+                os.symlink(os.path.join(self.home, "clone", "fleet", "bin", "fleet"), self.shim())
+            before = self.held()
+            refused = self.farm("shim", expect=1)
+            self.assertIn("not murmur's wrapper", refused["said"])
+            self.assertEqual(refused["next"], "open")
+            self.assertEqual(self.held(), before)
+            self.assertEqual(self.farm("status")["next"], "open")
+
+    def test_murmurs_wrapper_from_before_is_rewritten(self):
+        self.logged_in()
+        os.makedirs(os.path.dirname(self.shim()))
+        with open(self.shim(), "w", encoding="utf-8") as handle:
+            handle.write("#!/usr/bin/env bash\n"
+                         "# murmur farm: written by /murmur:farm, rewritten on every run\n"
+                         'exec ssh old-farm "/home/farm/.local/bin/fleet $*"\n')
+        self.assertEqual(self.farm("status")["next"], "shim")
+        done = self.farm("shim", expect=0)
+        self.assertTrue(done["changed"])
+        with open(self.shim(), encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertNotIn("old-farm", text)
+        self.assertIn(" -l farm farm \"/home/farm/.local/bin/fleet ${args[*]}\"", text)
 
 
 # ---------------------------------------------------------------------------- remote words
