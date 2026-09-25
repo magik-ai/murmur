@@ -346,6 +346,33 @@ is "kill: and it says killed, keeping its other fields" \
   "$($PY -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["status"], d["lane"])' "$record")" "killed lane"
 is "kill: no temporary file is left behind" "$(ls "$KILL_STATE/state" | grep -c '\.tmp$')" "0"
 
+echo "=== fleet drain and fleet resume ==="
+# The documented names for freeing the machine, with the old game-mode name kept as an alias.
+# systemctl is a fake that writes down what it was asked, so no unit on this box is touched.
+DRAIN_STATE="$ROOT/drain-state"; mkdir -p "$DRAIN_STATE/state" "$ROOT/drainbin"
+printf '#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n[ "$2" = is-active ] && echo inactive\nexit 0\n' \
+  "$ROOT" > "$ROOT/drainbin/systemctl"; chmod +x "$ROOT/drainbin/systemctl"
+drain(){ FLEET_STATE="$DRAIN_STATE" PATH="$ROOT/drainbin:$PATH" "$FLEET_BIN" "$@" 2>&1; }
+out=$(drain drain)
+grep -qx -- "--user stop fleet-daemon.service" "$ROOT/systemctl.log" \
+  && ok "drain: fleet drain stops the daemon" || no "drain: the daemon was not stopped" "$(cat "$ROOT/systemctl.log")"
+case "$out" in *"Start it again with: fleet resume"*) ok "drain: and names fleet resume as the way back";;
+  *) no "drain: the way back is not fleet resume" "$out";; esac
+: > "$ROOT/systemctl.log"; out=$(drain resume)
+is "drain: fleet resume starts the daemon" "$(cat "$ROOT/systemctl.log")" "--user start fleet-daemon.service"
+out=$(drain drain status)
+case "$out" in "daemon: inactive"*"live lanes: 0"*) ok "drain: fleet drain status reports the daemon and the lanes";;
+  *) no "drain: fleet drain status" "$out";; esac
+: > "$ROOT/systemctl.log"; out=$(drain game-mode off)
+is "drain: the old name, fleet game-mode off, still resumes" "$(cat "$ROOT/systemctl.log")" "--user start fleet-daemon.service"
+out=$(drain drain now); rc=$?
+[ "$rc" != 0 ] && ok "drain: an unknown word is refused, not taken as a drain" || no "drain: fleet drain now ran" "$out"
+out=$(drain help)
+case "$out" in *"fleet drain [status]"*"fleet resume"*) ok "drain: fleet help lists drain and resume";;
+  *) no "drain: fleet help does not list drain and resume" "$out";; esac
+case "$out" in *gaming*|*playing*|*game-mode*) no "drain: fleet help still talks about games" "$out";;
+  *) ok "drain: and says nothing about games";; esac
+
 echo "RESULT pass=$P fail=$F"
 
 [ "$F" = 0 ]

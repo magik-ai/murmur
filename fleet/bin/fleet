@@ -509,8 +509,8 @@ PY
     echo "(override with --force)"; return 2
   fi
 
-  # Power-mode gate: a manual balanced/hard game mode PAUSES new spawns (running agents keep
-  # going); soft / full / auto never block. --force overrides.
+  # Power-mode gate: the balanced and hard power modes pause new spawns (running agents keep
+  # going); soft, full and auto never block. --force overrides.
   local spawnck; spawnck=$("$PY" "$FLEET_HOME/lib/mode.py" allow-spawn 2>/dev/null || echo 1)
   if [ "${spawnck%%$'\t'*}" = "0" ] && [ "$force" != "1" ]; then
     echo "MODE BLOCK: power mode '${spawnck#*$'\t'}' pauses new spawns (running agents keep going)."
@@ -831,7 +831,7 @@ RUN
   chmod +x "$log.run.sh"
   # Run the agent as a transient systemd --user service inside fleet.slice. That places its
   # whole process tree in a cgroup the user manager delegates to us, so `fleet mode` can cap
-  # its CPU LIVE for gaming WITHOUT root. tmux can't be used here: it double-forks and
+  # its CPU while it runs, without root. tmux can't be used here: it double-forks and
   # escapes the cgroup. CollectMode reaps the unit whether it finishes or fails.
   export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
   systemd-run --user --slice=fleet.slice --unit="fleet-$slug" \
@@ -839,7 +839,7 @@ RUN
     --property=CollectMode=inactive-or-failed \
     -- bash "$log.run.sh" >/dev/null 2>&1
   # A freshly-created slice starts uncapped — reassert the current power mode so an agent
-  # spawned mid-game is throttled at once, not only at the dashboard's next tick.
+  # spawned while the farm is throttled is capped at once, not only at the dashboard's next tick.
   "$PY" "$FLEET_HOME/lib/mode.py" reapply >/dev/null 2>&1 || true
 
   trap - EXIT
@@ -1029,31 +1029,31 @@ except Exception: pass' "$f" 2>/dev/null)
   done
 }
 
-cmd_game_mode() { # on|off|status — free the machine for gaming by SAVING + STOPPING the farm
-  # On 32GB a farm-in-flight (~11-18GB) and a heavy game (~10GB) do not both fit. A running lane's
-  # RAM is IN USE and cannot be reclaimed live (soft throttle does nothing), so this frees it by
-  # salvaging every lane's work to git, stopping the daemon so it will not respawn, and killing
-  # the lanes to release their RAM. `off` restarts the daemon, which respawns until-* lanes from
-  # their briefs. Lanes with no restart policy lose in-progress work beyond what salvage pushed —
-  # that is the cost of freeing a machine that is genuinely full.
+cmd_drain() { # on|off|status: free the machine's memory by saving and stopping the farm
+  # A running lane's memory is in use, and a CPU cap (`fleet mode`) does not give it back. So a
+  # drain saves every lane's work to git, stops the daemon so that nothing restarts, and stops
+  # the lanes. `off` (`fleet resume`) starts the daemon again, and it restarts the lanes that
+  # have a restart policy from their briefs. A lane without one loses the work salvage could not
+  # push. `fleet drain` and `fleet resume` are the names to use; `fleet game-mode on|off|status`
+  # is the old name for the same three actions and still works.
   local action="${1:-status}"
   case "$action" in
     on)
-      echo "== game-mode ON: save + freeze the farm =="
+      echo "== drain: saving every lane's work, then stopping the farm =="
       local slugs; slugs=$(_live_lane_slugs)
       echo "live lanes: $(echo $slugs | wc -w)"
       local s
       for s in $slugs; do echo "-- salvage $s"; cmd_salvage "$s" 2>&1 | tail -1; done
-      systemctl --user stop fleet-daemon.service 2>/dev/null && echo "daemon stopped (no respawns)"
+      systemctl --user stop fleet-daemon.service 2>/dev/null && echo "daemon stopped (no restarts)"
       for s in $slugs; do cmd_kill "$s" >/dev/null 2>&1; done
-      echo "lanes killed (RAM released)"
+      echo "lanes stopped (their memory is free)"
       sleep 3
       free -m | awk '/Mem:/{print "free now: "$4"MB"}'
-      echo "RAM is yours. Resume with: fleet game-mode off"
+      echo "The farm is drained. Start it again with: fleet resume"
       ;;
     off)
       if systemctl --user start fleet-daemon.service 2>/dev/null; then
-        echo "daemon started — it will respawn until-pr/until-merged lanes from their briefs"
+        echo "daemon started: it restarts the until-pr and until-merged lanes from their briefs"
       else
         echo "daemon not started (was it ever installed? run: fleet daemon start)"
       fi
@@ -1063,7 +1063,7 @@ cmd_game_mode() { # on|off|status — free the machine for gaming by SAVING + ST
       echo "live lanes: $(_live_lane_slugs | wc -w)"
       free -m | awk '/Mem:/{print "used "$3"MB, free "$4"MB"}'
       ;;
-    *) echo "usage: fleet game-mode on|off|status"; return 1;;
+    *) echo "usage: fleet drain [status] | fleet resume"; return 1;;
   esac
 }
 
@@ -2015,7 +2015,14 @@ case "${1:-help}" in
   add-project) shift; cmd_add_project "$@";;
   projects) shift; cmd_projects "$@";;
   kill) shift; cmd_kill "$@";;
-  game-mode|gamemode) shift; cmd_game_mode "$@";;
+  drain) shift
+    case "${1:-}" in
+      "") cmd_drain on;;
+      status) cmd_drain status;;
+      *) echo "usage: fleet drain [status] | fleet resume"; exit 1;;
+    esac;;
+  resume) shift; [ $# -eq 0 ] || { echo "usage: fleet resume"; exit 1; }; cmd_drain off;;
+  game-mode|gamemode) shift; cmd_drain "$@";;   # the old name for drain and resume
   clean) shift; cmd_clean "$@";;
   salvage) shift; cmd_salvage "$@";;
   sweep) shift; cmd_sweep "$@";;
@@ -2094,7 +2101,8 @@ fleet: headless Claude Code and Codex agents on the farm
   fleet accounts keepalive        refresh any account token that is near expiry
   fleet kill <slug>               stop an agent
   fleet kill [--retire] <slug>   stop a lane; --retire also stops respawns for that lane
-  fleet game-mode on|off|status  free RAM for gaming: salvage+stop the farm, then resume
+  fleet drain [status]            save every lane's work and stop the farm, to free its memory
+  fleet resume                    start the farm again after a drain
   fleet salvage <slug>            commit and push a lane's recoverable work before cleaning
   fleet clean [--project X]       remove FINISHED agents' safe worktrees; unknown flags fail
               [--by NAME]         scope every selected state, including terminal lanes, by owner
@@ -2129,7 +2137,7 @@ fleet: headless Claude Code and Codex agents on the farm
   fleet mode [auto|full|soft|balanced|hard]
                                   power mode — give the CPU back when you use the machine.
                                   auto (default): full when the GPU is idle, soft when
-                                  it's busy (you're playing). soft ~50% CPU keeps spawning;
+                                  it is busy. soft ~50% CPU keeps spawning;
                                   balanced ~35% / hard ~20% PAUSE new spawns. Live, no
                                   root, no restart. No arg shows the current mode.
 

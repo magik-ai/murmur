@@ -433,9 +433,8 @@ or with no head office configured, the tab says so and shows the command that fi
 **Machine** holds the controls, in sections:
 
 - **Power**: the power setting, and three actions for the whole farm: **Throttle**
-  (`fleet mode balanced`), **Drain** (`fleet game-mode on`) and **Resume**
-  (`fleet game-mode off`). Each one shows what it will do before you confirm. See
-  [section 9](#9-power-modes-and-capacity).
+  (`fleet mode balanced`), **Drain** (`fleet drain`) and **Resume** (`fleet resume`). Each one
+  shows what it will do before you confirm. See [section 9](#9-power-modes-and-capacity).
 - **Services**: the agent runner (the supervisor daemon, which restarts only the lanes that have
   a restart policy) and the sweep timer, with start, stop and restart. Stopping the agent runner
   stops no running lane. The dashboard's own row is read-only: restart it from a terminal.
@@ -660,16 +659,19 @@ fleet mode full|soft|balanced|hard
 ### Draining the farm
 
 ```bash
-fleet game-mode on        # salvage every running lane, stop the daemon, stop the lanes
-fleet game-mode off       # start the daemon again
-fleet game-mode status
+fleet drain               # salvage every running lane, stop the daemon, stop the lanes
+fleet resume              # start the daemon again
+fleet drain status        # the daemon's state, the running lanes and free memory
 ```
 
-`game-mode on` frees the machine's memory. It runs `fleet salvage` on each running lane, stops the
-supervisor daemon so that nothing respawns, and then stops the lanes. `game-mode off` starts the
-daemon, which respawns the lanes that have a restart policy, from their saved briefs. A lane
-without a restart policy stays stopped, and any work that salvage could not push is lost. The
-dashboard's **Drain** and **Resume** run these two commands.
+`fleet drain` frees the machine's memory, for example while you use the machine for something
+else. It runs `fleet salvage` on each running lane, stops the supervisor daemon so that nothing
+respawns, and then stops the lanes. `fleet resume` starts the daemon, which respawns the lanes
+that have a restart policy, from their saved briefs. A lane without a restart policy stays
+stopped, and any work that salvage could not push is lost.
+
+`fleet game-mode on`, `off` and `status` are older names for the same three commands, and still
+work. The dashboard's **Drain** and **Resume** run `fleet game-mode on` and `fleet game-mode off`.
 
 ### Capacity
 

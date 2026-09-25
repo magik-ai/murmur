@@ -19,7 +19,7 @@ warn_cpu_temp = 85   # amber above this; below it is normal under load
 # `fleet mode auto|full|soft|balanced|hard`. The farm's agents live in a systemd
 # --user slice we cap live (no root, no restart). cpu_quota_pct = share of the WHOLE
 # machine; cpu_weight = scheduler share when not capped (100 = default, lower = yields);
-# allow_spawn = accept new agents. `auto` uses GPU load to pick full (idle) vs soft (gaming).
+# allow_spawn = accept new agents. `auto` uses GPU load to pick full (idle) or soft (in use).
 [mode]
 auto_enter_gpu = 25   # GPU util % that reads as "someone is using this box" -> soft
 auto_exit_gpu  = 10   # ...and below this...
