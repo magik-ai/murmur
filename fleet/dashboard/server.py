@@ -2641,10 +2641,11 @@ _hosting_hosts_snapshot = _blank_snapshot(providers=[])
 _hosting_wake = threading.Event()
 
 
-def _hosting_list(snapshot, args, what, keys):
+def _hosting_list(snapshot, args, what, keys, rename=None):
     """One listing into its snapshot. A failed run keeps the last good answer, says when it was
     true and carries one sentence: an empty table and an unreachable provider look identical
-    once the rows are gone, and only one of them is worth acting on."""
+    once the rows are gone, and only one of them is worth acting on. `rename` maps a snapshot
+    key to the listing's own name for it, where the listing's name is taken by the snapshot."""
     rc, out, err = run_tool([fleet_bin()] + list(args), timeout=HOSTING_LIST_TIMEOUT)
     known = _job_secrets()
     out, err = SCRUB.scrub(out, known), SCRUB.scrub(err, known)
@@ -2662,17 +2663,22 @@ def _hosting_list(snapshot, args, what, keys):
         with _snapshot_lock:
             _snapshot_failed(snapshot, f"{what} did not answer with a JSON object")
         return
+    rename = rename or {}
     with _snapshot_lock:
-        _snapshot_succeeded(snapshot, {key: payload.get(key, blank)
+        _snapshot_succeeded(snapshot, {key: payload.get(rename.get(key, key), blank)
                                        for key, blank in keys.items()})
 
 
 def hosting_refresh():
     """One pass over both listings. They are separate calls into separate snapshots, so one
     failing tool leaves the other table alone."""
+    # The listing's `error` says DigitalOcean was not asked or did not answer, so its rows are
+    # the registry's word alone. The snapshot's own `error` is about the run, so the listing's
+    # is kept as `provider_error`.
     _hosting_list(_hosting_machines_snapshot, ["machines", "list", "--json"],
                   "fleet machines list",
-                  {"this": {}, "total_monthly_usd": 0, "machines": []})
+                  {"this": {}, "total_monthly_usd": 0, "machines": [], "provider_error": ""},
+                  rename={"provider_error": "error"})
     _hosting_list(_hosting_hosts_snapshot, ["hosts", "list", "--json"], "fleet hosts list",
                   {"providers": []})
 
@@ -2703,7 +2709,8 @@ def hosting_machines():
     return _envelope(snapshot, {
         "this": this if isinstance(this, dict) else {},
         "total_monthly_usd": snapshot.get("total_monthly_usd") or 0,
-        "machines": machines if isinstance(machines, list) else []})
+        "machines": machines if isinstance(machines, list) else [],
+        "provider_error": str(snapshot.get("provider_error") or "")})
 
 
 def hosting_hosts():

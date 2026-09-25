@@ -4677,6 +4677,23 @@ class HostingSnapshotTest(HostingCase):
         self.assertEqual(len(dashboard.hosting_machines()["machines"]), 3)
         self.assertEqual(len(dashboard.hosting_hosts()["providers"]), 2)
 
+    def test_a_provider_that_did_not_answer_reaches_the_page(self):
+        # `fleet machines list` says so in its `error` field; the page must say it too.
+        machines = json.loads(self.machines_file.read_text())
+        machines["error"] = "doctl: unable to authenticate you"
+        self.machines_file.write_text(json.dumps(machines))
+        with self.farm():
+            dashboard.hosting_refresh()
+        answer = dashboard.hosting_machines()
+        self.assertEqual(answer["provider_error"], "doctl: unable to authenticate you")
+        self.assertIsNone(answer["error"])            # the run itself worked
+        self.assertEqual(len(answer["machines"]), 3)
+        machines.pop("error")
+        self.machines_file.write_text(json.dumps(machines))
+        with self.farm():
+            dashboard.hosting_refresh()
+        self.assertEqual(dashboard.hosting_machines()["provider_error"], "")
+
     def test_a_listing_that_is_not_json_is_a_sentence_and_not_a_traceback(self):
         self.machines_file.write_text("doctl: command not found\n")
         self.hosts_file.write_text("[]\n")

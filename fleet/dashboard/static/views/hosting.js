@@ -443,6 +443,15 @@ function staleNote(data, key) {
     + `${data.error ? `: ${data.error}` : ""}. What is drawn is its last reading.`);
 }
 
+/* The listing's own word that DigitalOcean was not asked or did not answer: the rows are then
+   the registry's record alone, and a droplet may have gone, or appeared, since. */
+function providerNote(data, key) {
+  if (!data || !data.provider_error) return null;
+  return h("p", { class: "readonly-note card-pad", key, "data-hosting-provider-error": "" },
+    `DigitalOcean was not asked or did not answer: ${data.provider_error}. `
+    + "The rows are this farm's own record, which may be out of date.");
+}
+
 function machinesCard(context) {
   const resource = context.res("/api/machines");
   return card({ key: "machines", "data-write": "" }, panel(resource, {
@@ -456,6 +465,7 @@ function machinesCard(context) {
     })),
     ready: (data) => [
       staleNote(data, "stale-machines"),
+      providerNote(data, "provider-machines"),
       h("div", { class: "tablewrap", key: "table" }, h("table", { class: "h-machines" },
         h("thead", null, h("tr", null,
           h("th", { title: "Name" }, "Name"),

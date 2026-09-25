@@ -460,6 +460,29 @@ for (const [route, table] of [["/api/machines", "machines"], ["/api/hosts", "hos
   await context.close();
 }
 
+/* `fleet machines list` says in its `error` field when DigitalOcean was not asked or did not
+   answer. Its rows are then the registry's word alone, and the card says so above them. */
+{
+  const real = await (await fetch(`${BASE}/api/machines?state=ready`)).json();
+  const { page, context, thrown } = await open({
+    overrides: {
+      "/api/machines": JSON.stringify({ ...real, provider_error: "doctl: unable to authenticate you" }),
+    },
+  });
+  const seen = await page.evaluate(() => ({
+    notes: [...document.querySelectorAll("#view [data-hosting-provider-error]")]
+      .map((node) => node.textContent),
+    rows: document.querySelectorAll("#view .h-machines tbody tr").length,
+  }));
+  check("hosting: a provider that did not answer is said above the rows",
+    seen.notes.length === 1
+    && /^DigitalOcean was not asked or did not answer: doctl: unable to authenticate you\./
+      .test(seen.notes[0]) && seen.rows > 1,
+    `${seen.notes.join(" | ")} (${seen.rows} rows)`);
+  check("hosting: nothing threw on a provider error", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
 /* A machines route that fails outright: the card says so, and the head says nothing about money
    it cannot know. */
 {
