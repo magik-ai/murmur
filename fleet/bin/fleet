@@ -1417,7 +1417,10 @@ force = sys.argv[1] == "1"
 by = sys.argv[2] if len(sys.argv) > 2 else ""
 project = sys.argv[3] if len(sys.argv) > 3 else ""
 ACTIVE = ("starting", "running")
-DONE = ("done", "done_no_pr", "pr_open", "failed", "ended", "killed")
+# What a lane's parser writes when it ends, what `fleet kill` writes, and what the supervisor
+# daemon writes about a lane it restarts (lib/supervisor.py).
+DONE = ("done", "done_no_pr", "pr_open", "failed", "ended", "killed",
+        "delivered", "gave_up", "respawned", "respawn_failed")
 skipped = []
 
 def unit_is_inactive(slug):

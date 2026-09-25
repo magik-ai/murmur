@@ -113,6 +113,18 @@ chk "salvage pushes protected commits" \
 "$FLEET" clean --project testproj >/dev/null 2>&1
 chk "clean removes a lane after successful salvage" '[ ! -d "$WTROOT/lane-a-111" ]'
 
+echo "== clean removes lanes the supervisor daemon has finished with =="
+for status in delivered gave_up respawned respawn_failed; do
+  mkwt "daemon-$status" "fleet/daemon-$status"
+  git -C "$WTROOT/daemon-$status" push -q -u origin "fleet/daemon-$status" 2>/dev/null
+  mkrec "daemon-$status" "$WTROOT/daemon-$status" "fleet/daemon-$status" "$status" mine
+done
+OUT=$("$FLEET" clean --project testproj 2>&1)
+chk "clean removes delivered, gave_up, respawned and respawn_failed lanes" \
+  '[ ! -d "$WTROOT/daemon-delivered" ] && [ ! -d "$WTROOT/daemon-gave_up" ] &&
+   [ ! -d "$WTROOT/daemon-respawned" ] && [ ! -d "$WTROOT/daemon-respawn_failed" ] &&
+   [ ! -f "$FLEET_STATE/state/daemon-delivered.json" ]'
+
 echo "== force cleanup is scoped, confirmed, and snapshotted =="
 mkwt force-dirty fleet/force-dirty
 echo dirty > "$WTROOT/force-dirty/dirty.txt"
