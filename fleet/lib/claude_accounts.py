@@ -440,8 +440,8 @@ def cmd_list(as_json: bool = False) -> int:
             if "429" in errors[name]:
                 exp = token_expiry(account_dirs()[name])
                 if exp is not None and exp <= time.time():
-                    print("               token EXPIRED (429 masks it); the keepalive timer "
-                          "refreshes it — or /login if that account's refresh token is gone")
+                    print("               token EXPIRED (429 masks it); `fleet accounts "
+                          "keepalive` refreshes it, or /login if its refresh token is gone")
                 else:
                     print("               rate-limited by Anthropic; retries on the next "
                           "refresh — logging in again would not help")
