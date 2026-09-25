@@ -236,10 +236,11 @@ so the numbers do not change.
     "Last seen 10m ago"; the composer label `Message to <name>`; "Sent as dashboard, not as you"
     beside Send; "Everything the office did" for the timeline toggle; "The office last answered
     10m ago" for an old snapshot. Never on screen: mailbox, box, feed, hq, issue, thread id.
-13. **Login states**: Logged in, Waiting for the first login, Token expired (the keepalive timer
-    usually fixes this), Rate limited (the farm cannot tell how much room is left), and Cannot
-    tell. Each comes with the sentence the server writes. The table shows when each account was
-    last read. "Refresh now" is disabled for sixty seconds after a press.
+13. **Login states**: Logged in, Waiting for the first login, Token expired
+    (`fleet accounts keepalive` refreshes a Claude login; Codex is logged in again), Rate limited
+    (the farm cannot tell how much room is left), and Cannot tell. Each comes with the sentence the
+    server writes. The table shows when each account was last read. "Refresh now" is disabled for
+    sixty seconds after a press.
 14. **Removing a project** is refused while the project has open lanes, and the refusal says how
     many. It edits only the registry, and keeps a copy of the old file next to it. The checkout and
     the worktrees stay. The answer names the dev server port block that becomes free. Adding a

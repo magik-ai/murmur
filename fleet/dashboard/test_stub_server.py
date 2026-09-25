@@ -568,8 +568,8 @@ LOGIN_STATES = [
     {"name": "farm-one", "engine": "claude", "state": "logged_in", "read_at": ago(240),
      "sentence": "Logged in. Lanes can be spawned on this account."},
     {"name": "farm-two", "engine": "codex", "state": "expired", "read_at": ago(900),
-     "sentence": "The login on this account has expired. The keepalive timer usually refreshes "
-                 "it; log in again if it does not."},
+     "sentence": "The codex login has expired. Log in again: "
+                 "ssh -L 1455:localhost:1455 -t farm codex login"},
     {"name": "farm-three", "engine": "claude", "state": "waiting_for_login", "read_at": None,
      "sentence": "This account has no login on the farm yet. Log in once: ssh -t farm claude, "
                  "then /login"},

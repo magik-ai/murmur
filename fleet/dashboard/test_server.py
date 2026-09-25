@@ -1155,7 +1155,9 @@ class LoginStateTest(unittest.TestCase):
         rows, _ = self.states([{"name": "farm-one", "stale_error": "429 rate-limited, 9m to retry",
                                 "read_at": None}])
         self.assertEqual(rows["farm-one"]["state"], "expired")
-        self.assertIn("keepalive", rows["farm-one"]["sentence"])
+        # murmur ships no keepalive timer: the sentence names the command that refreshes it.
+        self.assertIn("`fleet accounts keepalive` refreshes it", rows["farm-one"]["sentence"])
+        self.assertNotIn("timer", rows["farm-one"]["sentence"])
 
     def test_a_throttled_account_says_the_farm_cannot_tell_rather_than_logged_out(self):
         self.credentials(self.extra / "farm-one", 8 * 3600)

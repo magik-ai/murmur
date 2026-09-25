@@ -516,8 +516,8 @@ def _claude_login_row(name, config_dir, row, now):
         # A 429 masks an expired token, which is why the expiry is read first: the CLI's own list
         # makes the same correction.
         state = "expired"
-        sentence = ("The login on this account has expired. The keepalive timer usually "
-                    "refreshes it; log in again if it does not.")
+        sentence = ("The login on this account has expired. On the farm, `fleet accounts "
+                    "keepalive` refreshes it; log in again if it does not.")
     elif throttled:
         state = "rate_limited"
         sentence = ("The vendor asked the farm to slow down, so it cannot tell how much room is "
@@ -540,8 +540,8 @@ def _codex_login_row(row, now):
                     f"ssh -L 1455:localhost:1455 -t {CA.FARM_ALIAS} codex login")
     elif expiry <= now:
         state = "expired"
-        sentence = ("The codex login has expired. The keepalive timer usually refreshes it; log "
-                    "in again if it does not.")
+        sentence = ("The codex login has expired. Log in again: "
+                    f"ssh -L 1455:localhost:1455 -t {CA.FARM_ALIAS} codex login")
     elif str((row or {}).get("stale_error") or ""):
         state = "unknown"
         sentence = "The farm could not read codex's numbers the last time it asked."
