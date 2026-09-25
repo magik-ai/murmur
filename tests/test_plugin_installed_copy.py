@@ -81,6 +81,35 @@ class InstalledCopy(unittest.TestCase):
         self.assertIn("Agent work in this repository follows `.murmur/contract.md`.", law)
         self.assertIn("## 1. Repo and contract map", law)
 
+    def run_hook(self, *python_path):
+        env = {"PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "HOME": str(self.tmp),
+               "CLAUDE_PROJECT_DIR": str(self.project),
+               "PYTHONPATH": ":".join(str(path) for path in python_path)}
+        done = subprocess.run(["bash", str(self.plugin / "hooks" / "session-context.sh")],
+                              cwd=self.project, env=env, capture_output=True, text=True,
+                              timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)["hookSpecificOutput"]["additionalContext"]
+
+    def test_the_session_hook_reads_the_answers(self):
+        self.assertEqual(self.run_script("murmur_init.py", "apply", "--defaults").returncode, 0)
+        context = self.run_hook()
+        self.assertIn("# This repository (from `.murmur/config.toml`)", context)
+        self.assertIn("Never without <OWNER>: merge, force-push", context)
+
+    def test_the_session_hook_reads_the_answers_without_tomllib(self):
+        # A Mac's own python3 is 3.9, which has no tomllib. The hook must not tell every
+        # session there that the configuration could not be read.
+        self.assertEqual(self.run_script("murmur_init.py", "apply", "--defaults").returncode, 0)
+        old_python = self.tmp / "old-python"
+        old_python.mkdir()
+        (old_python / "tomllib.py").write_text('raise ImportError("No module named \'tomllib\'")\n')
+        context = self.run_hook(old_python)
+        self.assertNotIn("could not be read", context)
+        self.assertIn("# This repository (from `.murmur/config.toml`)", context)
+        self.assertIn("Branch claims: this machine only.", context)
+        self.assertIn("Never without <OWNER>: merge, force-push", context)
+
     def test_the_copy_holds_everything_the_scripts_read(self):
         self.assertTrue((self.plugin / "templates" / "CLAUDE.md").is_file())
         self.assertTrue((self.plugin / "hooks" / "generated-files.example.txt").is_file())

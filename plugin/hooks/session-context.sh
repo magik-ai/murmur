@@ -61,7 +61,7 @@ fi
 # <OWNER>, <TRACKER> and <FARM>; this block says what those words mean here.
 config="${CLAUDE_PROJECT_DIR:-.}/.murmur/config.toml"
 repo_block=$(python3 - "$config" <<'REPO'
-import sys, pathlib
+import json, sys, pathlib
 path = pathlib.Path(sys.argv[1])
 if not path.is_file():
     print("\n**This repository has not run murmur init yet.** Run `/murmur:init` to"
@@ -71,7 +71,23 @@ if not path.is_file():
     sys.exit(0)
 try:
     import tomllib
-    cfg = tomllib.loads(path.read_text(encoding="utf-8"))
+except ImportError:  # Python older than 3.11, such as the python3 a Mac comes with
+    tomllib = None
+try:
+    text = path.read_text(encoding="utf-8")
+    if tomllib:
+        cfg = tomllib.loads(text)
+    else:
+        # The flat `key = value` lines init writes. Each value, a string or a list of strings,
+        # reads the same as JSON; any other line is reported below as unreadable.
+        cfg = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                key, equals, value = line.partition("=")
+                if not equals:
+                    raise ValueError(f"not a key = value line: {line}")
+                cfg[key.strip()] = json.loads(value)
 except Exception as exc:  # a parse or read failure is reported, never a crashed session
     print(f"\n**Note:** `.murmur/config.toml` could not be read ({exc}). Run `/murmur:doctor`.")
     sys.exit(0)

@@ -15,8 +15,7 @@ two hooks that keep every session inside the team's rules. The words used here
 
 You need Claude Code, git and [uv](https://docs.astral.sh/uv/): the commands
 run their scripts with `uv run`. GitHub's command-line tool, `gh`, is needed
-for pull requests. The session-start hook runs your own `python3`, which must
-be Python 3.11 or newer to read `.murmur/config.toml`.
+for pull requests. The session-start hook runs your own `python3`.
 
 Inside Claude Code, add this repository as a plugin marketplace and install the
 plugin:
