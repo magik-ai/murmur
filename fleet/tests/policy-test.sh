@@ -105,6 +105,26 @@ is "a branch that starts with a dash is checked behind a separator" \
 is "and so is an ordinary branch" \
   "$(sed -n 2p "$ROOT/hq-args" 2>/dev/null)" "check-push|--|https://example.invalid/acme/demo.git|fleet/lane-1|"
 
+# The name the guard checks under. A clone-wide `git config hq.agent` is shared by every worktree
+# of the clone, so it must never override the caller's HQ_AGENT; the lane's own worktree value,
+# which spawn writes with extensions.worktreeConfig on, wins over both (as in hq's own guard).
+cat > "$ROOT/hookbin/hq" <<FAKE
+#!/bin/sh
+printf '%s\n' "\${HQ_AGENT:-(unset)}" >> "$ROOT/hq-agent"
+FAKE
+chmod +x "$ROOT/hookbin/hq"
+push_one='refs/heads/fleet/lane-1 2222 refs/heads/fleet/lane-1 0000'
+git -C "$ROOT/hookrepo" config hq.agent clone-wide
+printf '%s\n' "$push_one" \
+  | (cd "$ROOT/hookrepo" && HQ_AGENT=caller PATH="$ROOT/hookbin:$PATH" "$ROOT/claims-hook")
+is "a clone-wide hq.agent never overrides the caller's HQ_AGENT" \
+  "$(tail -n 1 "$ROOT/hq-agent" 2>/dev/null)" "caller"
+git -C "$ROOT/hookrepo" config extensions.worktreeConfig true
+git -C "$ROOT/hookrepo" config --worktree hq.agent lane-own
+printf '%s\n' "$push_one" \
+  | (cd "$ROOT/hookrepo" && HQ_AGENT=caller PATH="$ROOT/hookbin:$PATH" "$ROOT/claims-hook")
+is "the lane's own worktree hq.agent wins" "$(tail -n 1 "$ROOT/hq-agent" 2>/dev/null)" "lane-own"
+
 echo "=== the commit identity a lane pushes under ==="
 
 : > "$FLEET_CONFIG/policy.toml"

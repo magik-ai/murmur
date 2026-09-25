@@ -597,7 +597,13 @@ HOOK_DISPATCH
 hq_bin="$(command -v hq || echo "$HOME/.local/bin/hq")"
 [ -x "$hq_bin" ] || exit 0
 repo_url="$(git remote get-url origin 2>/dev/null)" || exit 0
-wt_agent="$(git config hq.agent 2>/dev/null || true)"
+# The name is resolved as hq's own guard resolves it (hq/src/hq/hook.py): this worktree's own
+# hq.agent wins, then the caller's HQ_AGENT, then hq's order. Without extensions.worktreeConfig a
+# worktree value would be the clone-wide one, shared by every worktree, so it is not read then.
+wt_agent=""
+if [ "$(git config --bool extensions.worktreeConfig 2>/dev/null)" = "true" ]; then
+  wt_agent="$(git config --worktree hq.agent 2>/dev/null || true)"
+fi
 export HQ_AGENT="${wt_agent:-${HQ_AGENT:-}}"
 [ -n "$HQ_AGENT" ] || unset HQ_AGENT
 # `--` because a branch name is not ours to choose: `refs/heads/-weird` is a legal ref, and
