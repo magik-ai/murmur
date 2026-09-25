@@ -275,11 +275,11 @@ def _codex_candidate():
         s = cx.summarize()
     except Exception:
         return None
-    prim = (s.get("primary") or {}).get("percent") or 0
-    sec = (s.get("secondary") or {}).get("percent") or 0
-    if s.get("limit_reached") or prim >= FULL or sec >= FULL:
+    weekly = (s.get("weekly") or {}).get("percent") or 0
+    session = (s.get("session") or {}).get("percent") or 0
+    if s.get("limit_reached") or weekly >= FULL or session >= FULL:
         return None
-    return ("codex", "codex", max(prim, sec))
+    return ("codex", "codex", max(weekly, session))
 
 
 def write_cache(rows: list, cache_path: str = None) -> None:

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Read the ChatGPT/codex subscription limits the farm spawns against.
 
-Turns out codex DOES expose usage, just undocumented and shaped differently from Anthropic's:
+Codex exposes its usage through an undocumented endpoint, shaped differently from Anthropic's:
 `https://chatgpt.com/backend-api/codex/usage` with the CLI's own access token returns a
-`rate_limit` block with a primary window (weekly, 604800s) and a secondary window (the ~5h burst
-window, null until it is in use). No dedicated per-account files like Claude — codex is a single
-subscription under `~/.codex/auth.json`.
+`rate_limit` block with a primary and a secondary window. Each window gives its length in
+`limit_window_seconds`: 5 hours (18000 s) for the session window, 7 days (604800 s) for the
+weekly one. Which of the two is primary is not fixed, so the windows are told apart by their
+length, never by their position. Either can be null. Codex is a single subscription under
+`~/.codex/auth.json`, with no per-account files like Claude's.
 
 The token never leaves this process; only percentages and reset times are surfaced.
 """
@@ -65,17 +67,39 @@ def _window(win):
     }
 
 
-def summarize(usage=None):
-    """{plan, primary, secondary, limit_reached} out of the payload, shaped for a tile.
+# A window of at most a day is the session window (5 hours today); a longer one is the weekly one.
+SESSION_MAX_SECONDS = 24 * 3600
 
-    primary is the weekly window, secondary the ~5h burst window (None until in use).
+
+def _slot(win, guess):
+    """"session" or "weekly" for one window, by its limit_window_seconds.
+
+    A window that does not give its length keeps the slot its position suggests (`guess`)."""
+    seconds = win.get("limit_window_seconds")
+    if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds > 0:
+        return "session" if seconds <= SESSION_MAX_SECONDS else "weekly"
+    return guess
+
+
+def summarize(usage=None):
+    """{plan, session, weekly, limit_reached} out of the payload, shaped for a tile.
+
+    session is the 5-hour window and weekly the 7-day one, each None when the payload has no
+    such window.
     """
     usage = usage if usage is not None else read_usage()
     rl = usage.get("rate_limit") or {}
+    placed = {"session": None, "weekly": None}
+    for key, guess in (("primary_window", "weekly"), ("secondary_window", "session")):
+        win = rl.get(key)
+        if isinstance(win, dict):
+            slot = _slot(win, guess)
+            if placed[slot] is None:
+                placed[slot] = _window(win)
     return {
         "plan": usage.get("plan_type"),
-        "primary": _window(rl.get("primary_window")),
-        "secondary": _window(rl.get("secondary_window")),
+        "session": placed["session"],
+        "weekly": placed["weekly"],
         "limit_reached": bool(rl.get("limit_reached")),
     }
 
@@ -105,12 +129,12 @@ def snapshot_row():
         return {"name": "codex", "label": "codex", "engine": "codex",
                 "stale_error": f"{type(exc).__name__}", "read_at": None,
                 "session": None, "weekly": None}
-    prim, sec = s["primary"] or {}, s["secondary"] or {}
+    session, weekly = s["session"] or {}, s["weekly"] or {}
     return {
         "name": "codex", "label": "codex", "engine": "codex", "read_at": time.time(),
-        # map onto the same keys the Claude tiles use so the UI renders both in one row
-        "session": sec.get("percent"), "session_resets": sec.get("resets"),
-        "weekly": prim.get("percent"), "weekly_resets": prim.get("resets"),
+        # the same keys the Claude tiles use, so the page draws both in one row
+        "session": session.get("percent"), "session_resets": session.get("resets"),
+        "weekly": weekly.get("percent"), "weekly_resets": weekly.get("resets"),
         "plan": s["plan"], "limit_reached": s["limit_reached"],
     }
 
@@ -143,7 +167,7 @@ if __name__ == "__main__":
         print(json.dumps(snapshot_row(), indent=2))
     else:
         s = summarize()
-        p, sec = s["primary"] or {}, s["secondary"] or {}
-        print(f"  codex ({s['plan']}): weekly {p.get('percent')}%  "
-              f"5h {sec.get('percent') if sec else '—'}%"
+        weekly, session = s["weekly"] or {}, s["session"] or {}
+        print(f"  codex ({s['plan']}): weekly {weekly.get('percent')}%  "
+              f"5h {session.get('percent') if session else '—'}%"
               + ("  LIMIT REACHED" if s["limit_reached"] else ""))
