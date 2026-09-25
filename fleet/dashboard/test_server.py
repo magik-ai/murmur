@@ -1365,10 +1365,10 @@ class EnginesTest(unittest.TestCase):
                 tool = binaries / name
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
-            environment = {"PATH": str(binaries)}
+            environment = {"PATH": str(binaries), "HOME": home}
             environment.update(env or {})
             with mock.patch.dict(os.environ, environment, clear=False):
-                for name in ("CLAUDE_BIN", "CODEX_BIN"):
+                for name in ("CLAUDE_BIN", "CODEX_BIN", "FLEET_CLAUDE_BIN", "FLEET_CODEX_BIN"):
                     if name not in (env or {}):
                         os.environ.pop(name, None)
                 with mock.patch.object(dashboard.MODELS, "listing", return_value=self.CATALOG):
@@ -1394,10 +1394,25 @@ class EnginesTest(unittest.TestCase):
             rows, _home = self.rows(installed=["claude"], env={"CLAUDE_BIN": str(own)})
             self.assertTrue(rows["claude"]["installed"])
             self.assertEqual(rows["claude"]["path"], str(own))
-            # an override pointing at nothing falls back to the command on the PATH
+            # The env file's name for it counts the same way.
+            rows, _home = self.rows(installed=["claude"], env={"FLEET_CLAUDE_BIN": str(own)})
+            self.assertEqual(rows["claude"]["path"], str(own))
+            # An override pointing at nothing is still what a lane would run, so the engine
+            # cannot start, whatever else is on the PATH.
             rows, _home = self.rows(installed=["claude"],
-                                    env={"CLAUDE_BIN": str(own) + "-gone"})
-            self.assertTrue(rows["claude"]["installed"])
+                                    env={"FLEET_CLAUDE_BIN": str(own) + "-gone"})
+            self.assertFalse(rows["claude"]["installed"])
+            self.assertEqual(rows["claude"]["path"], "")
+
+    def test_the_official_installers_place_comes_before_the_path(self):
+        with tempfile.TemporaryDirectory() as home:
+            local = pathlib.Path(home, ".local", "bin")
+            local.mkdir(parents=True)
+            (local / "codex").write_text("#!/bin/sh\nexit 0\n")
+            (local / "codex").chmod(0o755)
+            rows, _home = self.rows(installed=["claude", "codex"], env={"HOME": home})
+            self.assertEqual(rows["codex"]["path"], str(local / "codex"))
+            self.assertTrue(rows["claude"]["path"].endswith("/bin/claude"))
             self.assertTrue(rows["claude"]["path"].endswith("/claude"))
 
     def test_the_row_carries_the_switch_and_the_last_test(self):
@@ -1847,10 +1862,11 @@ class ModelStatusTest(unittest.TestCase):
                 tool = binaries / name
                 tool.write_text("#!/bin/sh\nexit 0\n")
                 tool.chmod(0o755)
-            environment = {"PATH": str(binaries)}
+            environment = {"PATH": str(binaries), "HOME": str(room)}
             environment.update(env or {})
             with mock.patch.dict(os.environ, environment, clear=False):
-                for name in ("CLAUDE_BIN", "CODEX_BIN", "KEYLESS_API_KEY"):
+                for name in ("CLAUDE_BIN", "CODEX_BIN", "FLEET_CLAUDE_BIN", "FLEET_CODEX_BIN",
+                             "KEYLESS_API_KEY"):
                     if name not in (env or {}):
                         os.environ.pop(name, None)
                 yield room
@@ -2344,6 +2360,24 @@ class DashboardHealthTest(unittest.TestCase):
             rows = self.rows()
         self.assertEqual(rows["claude"]["state"], "ok")
         self.assertEqual(rows["codex"]["state"], "off")
+
+    def test_an_engine_row_checks_the_file_a_lane_will_run(self):
+        # FLEET_CLAUDE_BIN in the env file is what every lane runs. A claude elsewhere on the PATH
+        # must not make the row say ok while each lane fails to start.
+        with fake_tools({"claude": "exit 0\n", "codex": "exit 0\n"},
+                        env={"FLEET_CLAUDE_BIN": "/nowhere/claude"}):
+            rows = self.rows()
+        self.assertEqual(rows["claude"]["state"], "off")
+        self.assertEqual(rows["codex"]["state"], "ok")
+        # Codex's own installer puts it in ~/.local/bin, which is not on this server's PATH.
+        with fake_tools({"claude": "exit 0\n"}) as box:
+            local = box.root / ".local" / "bin"
+            local.mkdir(parents=True)
+            (local / "codex").write_text("#!/bin/sh\nexit 0\n")
+            (local / "codex").chmod(0o755)
+            rows = self.rows()
+        self.assertEqual(rows["codex"]["state"], "ok")
+        self.assertEqual(rows["codex"]["detail"], str(local / "codex"))
 
     def test_a_healthy_machine_reports_ok_with_what_it_found(self):
         systemctl = '''case "$2" in

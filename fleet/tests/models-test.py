@@ -914,6 +914,52 @@ if _litter.exists():
     _litter.unlink()
 
 print()
+print("the claude and codex CLIs a Test looks at")
+
+# The Test for a native engine checks the file a lane will run (model_presets.engine_bin), not
+# whatever answers to the name on the PATH: otherwise it passes while every lane fails to start.
+@contextlib.contextmanager
+def engine_room(**env):
+    names = ("HOME", "PATH", "CLAUDE_BIN", "CODEX_BIN", "FLEET_CLAUDE_BIN", "FLEET_CODEX_BIN")
+    kept = {name: os.environ.get(name) for name in names}
+    with farm() as room:
+        (room / "home").mkdir()
+        (room / "npm").mkdir()
+        for name in ("claude", "codex"):
+            tool = room / "npm" / name
+            tool.write_text("#!/bin/sh\nexit 0\n")
+            tool.chmod(0o755)
+        for name in names:
+            os.environ.pop(name, None)
+        os.environ.update({"HOME": str(room / "home"), "PATH": str(room / "npm")})
+        os.environ.update({key: value.format(room=room) for key, value in env.items()})
+        try:
+            yield room
+        finally:
+            for name, value in kept.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+
+with engine_room(FLEET_CLAUDE_BIN="{room}/gone/claude"):
+    _health, _detail, _limits = M.health_check("claude")
+check("claude: the env file's FLEET_CLAUDE_BIN pointing at nothing fails the Test, whatever PATH "
+      "holds", _health == "fail" and "gone/claude" in _detail, f"{_health}: {_detail}")
+with engine_room() as _room:
+    _local = _room / "home" / ".local" / "bin"
+    _local.mkdir(parents=True)
+    (_local / "codex").write_text("#!/bin/sh\nexit 0\n")
+    (_local / "codex").chmod(0o755)
+    (_room / "home" / ".codex").mkdir()
+    (_room / "home" / ".codex" / "auth.json").write_text("{}")
+    _found = P.engine_bin("codex")
+    _health, _detail, _limits = M.health_check("codex")
+check("codex: found where its own installer puts it, ~/.local/bin, before the PATH",
+      _found == str(_local / "codex") and _health == "ok", f"{_found}; {_health}: {_detail}")
+
+print()
 print("the model a person picks reaches the command")
 
 # Step 2 of the dialog offers a choice of models. It is only a choice if the name lands on the

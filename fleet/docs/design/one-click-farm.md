@@ -292,7 +292,8 @@ The logins:
      `npm install --prefix /home/farm/.local -g @openai/codex`. The program lands at
      `/home/farm/.local/bin/codex`, and a user-owned install also updates without root.
   3. The script writes `FLEET_CODEX_BIN=/home/farm/.local/bin/codex` into
-     `/home/farm/.config/fleet/env`. The fleet's own default is `/usr/bin/codex`.
+     `/home/farm/.config/fleet/env`. fleet looks in `~/.local/bin` by itself too; the setting
+     names the path for certain.
   4. The login forwards Codex's sign-in port:
      `ssh -L 1455:localhost:1455 -t <name> /home/farm/.local/bin/codex login`. The check is
      `codex login status`.

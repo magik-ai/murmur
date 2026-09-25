@@ -147,8 +147,9 @@ def keepalive(now: float = None) -> list:
     but a file read. A ping that leaves the token still expired means the refresh token is gone and
     the account needs an interactive /login.
     """
+    from model_presets import engine_bin
     now = now if now is not None else time.time()
-    binp = os.environ.get("CLAUDE_BIN", os.path.expanduser("~/.local/bin/claude"))
+    binp = engine_bin("claude")
     out = []
     for name, path in account_dirs().items():
         exp = token_expiry(path)

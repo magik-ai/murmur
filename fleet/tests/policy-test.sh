@@ -230,14 +230,43 @@ case "$PATH" in /nowhere) no "env file: a non-FLEET key is ignored" "$PATH";; *)
 PATH="$saved_path"; unset FLEET_LHM_URL FLEET_FARM_ALIAS FLEET_DASH_BIND
 rm -f "$FLEET_CONFIG/env"
 
-# ---- the codex engine: FLEET_CODEX_BIN / FLEET_CODEX_MODEL (env file) pick the binary and model
-codex_lines="$(grep -E '^CODEX_(BIN|DEFAULT_MODEL)=' "$FLEET_BIN")"
-got=$(unset CODEX_BIN CODEX_DEFAULT_MODEL FLEET_CODEX_BIN FLEET_CODEX_MODEL; eval "$codex_lines"; echo "$CODEX_BIN|$CODEX_DEFAULT_MODEL")
-is "codex: nothing set keeps the system binary and the shipped model" "$got" "/usr/bin/codex|gpt-5.6-sol"
-got=$(unset CODEX_BIN CODEX_DEFAULT_MODEL; FLEET_CODEX_BIN=/opt/codex/bin/codex FLEET_CODEX_MODEL=gpt-6-sol; eval "$codex_lines"; echo "$CODEX_BIN|$CODEX_DEFAULT_MODEL")
-is "codex: the env file's FLEET_CODEX_BIN and FLEET_CODEX_MODEL are used" "$got" "/opt/codex/bin/codex|gpt-6-sol"
-got=$(CODEX_BIN=/explicit/codex; FLEET_CODEX_BIN=/opt/codex/bin/codex; eval "$codex_lines"; echo "$CODEX_BIN")
-is "codex: an explicit CODEX_BIN still wins" "$got" "/explicit/codex"
+# ---- the engine CLIs: FLEET_CLAUDE_BIN / FLEET_CODEX_BIN (env file), then ~/.local/bin, where
+# both official installers put them, then PATH (an npm install), then a fixed path. The Python
+# checks (lib/model_presets.py engine_bin) must find the same file, or the dashboard says an engine
+# is installed while its lanes cannot start.
+engine_lines="$(sed -n '/^_engine_bin() {/,/^}$/p' "$FLEET_BIN"
+                grep -E '^(CLAUDE_BIN|CODEX_BIN|CODEX_DEFAULT_MODEL)=' "$FLEET_BIN")"
+PY_ABS="$(command -v python3)"
+LIB_DIR="$(cd "$(dirname "$FLEET_BIN")/../lib" && pwd)"
+ENG="$ROOT/engines"; mkdir -p "$ENG/home/.local/bin" "$ENG/npm" "$ENG/empty"
+for tool in "$ENG/npm/claude" "$ENG/npm/codex"; do
+  printf '#!/bin/sh\nexit 0\n' > "$tool"; chmod +x "$tool"
+done
+engines() { # [VAR=value ...]: what bash and Python each pick, with only those set
+  (unset CLAUDE_BIN CODEX_BIN CODEX_DEFAULT_MODEL FLEET_CLAUDE_BIN FLEET_CODEX_BIN FLEET_CODEX_MODEL
+   [ $# -gt 0 ] && export "$@"
+   eval "$engine_lines"
+   py=$("$PY_ABS" -c 'import sys; sys.path.insert(0, sys.argv[1]); import model_presets as P
+print(P.engine_bin("claude") + "|" + P.engine_bin("codex"))' "$LIB_DIR")
+   echo "$CLAUDE_BIN|$CODEX_BIN|$CODEX_DEFAULT_MODEL|python:$py")
+}
+H="$ENG/home"
+is "engines: found nowhere, fleet names where the installers put claude and /usr/bin/codex" \
+  "$(engines HOME="$H" PATH="$ENG/empty")" \
+  "$H/.local/bin/claude|/usr/bin/codex|gpt-5.6-sol|python:$H/.local/bin/claude|/usr/bin/codex"
+is "engines: an npm install on PATH is found" \
+  "$(engines HOME="$H" PATH="$ENG/npm")" \
+  "$ENG/npm/claude|$ENG/npm/codex|gpt-5.6-sol|python:$ENG/npm/claude|$ENG/npm/codex"
+cp "$ENG/npm/claude" "$ENG/npm/codex" "$H/.local/bin/"
+is "engines: ~/.local/bin, where the official installers put them, comes before PATH" \
+  "$(engines HOME="$H" PATH="$ENG/npm")" \
+  "$H/.local/bin/claude|$H/.local/bin/codex|gpt-5.6-sol|python:$H/.local/bin/claude|$H/.local/bin/codex"
+is "engines: the env file's FLEET_CLAUDE_BIN, FLEET_CODEX_BIN and FLEET_CODEX_MODEL win" \
+  "$(engines HOME="$H" PATH="$ENG/npm" FLEET_CLAUDE_BIN=/opt/claude FLEET_CODEX_BIN=/opt/codex FLEET_CODEX_MODEL=gpt-6-sol)" \
+  "/opt/claude|/opt/codex|gpt-6-sol|python:/opt/claude|/opt/codex"
+is "engines: an explicit CLAUDE_BIN or CODEX_BIN still wins over the env file" \
+  "$(engines HOME="$H" PATH="$ENG/npm" CLAUDE_BIN=/x/claude CODEX_BIN=/x/codex FLEET_CLAUDE_BIN=/opt/claude FLEET_CODEX_BIN=/opt/codex)" \
+  "/x/claude|/x/codex|gpt-5.6-sol|python:/x/claude|/x/codex"
 
 echo "=== fleet kill rewrites the lane record whole ==="
 # The dashboard reads a lane's record while `fleet kill` marks it killed. A bare truncate and

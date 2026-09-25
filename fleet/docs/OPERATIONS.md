@@ -93,11 +93,13 @@ sudo systemctl daemon-reload
 - Logging in is interactive. Do it once over ssh with a terminal: `ssh -t <FARM_HOST> claude`,
   then type `/login`. For Codex, tunnel the login callback back to the farm:
   `ssh -L 1455:localhost:1455 -t <FARM_HOST> codex login`.
-- fleet starts Claude Code from `~/.local/bin/claude` and Codex from `/usr/bin/codex`. The
-  `CLAUDE_BIN` environment variable and the `FLEET_CODEX_BIN` setting change these paths. If
-  `command -v codex` prints another path, set `FLEET_CODEX_BIN` to it, as in
-  [quickstart step 4](QUICKSTART.md#4-install-an-agent-cli-and-log-in-on-a-subscription). A lane
-  whose engine is not there fails at once (see [troubleshooting](#lanes)).
+- fleet looks for each engine CLI in `~/.local/bin` first, where the official installers put it,
+  then on `PATH`, and for Codex at `/usr/bin/codex` last. `FLEET_CLAUDE_BIN` and `FLEET_CODEX_BIN`
+  name another path. Set them when the CLI is outside the services' `PATH`
+  (`/usr/local/bin:/usr/bin:/bin:~/.local/bin`), as in
+  [quickstart step 4](QUICKSTART.md#4-install-an-agent-cli-and-log-in-on-a-subscription). The
+  dashboard checks the same file a lane runs. A lane whose engine is not there fails at once (see
+  [troubleshooting](#lanes)).
 
 ### Where it runs
 
@@ -782,7 +784,8 @@ Every setting below is optional and has a working default. Put it in `~/.config/
 | `FLEET_FARM_ALIAS` | the machine's hostname | the ssh host name in account login commands. Set it to the name you actually reach the farm by |
 | `FLEET_NVIDIA_SMI` | `nvidia-smi` on `PATH` | the GPU sensor that `fleet mode auto` and the capacity check read |
 | `FLEET_LHM_URL` | unset | a LibreHardwareMonitor web server for the CPU temperature. Unset, the temperature is unknown and never blocks a spawn |
-| `FLEET_CODEX_BIN` | `/usr/bin/codex` | the Codex CLI that lanes run. Set it to the path `command -v codex` prints when Codex is installed anywhere else. A newer CLI unlocks newer models |
+| `FLEET_CLAUDE_BIN` | `~/.local/bin/claude`, else `claude` on `PATH` | the Claude Code CLI that lanes run. Set it when Claude Code is outside the services' `PATH` |
+| `FLEET_CODEX_BIN` | `~/.local/bin/codex`, else `codex` on `PATH`, else `/usr/bin/codex` | the Codex CLI that lanes run. Set it when Codex is outside the services' `PATH`. A newer CLI unlocks newer models |
 | `FLEET_CODEX_MODEL` | `gpt-5.6-sol` | the model a Codex lane runs when `fleet spawn` gets no `--model` |
 | `FLEET_DAEMON_INTERVAL` | `60` | seconds between two passes of the supervisor daemon |
 | `FLEET_RESPAWN_MAX` | `10` | the most respawns per lane before it is marked `gave_up` |
@@ -790,8 +793,8 @@ Every setting below is optional and has a working default. Put it in `~/.config/
 | `FLEET_BIN` | `~/.local/bin/fleet` | the `fleet` command the supervisor daemon respawns lanes with. Set it after `install.sh --prefix` |
 | `FLEET_DOCTL_CONTEXT` | `murmur` | the `doctl` login context used for DigitalOcean |
 
-`CLAUDE_BIN` (default `~/.local/bin/claude`) points at the Claude Code CLI. The `fleet` command
-takes it from your shell's environment, not from this file.
+`CLAUDE_BIN` and `CODEX_BIN` in your shell's environment win over both settings. In this file,
+use the `FLEET_` names: the `fleet` command reads only the `FLEET_` keys from it.
 
 ---
 
@@ -873,8 +876,8 @@ an `[hq]` table with `enabled = true` or `enabled = false` to `policy.toml` (see
 ### Lanes
 
 **A lane is `failed` seconds after it started, with "exited before its first turn - the lane never
-started".** Read `~/.fleet/logs/<slug>.err`. Usually the engine CLI is not where fleet looks
-(`~/.local/bin/claude`, `/usr/bin/codex`), or it is not logged in. See [logins](#logins).
+started".** Read `~/.fleet/logs/<slug>.err`. Usually fleet did not find the engine CLI, or the
+CLI is not logged in. See [logins](#logins).
 
 **`fleet status` shows `running?` and "dead?".** The card says running, but the lane's unit has
 been gone for over 15 minutes, usually after a reboot. The lane is gone; its worktree is not.

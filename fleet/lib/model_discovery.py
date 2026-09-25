@@ -213,9 +213,8 @@ def _bin(row, fallback):
 
 
 def codex_bin():
-    """The codex lanes run: bin/fleet's CODEX_BIN, which FLEET_CODEX_BIN points elsewhere."""
-    return (os.environ.get("CODEX_BIN") or os.environ.get("FLEET_CODEX_BIN")
-            or ("/usr/bin/codex" if os.path.exists("/usr/bin/codex") else "codex"))
+    """The codex CLI lanes run, found as bin/fleet finds it (model_presets.engine_bin)."""
+    return PRESETS.engine_bin("codex")
 
 
 def from_codex(row):

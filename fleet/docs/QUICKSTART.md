@@ -89,8 +89,6 @@ Install Claude Code, Codex, or both. murmur's own installer installs Claude Code
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-fleet starts Claude Code from `~/.local/bin/claude` (the `CLAUDE_BIN` variable changes it).
-
 To install Codex, run one of these two commands, not both:
 
 ```bash
@@ -98,13 +96,17 @@ curl -fsSL https://chatgpt.com/codex/install.sh | sh    # Codex's own installer
 npm install -g @openai/codex                            # or with npm, if you have Node.js
 ```
 
-fleet runs Codex from `/usr/bin/codex` unless `FLEET_CODEX_BIN` names another path. Run
-`command -v codex`. If it prints anything other than `/usr/bin/codex`, write that path into
-`~/.config/fleet/env`:
+Claude Code's installer and Codex's own installer both put the CLI in `~/.local/bin`, where
+fleet looks first. After that it looks on `PATH`, and for Codex at `/usr/bin/codex` last. The
+supervisor daemon and the dashboard run as services, whose `PATH` is only
+`/usr/local/bin:/usr/bin:/bin:~/.local/bin`. So run `command -v codex`. If it prints a path in any
+other folder, write that path into `~/.config/fleet/env`:
 
 ```bash
 mkdir -p ~/.config/fleet && echo "FLEET_CODEX_BIN=$(command -v codex)" >> ~/.config/fleet/env
 ```
+
+`FLEET_CLAUDE_BIN` does the same for Claude Code.
 
 Log in once, interactively, from a terminal:
 

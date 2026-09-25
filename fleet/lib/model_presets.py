@@ -40,7 +40,9 @@ in its own `tos` sentence rather than inventing a package name, and the operator
 about a service, and belongs in that farm's own models.toml.
 """
 import copy
+import os
 import re
+import shutil
 
 # The answer is not in the question: a CLI that echoes the prompt, or quotes it back in an error
 # about a bad key, must not pass the Test. models.health_check passes only a reply line that is 42 alone.
@@ -88,6 +90,30 @@ PRESETS = [
         "docs": "https://developers.openai.com/codex/cli",
     },
 ]
+
+# Where a claude or codex lane's CLI is found, in this order, the same way bin/fleet finds it:
+# CLAUDE_BIN or CODEX_BIN; then FLEET_CLAUDE_BIN or FLEET_CODEX_BIN, which the env file sets;
+# then ~/.local/bin, where both official installers put the CLI; then PATH (an npm install);
+# then the path below. Every check that says an engine is installed asks engine_bin(), so it
+# looks at the file a lane will run.
+ENGINE_BIN_FALLBACK = {"claude": "~/.local/bin/claude", "codex": "/usr/bin/codex"}
+
+
+def engine_bin(engine):
+    """The path a lane of this native engine ("claude" or "codex") runs."""
+    upper = engine.upper()
+    named = os.environ.get(f"{upper}_BIN") or os.environ.get(f"FLEET_{upper}_BIN")
+    if named:
+        return named
+    local = os.path.expanduser(f"~/.local/bin/{engine}")
+    if runnable(local):
+        return local
+    return shutil.which(engine) or os.path.expanduser(ENGINE_BIN_FALLBACK[engine])
+
+
+def runnable(path):
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
 
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
 # The one model rule: every model name that reaches a command line passes it, whichever engine

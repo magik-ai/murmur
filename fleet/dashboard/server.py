@@ -631,12 +631,8 @@ def static_file(name):
 # a page that shows a traceback has told the operator nothing they can act on.
 
 
-def _which(name, env_var=""):
-    """A tool's path, honouring the environment variable that points at it when it lives
-    somewhere PATH does not reach."""
-    override = (os.environ.get(env_var) or "").strip() if env_var else ""
-    if override:
-        return override if os.path.exists(override) else ""
+def _which(name):
+    """A tool's path on this server's PATH, or "". The engines are found by _engine_path."""
     return shutil.which(name) or ""
 
 
@@ -712,8 +708,15 @@ def _check_hq():
     return "ok", f"head office {office}", ""
 
 
-def _engine_row(name, env_var, label_fix, other_present):
-    path = _which(name, env_var)
+def _engine_path(name):
+    """The CLI a lane of this engine runs (lib/model_presets.py engine_bin), or "" when that
+    file is not there to run."""
+    path = MODEL_PRESETS.engine_bin(name)
+    return path if MODEL_PRESETS.runnable(path) else ""
+
+
+def _engine_row(name, label_fix, other_present):
+    path = _engine_path(name)
     if path:
         return "ok", path, ""
     if other_present:
@@ -724,15 +727,13 @@ def _engine_row(name, env_var, label_fix, other_present):
 
 
 def _check_claude():
-    return _engine_row("claude", "CLAUDE_BIN",
-                       "install Claude Code: https://claude.com/claude-code",
-                       bool(_which("codex", "CODEX_BIN")))
+    return _engine_row("claude", "install Claude Code: https://claude.com/claude-code",
+                       bool(_engine_path("codex")))
 
 
 def _check_codex():
-    return _engine_row("codex", "CODEX_BIN",
-                       "install the Codex CLI: https://developers.openai.com/codex",
-                       bool(_which("claude", "CLAUDE_BIN")))
+    return _engine_row("codex", "install the Codex CLI: https://developers.openai.com/codex",
+                       bool(_engine_path("claude")))
 
 
 def _check_gpu_sensor():
@@ -904,15 +905,15 @@ def health():
 # of the machine tab, and a GET that ran each engine's CLI would be a health check nobody asked
 # for, on every tick, for every engine. Running the engine is what Test is for.
 
-# The variable each native engine's launcher reads instead of the bare command.
-ENGINE_BIN_ENV = {"claude": "CLAUDE_BIN", "codex": "CODEX_BIN"}
+# The engines bin/fleet launches itself, each from the path lib/model_presets.py engine_bin finds.
+NATIVE_ENGINES = ("claude", "codex")
 
 
 def engine_command(model):
     """The command one catalog row runs. A native engine is named by its engine, a generic one
     carries its own `bin`."""
     engine = str((model or {}).get("engine") or "").strip()
-    if engine in ENGINE_BIN_ENV:
+    if engine in NATIVE_ENGINES:
         return engine
     return str((model or {}).get("bin") or (model or {}).get("id") or "").strip()
 
@@ -922,10 +923,10 @@ def engine_binary(model):
     command = engine_command(model)
     if not command:
         return False, ""
-    override = os.environ.get(ENGINE_BIN_ENV.get(str((model or {}).get("engine") or ""), ""), "")
-    if override and os.path.isfile(override) and os.access(override, os.X_OK):
+    if str((model or {}).get("engine") or "") in NATIVE_ENGINES:
         # The launcher runs this file and nothing else, so this is the path that counts.
-        return True, override
+        path = _engine_path(command)
+        return bool(path), path
     found = shutil.which(command)
     return (True, found) if found else (False, "")
 
@@ -1116,8 +1117,8 @@ def remove_model_request(body):
 #
 # Request available models and the ticks that follow (design: docs/design/models-providers.md,
 # sections 3 to 6). Discovery runs `fleet models discover` through run_tool, so it uses the
-# codex binary lanes use (bin/fleet's CODEX_BIN), which this server does not have in its own
-# environment. Neither route sends a prompt or runs a provider's test.
+# codex binary lanes use (bin/fleet's CODEX_BIN). Neither route sends a prompt or runs a
+# provider's test.
 
 DISCOVER_TIMEOUT = 20
 SELECT_TIMEOUT = 10

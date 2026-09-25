@@ -157,17 +157,16 @@ def health_check(mid):
         return "fail", "no such model", ""
     eng = m.get("engine")
     if eng == "codex":
-        binp = (os.environ.get("CODEX_BIN") or os.environ.get("FLEET_CODEX_BIN")
-                or "/usr/bin/codex")
-        if not (os.path.exists(binp) or shutil.which("codex")):
-            return "fail", "codex binary not found", ""
+        binp = PRESETS.engine_bin("codex")
+        if not PRESETS.runnable(binp):
+            return "fail", f"codex binary not found at {binp}", ""
         auth = os.path.exists(os.path.expanduser("~/.codex/auth.json"))
         return ("ok", "codex CLI + ChatGPT auth present", "subscription") if auth \
             else ("fail", "no ~/.codex/auth.json", "")
     if eng == "claude":
-        binp = os.environ.get("CLAUDE_BIN", os.path.expanduser("~/.local/bin/claude"))
-        if not (os.path.exists(binp) or shutil.which("claude")):
-            return "fail", "claude binary not found", ""
+        binp = PRESETS.engine_bin("claude")
+        if not PRESETS.runnable(binp):
+            return "fail", f"claude binary not found at {binp}", ""
         return "ok", "claude CLI present", "subscription"
     # generic: actually run the CLI on a tiny prompt
     binp = m.get("bin", mid)
