@@ -61,6 +61,18 @@ skills work in Codex as well as in Claude Code.
 
 - `/murmur:farm` no longer skips the step that signs the farm in to Claude and
   Codex.
+- The farm installer stops before it changes anything on a machine where
+  systemd does not run, and says what to do on WSL and as root. Its last lines
+  no longer ask for `hq hello` or `hq whoami`.
+- `fleet dashboard status` says running only when the dashboard answers.
+  `fleet dashboard start` waits until it answers, so `fleet dashboard token`
+  right after the first start finds the token, and says why when it does not
+  come up.
+- The dashboard says "Needs a login" for Claude Code and Codex until one is
+  signed in on the farm, instead of "Connected".
+- `fleet/install.sh` links the fleet skill into `~/.agents/skills`, where Codex
+  reads skills now. The fleet skill says Claude lanes default to Opus.
+- The policy test's fake `hq` no longer calls itself.
 
 ## 0.1.0 - 2026-09-25
 
