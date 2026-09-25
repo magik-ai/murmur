@@ -787,6 +787,9 @@ RUN
   local claude_env="" claude_flags=""
   [ -n "$account_dir" ] && claude_env="export CLAUDE_CONFIG_DIR=\"$account_dir\""
   [ -n "$effort" ] && [ "$engine" = "claude" ] && claude_flags="--effort $effort"
+  # --fallback-model moves the lane to sonnet when its own model is overloaded. A lane that
+  # already runs sonnet has nothing to move to, so the flag goes only to a lane on another model.
+  [ "$model" != "sonnet" ] && claude_flags="${claude_flags:+$claude_flags }--fallback-model sonnet"
 
     cat > "$log.run.sh" <<RUN
 #!/usr/bin/env bash
@@ -798,7 +801,7 @@ $claude_env
 cd "$wt" || exit 1
 "$CLAUDE_BIN" -p "\$(cat "$log.task")" \\
   --model "$model" $claude_flags --output-format stream-json --verbose --include-partial-messages \\
-  --dangerously-skip-permissions --fallback-model sonnet \\
+  --dangerously-skip-permissions \\
   --append-system-prompt "\$(cat "$log.sys")" \\
   2>>"$log.err" | tee "$log.jsonl" | "$PY" "$FLEET_HOME/lib/parse_stream.py" "$slug"
 RUN
