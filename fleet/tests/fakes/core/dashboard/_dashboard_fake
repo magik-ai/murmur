@@ -21,8 +21,10 @@ leaves nothing behind for long.
 """
 import os
 import signal
+import socket
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from _fakelib import flag, out, record  # noqa: E402
@@ -91,9 +93,20 @@ def start_stand_in():
 
 
 def stop_stand_in():
+    """End the stand-in, and return once its port no longer answers, as a stopped unit's would
+    not: a start straight after must not find the old one still holding the socket."""
     pid = stand_in_pid()
     if pid:
         os.kill(pid, signal.SIGTERM)
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", int(flag("FAKE_DASH_PORT", "7878"))),
+                                              timeout=0.2):
+                    pass
+            except OSError:
+                break
+            time.sleep(0.05)
     for path in (marker(), pid_file()):
         if os.path.exists(path):
             os.unlink(path)

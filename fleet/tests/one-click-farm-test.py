@@ -1217,11 +1217,10 @@ class DashboardUnit(Scratch):
         self.assertEqual(self.run_sh("enable", port=port).returncode, 0)
         # The unit still reads as active, and the kernel still reports the socket, but the
         # server behind it is gone.
-        pid = self.stand_in()
-        os.kill(pid, 15)
+        os.kill(self.stand_in(), 15)
         for _ in range(50):
             try:
-                os.kill(pid, 0)
+                socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
             except OSError:
                 break
             time.sleep(0.1)
