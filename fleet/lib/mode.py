@@ -8,18 +8,18 @@ agents. That's the whole trick.
 
 Modes:
   full      no cap, spawns on           — the farm takes everything (default when idle)
-  soft      ~50% CPU, spawns ON         — yields to a foreground game but keeps working
+  soft      ~50% CPU, spawns ON         — yields to what you run yourself but keeps working
   balanced  ~35% CPU, spawns paused     — existing agents crawl, no new ones
-  hard      ~20% CPU, spawns paused     — near-frozen; for a game that wants every frame
-  auto      full when the GPU is idle; SOFT when the GPU is busy (= you're gaming)
+  hard      ~20% CPU, spawns paused     — near-frozen; for work that needs the whole machine
+  auto      full when the GPU is idle; SOFT when the GPU is busy (someone is using the machine)
 
 `auto` needs a GPU sensor to have an opinion. Without one (no nvidia-smi on PATH, no
 FLEET_NVIDIA_SMI) it is INERT: it resolves to full and says so once, rather than pretending
-to read a game that nothing is watching for. The manual profiles work regardless.
+to read a load that nothing is watching. The manual profiles work regardless.
 
 A sensor that IS there and fails to answer (nvidia-smi timing out under load is the common
 case) is a different thing entirely. Treated the same, one slow read would release the cap to
-full, the next would throttle back to soft, and the farm would yo-yo while somebody was gaming.
+full, the next would throttle back to soft, and the farm would yo-yo while somebody used the GPU.
 A failed read keeps whatever profile is in force and leaves the hysteresis alone.
 
 `auto` is the default and deliberately picks SOFT, never a harder profile: casually using
@@ -63,7 +63,7 @@ DEFAULT_PROFILES = {
                  "mem_high_pct": 25},
 }
 DEFAULT_AUTO = {
-    "auto_enter_gpu": 25,   # GPU util % that reads as "a game is running" -> throttle
+    "auto_enter_gpu": 25,   # GPU util % that reads as "someone is using the GPU" -> throttle
     "auto_exit_gpu": 10,    # ...and below this...
     "auto_exit_hold": 60,   # ...for this many seconds -> back to full (hysteresis)
 }
@@ -225,7 +225,7 @@ def resolve_effective(setting, gpu_util, rt, auto, sensor_present=False):
     `sensor_present` separates the two reasons gpu_util can be None. No sensor at all resolves
     to full, because nothing will ever throttle it. A sensor that failed THIS read keeps the
     profile already in force: releasing the cap on a timeout would make the farm yo-yo
-    between full and soft while somebody was gaming."""
+    between full and soft while somebody used the GPU."""
     if setting != "auto":
         return setting
     if gpu_util is None:
@@ -240,7 +240,7 @@ def resolve_effective(setting, gpu_util, rt, auto, sensor_present=False):
         return "full"
     now = time.time()
     prev = rt.get("auto_eff", "full")
-    if gpu_util >= auto["auto_enter_gpu"]:            # game clearly running
+    if gpu_util >= auto["auto_enter_gpu"]:            # the GPU is clearly in use
         rt["auto_eff"] = "soft"; rt["below_since"] = None
         return "soft"
     if prev == "soft":                               # was throttling — hold before releasing
