@@ -590,7 +590,7 @@ check("a model switched on whose test passed is on",
       _rows["live"]["status"] == "on", _rows["live"]["status"])
 check("a model nobody switched on is off",
       _rows["resting"]["status"] == "off", _rows["resting"]["status"])
-check("every status is one of the five the pill can say",
+check("every status is one of the six the pill can say",
       all(row["status"] in SERVER.MODEL_STATUSES for row in _rows.values()))
 
 _rows = statuses([])

@@ -938,10 +938,10 @@ def engine_binary(model):
     return (True, found) if found else (False, "")
 
 
-# The five words a row's Status pill can say. The order below is the order they are decided in:
+# The six words a row's Status pill can say. The order below is the order they are decided in:
 # a model nothing can run is "not installed" whatever else is true of it, and a model that has
-# no key cannot be failing a test it never ran.
-MODEL_STATUSES = ("not_installed", "needs_key", "failing", "on", "off")
+# no key, or no login, cannot be failing a test it never ran.
+MODEL_STATUSES = ("not_installed", "needs_key", "needs_login", "failing", "on", "off")
 
 # What a preset-less row says about its money, when its catalog entry never said.
 NATIVE_ACCESS = {"claude": "your Claude subscription", "codex": "your ChatGPT subscription"}
@@ -974,17 +974,55 @@ def model_access(model):
     return tos or "not recorded: add an access line to this model in models.toml"
 
 
+def model_has_login(model):
+    """Whether this farm holds the subscription login a Claude Code or Codex row runs on. A CLI on
+    the PATH is not a login: a fresh farm has Claude Code installed and no account logged in, and
+    its row used to read Connected while the accounts row waited for the first login.
+
+    Read from files, never by asking the vendor, like the accounts rows: Claude Code has one once
+    any account's credentials file is there, Codex once its auth.json is. A credentials file that
+    is there but cannot be read is not called missing (credentials_state says why): that
+    account's row says it cannot tell, and sending the operator to /login over a working
+    credential helps nobody. Every other engine is paid with a key or needs nothing, which
+    model_has_key answers."""
+    engine = str((model or {}).get("engine") or "")
+    if engine == "claude":
+        return any(credentials_state(config_dir) != "absent"
+                   for config_dir in CA.account_dirs().values())
+    if engine == "codex":
+        return os.path.exists(CX.AUTH)
+    return True
+
+
 def model_status(model, installed):
     """One word for the Status pill, from what the machine and the catalog know."""
     if not installed:
         return "not_installed"
     if not model_has_key(model):
         return "needs_key"
+    if not model_has_login(model):
+        return "needs_login"
     if str((model or {}).get("health") or "") == "fail":
         return "failing"
     if (model or {}).get("enabled") and (model or {}).get("routable"):
         return "on"
     return "off"
+
+
+def install_hint(model, command):
+    """What puts this engine's command on the farm, as the page puts it after "Install it with:".
+    The shipped catalog's Claude Code and Codex rows carry no hint of their own, and the sentence
+    that stood in for one read "Install it with: install codex and put it on this farm's PATH",
+    so a native engine takes its preset's command, the one lib/model_presets.py documents."""
+    said = str((model or {}).get("install_hint") or "").strip()
+    if said:
+        return said
+    engine = str((model or {}).get("engine") or "")
+    preset = MODEL_PRESETS.by_id(engine) if engine in NATIVE_ENGINES else None
+    if preset and preset.get("install_hint"):
+        return preset["install_hint"]
+    name = command or str((model or {}).get("id") or "")
+    return f"{name}'s own installer, so that {name} is on this farm's PATH"
 
 
 def engine_row(model):
@@ -999,8 +1037,7 @@ def engine_row(model):
         "command": command,
         "installed": installed,
         "path": path,
-        "install_hint": str(model.get("install_hint") or "").strip()
-        or f"install {command or model.get('id')} and put it on this farm's PATH",
+        "install_hint": install_hint(model, command),
         "enabled": bool(model.get("enabled")),
         "last_test": _iso(checked) if checked else None,
         "access": model_access(model),

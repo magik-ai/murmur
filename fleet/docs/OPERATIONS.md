@@ -1050,7 +1050,7 @@ true.
 | `/api/agent/log?slug=<slug>&tail=200` | the end of the lane's log as text; `tail` is 1 to 2000 lines |
 | `/api/accounts` | each subscription's usage windows, with the last good numbers when a read failed |
 | `/api/accounts/login-state` | per account: `logged_in`, `waiting_for_login`, `expired`, `rate_limited` or `unknown`, with a sentence |
-| `/api/engines` | the model catalog with this machine's facts: one status per provider (`on`, `off`, `needs_key`, `not_installed` or `failing`), the models switched on, the default model, and whether the command is installed |
+| `/api/engines` | the model catalog with this machine's facts: one status per provider (`on`, `off`, `needs_key`, `needs_login`, `not_installed` or `failing`), the models switched on, the default model, and whether the command is installed |
 | `/api/models` | the model catalog without the machine's facts |
 | `/api/models/presets` | the providers that "Add a model" offers (Claude Code and Codex) |
 | `/api/projects` | the registered projects, with open lanes, last activity and GitHub access |

@@ -200,13 +200,16 @@ ACCOUNTS = {
 # operator added the entry or it shipped with the farm (`source`), and the variant it runs.
 #
 # There are five rows here on purpose, one per status, because the table draws a different set
-# of actions for each, and a sixth (grok) that murmur no longer ships. The fields are the ones
-# GET /api/engines really carries: `health` is the state of the last test (ok | fail | unchecked)
-# and `health_prompt` is the tiny prompt a test sends, which is how lib/models.py names them;
-# `in_catalog` and `catalog_note` say whether murmur still ships the row's engine, and how to take
-# it out when it does not; no row carries `docs`, because nothing on the server writes one into a
-# catalog; and the rows this farm added carry no role, quality or caps note, because the add
-# route writes none.
+# of actions for each, and a sixth (grok) that murmur no longer ships. The sixth status,
+# needs_login, belongs to Claude Code and Codex alone, which are the Connected and the Failing
+# rows here, so test_hostile_models.mjs draws it by answering for those two itself.
+#
+# The fields are the ones GET /api/engines really carries: `health` is the state of the last
+# test (ok | fail | unchecked) and `health_prompt` is the tiny prompt a test sends, which is how
+# lib/models.py names them; `in_catalog` and `catalog_note` say whether murmur still ships the
+# row's engine, and how to take it out when it does not; no row carries `docs`, because nothing on
+# the server writes one into a catalog; and the rows this farm added carry no role, quality or
+# caps note, because the add route writes none.
 MODELS = [
     {"id": "claude", "label": "Claude Code", "glyph": "C", "color": "#D97757", "enabled": True,
      "engine": "claude", "source": "shipped", "preset": "", "status": "on", "variant": "opus",
@@ -947,13 +950,21 @@ def machine_plan(body):
 
 # ------------------------------------------------------------------- the server
 
+# The build, in the two shapes a farm's own server gives it. /api/config says which checkout it
+# runs, as `git rev-parse --short HEAD` prints it (server.version), and /api/version the newest
+# modification time among the page's files, in whole seconds (server.page_build), which the
+# sidebar draws as "build ...". Screenshots of the stub should read like a farm's.
+STUB_COMMIT = "5d0c3b7"
+STUB_BUILD = "1789999651"
+
+
 def config_for(state):
     # health_panel is off, as on every farm that has not set FLEET_DASH_HEALTH=on.
     features = {"hq": True, "slice": True, "gpu": True, "cpu_temp": True,
                 "forge": True, "health_panel": False}
     if state == "error":
         features.update({"hq": False, "gpu": False, "cpu_temp": True})
-    return {"title": "murmur", "version": "2026.09.21-a1b2c3d", "features": features,
+    return {"title": "murmur", "version": STUB_COMMIT, "features": features,
             "hq_agent": "dashboard", "farm_alias": "farm", "at": iso(), "stale_since": None, "error": None,
             "pending": None}
 
@@ -1025,7 +1036,7 @@ def payload_for(state, path, query):
     if path == "/api/config":
         return 200, config_for(state)
     if path == "/api/version":
-        return 200, {"v": "2026.09.21-a1b2c3d"}
+        return 200, {"v": STUB_BUILD}
     if path == "/api/access":
         return 200, {"writable": state != "error", "reason":
                      "" if state != "error" else "This page was opened without the dashboard token.",
@@ -1203,7 +1214,7 @@ HARNESS = r"""<!doctype html>
         d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" stroke="currentColor"
         stroke-width="2"/></svg><span class="label">Machine</span></a>
     </nav>
-    <div class="side-foot"><span id="versionLabel" class="muted">harness</span></div>
+    <div class="side-foot"><span id="versionLabel" class="muted">build __STUB_BUILD__</span></div>
   </aside>
   <header id="topbar">
     <h1 class="sr-only"><span id="productTitle">murmur</span>, <span id="viewTitle"></span></h1>
@@ -1385,7 +1396,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self._file(PAGE, "text/html; charset=utf-8")
         if path == "/harness":
-            body = HARNESS.encode()
+            body = HARNESS.replace("__STUB_BUILD__", STUB_BUILD).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")

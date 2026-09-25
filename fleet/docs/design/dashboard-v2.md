@@ -334,5 +334,7 @@ like a key, secret, token, credential or password is refused, and so is a comman
 written into it. Both refusals name `fleet models auth <id>`.
 
 `GET /api/engines` is what the page reads as the models table: the catalog, with each row's
-`access`, `status` (`on`, `off`, `needs_key`, `not_installed` or `failing`), `source`, `variant`,
-and whether its command is installed. `GET /api/models` is the catalog alone.
+`access`, `status` (`on`, `off`, `needs_key`, `needs_login`, `not_installed` or `failing`),
+`source`, `variant`, and whether its command is installed. `needs_login` is Claude Code with no
+account's credentials file on the farm, or Codex with no `~/.codex/auth.json`. `GET /api/models`
+is the catalog alone.

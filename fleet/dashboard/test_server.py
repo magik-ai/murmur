@@ -1971,6 +1971,95 @@ class ModelStatusTest(unittest.TestCase):
             self.assertIn(row["status"], dashboard.MODEL_STATUSES, row["id"])
 
 
+class ModelLoginTest(unittest.TestCase):
+    """Claude Code and Codex run on a subscription login, not on a key. Found on the PATH and
+    never logged in, their row read Connected while the Accounts section waited for the first
+    login. Until a login is on this farm the row needs one, read from files as the accounts rows
+    are: a credentials file for any Claude account, ~/.codex/auth.json for Codex."""
+
+    CATALOG = [
+        {"id": "claude", "label": "Claude Code", "engine": "claude", "enabled": True,
+         "routable": True, "health": "unchecked", "health_detail": "", "checked_at": 0},
+        {"id": "codex", "label": "Codex", "engine": "codex", "enabled": True, "routable": True,
+         "health": "unchecked", "health_detail": "", "checked_at": 0},
+    ]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = pathlib.Path(self.tmp.name)
+        binaries = self.home / "bin"
+        binaries.mkdir()
+        for name in ("claude", "codex"):
+            tool = binaries / name
+            tool.write_text("#!/bin/sh\nexit 0\n")
+            tool.chmod(0o755)
+        accounts = {"default": str(self.home / ".claude"),
+                    "farm-two": str(self.home / ".fleet" / "claude-accounts" / "farm-two")}
+        for patcher in (
+                mock.patch.dict(os.environ, {"PATH": str(binaries), "HOME": str(self.home)}),
+                mock.patch.object(dashboard.CA, "account_dirs", return_value=accounts),
+                mock.patch.object(dashboard.CX, "AUTH", str(self.home / ".codex" / "auth.json")),
+                mock.patch.object(dashboard.MODELS, "listing", return_value=self.CATALOG)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for name in ("CLAUDE_BIN", "CODEX_BIN", "FLEET_CLAUDE_BIN", "FLEET_CODEX_BIN"):
+            os.environ.pop(name, None)       # the patched environment is put back whole
+
+    def rows(self):
+        return {row["id"]: row for row in dashboard.engines()}
+
+    def write(self, relative, text):
+        path = self.home / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def test_a_cli_that_is_installed_and_never_logged_in_needs_a_login(self):
+        rows = self.rows()
+        for engine in ("claude", "codex"):
+            self.assertTrue(rows[engine]["installed"], engine)
+            self.assertEqual(rows[engine]["status"], "needs_login", engine)
+        self.assertIn("needs_login", dashboard.MODEL_STATUSES)
+
+    def test_one_claude_account_with_a_login_is_enough(self):
+        self.write(".fleet/claude-accounts/farm-two/.credentials.json",
+                   json.dumps({"claudeAiOauth": {"expiresAt": (time.time() + 3600) * 1000}}))
+        rows = self.rows()
+        self.assertEqual(rows["claude"]["status"], "on")
+        self.assertEqual(rows["codex"]["status"], "needs_login", "a Claude login is not Codex's")
+
+    def test_a_credentials_file_that_cannot_be_read_is_not_called_missing(self):
+        # The accounts row says it cannot tell; sending the operator to /login over a working
+        # credential helps nobody.
+        self.write(".claude/.credentials.json", '{"claudeAiOauth": {"expiresAt"')
+        self.assertEqual(dashboard.credentials_state(str(self.home / ".claude")), "unreadable")
+        self.assertEqual(self.rows()["claude"]["status"], "on")
+
+    def test_codex_has_a_login_once_its_auth_file_is_there(self):
+        self.write(".codex/auth.json", json.dumps({"tokens": {"access_token": "not-a-token"}}))
+        self.assertEqual(self.rows()["codex"]["status"], "on")
+
+    def test_no_login_outranks_a_failed_test_and_a_switch_that_is_off(self):
+        failed = [dict(row, health="fail", health_detail="no ~/.codex/auth.json")
+                  for row in self.CATALOG]
+        with mock.patch.object(dashboard.MODELS, "listing", return_value=failed):
+            self.assertEqual(self.rows()["codex"]["status"], "needs_login")
+        resting = [dict(row, enabled=False, routable=False) for row in self.CATALOG]
+        with mock.patch.object(dashboard.MODELS, "listing", return_value=resting):
+            self.assertEqual(self.rows()["claude"]["status"], "needs_login")
+
+    def test_a_native_engine_with_no_hint_of_its_own_names_its_real_installer(self):
+        # The shipped catalog gives neither engine an install_hint. The sentence that stood in
+        # read "Install it with: install codex and put it on this farm's PATH" on the page.
+        os.environ["PATH"] = str(self.home / "nothing-here")
+        rows = self.rows()
+        self.assertFalse(rows["codex"]["installed"])
+        self.assertEqual(rows["codex"]["status"], "not_installed")
+        self.assertEqual(rows["codex"]["install_hint"], "npm install -g @openai/codex")
+        self.assertEqual(rows["claude"]["install_hint"],
+                         "curl -fsSL https://claude.ai/install.sh | bash")
+
+
 class MachineReadingTest(unittest.TestCase):
     """The machine readings are Linux only, and the page must survive being run anywhere else."""
 

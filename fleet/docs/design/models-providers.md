@@ -39,7 +39,7 @@ one list of models per provider.
 |---|---|
 | Provider | the name, with the command it runs in the tooltip |
 | Access | Subscription, API key or Local, with the catalog's sentence in the tooltip |
-| Status | one pill with the server's own status: Connected (the server's `on`), Off, Needs a key, Not installed, or Failing |
+| Status | one pill with the server's own status: Connected (the server's `on`), Off, Needs a key, Needs a login (Claude Code or Codex installed, with no login on the farm), Not installed, or Failing |
 | Models | for example "3 on", with the names in the tooltip; the default model is counted |
 | Last test | when the provider was last tested |
 | Actions | Switch on or Switch off, and Test; Key (it copies `fleet models auth <id>`) when a key is missing; Remove for a row this farm added |
