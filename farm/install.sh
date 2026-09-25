@@ -155,7 +155,10 @@ say "1/5  System"
 [ "$(id -u)" != 0 ] || die "run this as an ordinary user, not root: the agents run as you"
 if ! have apt-get; then die "this installer knows Ubuntu and Debian (apt). On another Linux, follow docs/12-the-machine.md by hand"; fi
 if ! have systemctl; then die "no systemd here. The farm needs it for services that outlive your ssh session"; fi
-if grep -qi microsoft /proc/version 2>/dev/null; then note "WSL2 detected: fine, a farm can run under WSL2"; fi
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  note "WSL2 detected: fine, a farm can run under WSL2"
+  note 'WSL stops this distribution soon after its last terminal closes, unless %UserProfile%\.wslconfig on Windows sets instanceIdleTimeout=-1 (docs/12-the-machine.md shows how)'
+fi
 
 missing=()
 for pkg in git tmux python3 curl ca-certificates; do dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg"); done
@@ -169,7 +172,7 @@ fi
 py311_line="sudo apt-get install -y software-properties-common && sudo add-apt-repository -y ppa:deadsnakes/ppa && sudo apt-get install -y python3.11 python3.11-venv && sudo ln -sf /usr/bin/python3.11 /usr/local/bin/python3 && hash -r"
 pyv=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
-  || die "python3 is $pyv; murmur needs 3.11 or newer. Ubuntu 24.04 and later and Debian 12 ship 3.11 or newer and work as they are. On Ubuntu 22.04 run: $py311_line, then run this installer again"
+  || die "python3 is $pyv; murmur needs 3.11 or newer. Ubuntu 24.04 and later, and Debian 12 and later, ship 3.11 or newer and work as they are. On Ubuntu 22.04 run: $py311_line, then run this installer again"
 note "python3 $pyv"
 
 if ! have gh || ! gh_new_enough; then
