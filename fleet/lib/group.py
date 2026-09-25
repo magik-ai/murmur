@@ -19,6 +19,8 @@ import tempfile
 import time
 import tomllib
 
+from model_presets import MODEL_RE, MODEL_RULE
+
 
 STATE = Path(os.path.expanduser(os.environ.get("FLEET_STATE", "~/.fleet")))
 CONFIG = Path(os.path.expanduser(os.environ.get("FLEET_CONFIG", "~/.config/fleet")))
@@ -256,6 +258,14 @@ def read_spec(path):
         for key in ("engine", "model", "effort", "by"):
             if row.get(key):
                 lane[key] = str(row[key])
+        # The rules `fleet spawn` applies to the same values, checked here so that a bad one
+        # stops the group before its record is saved, not after some of its lanes have started.
+        for key, label in (("by", "code name (by)"), ("effort", "effort")):
+            if key in lane and not SAFE_NAME.fullmatch(lane[key]):
+                raise GroupError(f"lane '{name}': invalid {label} '{lane[key]}'; use letters, "
+                                 "digits, '.', '_' or '-', starting with a letter or digit")
+        if "model" in lane and not MODEL_RE.fullmatch(lane["model"]):
+            raise GroupError(f"lane '{name}': invalid model '{lane['model']}'; {MODEL_RULE}")
         lanes.append(lane)
     names = [lane["name"] for lane in lanes]
     if len(names) != len(set(names)):
