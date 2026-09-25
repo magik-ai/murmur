@@ -1,6 +1,6 @@
 ---
 name: fleet
-description: Drive a farm of headless coding agents with the fleet command. Trigger on "spawn agents on the farm", "fan this out" or "fleet mode". Split a batch into lanes, spawn one headless Claude Code or Codex agent per lane, track each lane to a pull request, and merge only on the user's explicit signal.
+description: Drive a farm of headless coding agents with the fleet command. Trigger on "spawn agents on the farm" or "fleet mode". Split a batch into lanes, spawn one headless Claude Code or Codex agent per lane, track each lane to a pull request, and merge only on the user's explicit signal.
 ---
 
 # Fleet mode
@@ -135,9 +135,10 @@ Never spawn without an explicit go from the user.
 ## Engines and tiers
 
 - **Opus** (`--model opus`): hard, unclear, architectural or risky slices.
-  Also use it to review other agents' pull requests.
-- **Sonnet** (`--model sonnet`): ordinary, well-scoped slices. It is the
-  default.
+  Also use it to review other agents' pull requests. It is the default: a
+  Claude lane spawned without `--model` runs Opus, unless the farm sets
+  `FLEET_CLAUDE_MODEL`.
+- **Sonnet** (`--model sonnet`): ordinary, well-scoped slices.
 - **Haiku** (`--model haiku`): mechanical work such as docs, renames and small
   fixes.
 - **Codex** (`--engine codex`): one model, with the tier set by
