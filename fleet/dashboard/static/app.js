@@ -327,9 +327,10 @@ function paintSweep() {
   }
 }
 
-/* The header says whether the farm is working, in three words: on, paused or
-   off. Off is the agent runner stopped, so nothing starts or restarts; paused is the power
-   setting on Paused, so nothing new starts; on is everything else. */
+/* The header says whether the farm is working: on, paused, or restarts off. Restarts off is the
+   agent runner stopped: new agents still start (`fleet spawn` does not need it), but no lane is
+   restarted and no gated lane fires. Paused is the power setting on Paused, so nothing new
+   starts; on is everything else. */
 function paintFarmState() {
   const node = document.getElementById("farmState");
   if (!node) return;
@@ -345,8 +346,9 @@ function paintFarmState() {
   let word = "Farm";
   let why = "The farm has not said whether its agent runner is running.";
   if (runner && runner.state !== "active") {
-    [meaning, word] = ["fail", "Farm off"];
-    why = "The agent runner is stopped, so no agent starts or restarts. Start it on the Machine tab.";
+    [meaning, word] = ["pause", "Restarts off"];
+    why = "The agent runner is stopped. New agents still start and running ones keep going, but no "
+      + "lane is restarted, and no lane waiting on another one starts. Start it on the Machine tab.";
   } else if (paused) {
     [meaning, word] = ["pause", "Farm paused"];
     why = "Power is on Paused, so no new agent starts and the running ones are held back.";
