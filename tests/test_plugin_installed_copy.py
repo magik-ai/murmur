@@ -7,6 +7,7 @@ plugin directory fails here, and not only for the people who installed it from t
 """
 import ast
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -80,6 +81,36 @@ class InstalledCopy(unittest.TestCase):
             self.assertIn(first_rule, contract, heading)
         self.assertIn("Agent work in this repository follows `.murmur/contract.md`.", law)
         self.assertIn("## 1. Repo and contract map", law)
+
+    def apply_report(self, *args):
+        """{path: entry} of the report `apply --defaults` prints."""
+        result = self.run_script("murmur_init.py", "apply", "--defaults", *args)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return {entry["path"]: entry for entry in json.loads(result.stdout)["files"]}
+
+    def test_a_fresh_claude_md_lists_the_placeholders_still_to_fill(self):
+        entry = self.apply_report()["CLAUDE.md"]
+        self.assertEqual(entry["action"], "wrote")
+        self.assertEqual(entry["note"], "from the template, some placeholders still to fill")
+        law = (self.project / "CLAUDE.md").read_text()
+        blanks = entry["placeholders"]
+        for blank in ("<NAME>", "<DOC>", "<PATH>", "<VERSION>", "<CTO>", "<KIND OF WORK>"):
+            self.assertIn(blank, blanks)
+        self.assertEqual(len(blanks), len(set(blanks)))
+        for blank in blanks:
+            self.assertIn(blank, law)
+        # What init fills in is no blank any more, and the template's comment only names them.
+        for gone in ("<ORG>", "<REPO>", "<PRODUCT>", "<TRACKER>", "<PLACEHOLDER>"):
+            self.assertNotIn(gone, blanks)
+        # Every upper-case blank the file still holds outside a comment is on the list.
+        bare = re.sub(r"<!--.*?-->", "", law, flags=re.DOTALL)
+        self.assertEqual(set(re.findall(r"<[A-Z][A-Z0-9_ ]+>", bare)), set(blanks))
+
+    def test_a_claude_md_the_person_wrote_gets_no_placeholder_list(self):
+        (self.project / "CLAUDE.md").write_text("# Ours\n\nBuild with `make <TARGET>`.\n")
+        entry = self.apply_report()["CLAUDE.md"]
+        self.assertEqual(entry["action"], "appended")
+        self.assertNotIn("placeholders", entry)
 
     def run_hook(self, *python_path):
         env = {"PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "HOME": str(self.tmp),

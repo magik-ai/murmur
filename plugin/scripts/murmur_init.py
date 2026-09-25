@@ -310,6 +310,19 @@ def fill_template(text: str, config: dict) -> str:
     return rebase_text(out, config["base_branch"])
 
 
+# A blank the person fills in: upper-case words in angle brackets, such as <OWNER> or
+# <KIND OF WORK>. A single letter is not one, so a type such as Result<T> is not taken for a
+# blank, and neither is anything inside an HTML comment, where the template's own <PLACEHOLDER>
+# names the blanks instead of being one.
+PLACEHOLDER = re.compile(r"<[A-Z][A-Z0-9_]+(?: [A-Z0-9_]+)*>")
+COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def placeholders(text: str) -> list[str]:
+    """The blanks still in the text, each once, in the order they first appear."""
+    return list(dict.fromkeys(PLACEHOLDER.findall(COMMENT.sub("", text))))
+
+
 def place(root: Path, rel: Path, content: str, mode: str, report: list[dict]) -> None:
     """mode "once": leave anything already there. mode "managed": write alongside."""
     target = root / rel
@@ -393,6 +406,7 @@ def cmd_apply(root: Path, use_defaults: bool = False) -> int:
                  + pointer_block(base) + "\n")
         place(root, Path("CLAUDE.md"), fresh, "managed", report)
         report[-1]["note"] = "from the template, some placeholders still to fill"
+        report[-1]["placeholders"] = placeholders(fresh)
     if (root / "AGENTS.md").is_file():
         add_pointer(root, Path("AGENTS.md"), base, report)
     summary = {
