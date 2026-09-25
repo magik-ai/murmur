@@ -232,7 +232,20 @@ email address. With Codex and a registered project,
 `logins --codex-lane <project> --by <code name>` runs one real Codex lane (one
 agent on one task) to prove that Codex works.
 
-## 9. Open
+## 9. The fleet command on this laptop
+
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/scripts/murmur_farm.py shim
+```
+
+It writes a small `fleet` script to `~/.local/bin/fleet` that runs every
+`fleet` command on the farm over ssh, so "fan this out" in Claude Code or Codex
+on this laptop starts lanes on the farm. If `said` says `~/.local/bin` is not
+on the PATH, or another `fleet` comes first, tell the person the one line that
+fixes it. It never replaces a `fleet` that is not murmur's: it says so and the
+flow goes on to `open`.
+
+## 10. Open
 
 ```bash
 uv run ${CLAUDE_PLUGIN_ROOT}/scripts/murmur_farm.py open
@@ -253,6 +266,8 @@ Tell the person, in plain words:
   `uv run --no-project --python 3.11 ${CLAUDE_PLUGIN_ROOT}/lib/machines.py destroy <name> --confirm <name>`.
   It needs Python 3.11 or newer, which uv provides; a Mac's own `python3` is
   older. Run it only when the person asks for it by name;
+- that `fleet` on this laptop now runs on the farm;
 - the next steps: register a project on the farm
-  (`ssh <name> /home/farm/.local/bin/fleet add-project --name myproj --repo owner/name`)
-  and spawn the first lane.
+  (`fleet add-project --name myproj --repo owner/name`, or without the laptop
+  script `ssh <name> /home/farm/.local/bin/fleet add-project ...`), then ask
+  for a team: "fan this out: ...". The lanes run on the farm.

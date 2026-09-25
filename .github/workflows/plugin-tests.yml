@@ -24,5 +24,7 @@ jobs:
           python-version: "3.11"
       - name: The plugin works from a cache copy with nothing outside it
         run: python tests/test_plugin_installed_copy.py -v
+      - name: The skills are written for Codex with their paths filled in
+        run: python tests/test_murmur_skills.py -v
       - name: /murmur:farm step by step, against fakes (no cloud call)
         run: python tests/test_murmur_farm.py -v

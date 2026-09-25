@@ -10,8 +10,9 @@ claims its own branch, another agent reviews its work, and only changes that
 pass their checks reach the base branch. The person decides what merges.
 
 murmur keeps one clone in `~/work/murmur` on every machine. The skills below
-are the same in Claude Code (the plugin, commands `/murmur:<name>`) and in
-Codex (written into `~/.agents/skills`, called as `$murmur-<name>`).
+are the same in Claude Code, where the plugin adds them, and in Codex, where
+murmur's skill installer writes them into `~/.agents/skills` as
+`murmur-<name>`.
 
 ## Which skill does what
 

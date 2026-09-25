@@ -62,7 +62,24 @@ means and what it costs, one sentence each.
 - **tracker**: a tracker was chosen but its rules file, `.claude/tracker.md`,
   is not there, so an agent has to ask what to do on every task. Running the
   init skill again writes it.
-- **claude**: Claude Code, which the agents run in, is not on the path.
+- **engines**: neither Claude Code nor Codex is on the path, and the agents
+  run in one of them.
+- **init files**: a file the init skill writes is gone: the pull request
+  template or `docs/GOTCHAS.md`. Running the init skill again writes it back.
+- **generated files**: optional. Without `.claude/generated-files.txt`, nothing
+  stops an agent from editing a generated file by hand.
+- **CLAUDE.md** and **AGENTS.md**: the file has no pointer to the contract, so
+  agents that read it never see the team's rules. For `AGENTS.md`, it also warns
+  when Codex is installed and the repository has no `AGENTS.md`. Running the
+  init skill again (with `--agents-md` for Codex) adds the pointer.
+- **placeholders**: `CLAUDE.md` still has blanks such as `<NAME>`. Offer to fill
+  them in with the person.
+- **murmur-new files**: a `.murmur-new` file waits next to the file it would
+  replace. Show the person both, and let them keep one. Never commit a
+  `.murmur-new` file.
+- **setup pushed**: the setup is not on the base branch on GitHub yet, as of the
+  last fetch. Agents start from there, so they do not see it. Commit and push
+  it through a pull request; after the merge the warning goes away.
 - **stale branches**: local branches with no upstream branch whose last commit
   is more than a week old. Work that exists on one machine only can be lost.
   Name them and ask whether to push or delete each one. Do neither on your own.
