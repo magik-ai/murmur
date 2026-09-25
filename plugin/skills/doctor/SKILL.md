@@ -10,10 +10,11 @@ the table in plain words, and offer a repair only where a repair is safe.
 Never push, delete or rename a branch, and never change a file the person
 wrote.
 
-**Where the scripts are.** `${CLAUDE_PLUGIN_ROOT}` below is the folder of the
-murmur plugin, and Claude Code fills it in. In Codex or another agent, write
-`~/work/murmur/plugin` in its place. If that folder is missing, clone murmur
-there first: `git clone --depth 1 https://github.com/magik-ai/murmur ~/work/murmur`.
+**Where the scripts are.** The commands below run murmur's scripts from
+`${CLAUDE_PLUGIN_ROOT}`, the plugin's folder. Claude Code fills it in, and
+murmur's skill installer for Codex writes it in. If it is ever empty, use
+`~/work/murmur/plugin`, and clone murmur there first if that folder is missing:
+`git clone https://github.com/magik-ai/murmur ~/work/murmur`.
 
 ## 1. Run it
 

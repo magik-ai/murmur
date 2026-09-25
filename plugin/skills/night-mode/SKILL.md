@@ -29,9 +29,10 @@ something that blocks a finish inside the frozen scope.
 
 1. Confirm your identity. If you use a head office (the `hq` command), run
    `hq whoami`, then `hq hello <name> --task "night run: <scope in one line>"`.
-   In Codex, put `HQ_SESSION_ID=<name>` in front of every `hq` command. Without
-   a head office, still state your name and scope in whatever shared log the
-   team reads.
+   If `hq whoami` says this session has no key (a plain terminal or ssh shell),
+   put `HQ_SESSION_ID=<name>` in front of every `hq` command. Without a head
+   office, still state your name and scope in whatever shared log the team
+   reads.
 2. Send <OWNER> one message: each scope item, its target (production or
    preview), and what stands in the way. Do not wait for a reply.
 3. Start the heartbeat (section 3), and tell <OWNER> in one sentence how it
@@ -84,6 +85,9 @@ choice into the night journal.** Ask <OWNER> if it was not stated:
 | lane | a headless lane on <FARM> that reruns the checklist | you have a farm, and the session may close |
 | schedule | a cloud or cron schedule outside the session | you have neither a farm nor a machine that stays awake |
 | none | nothing; you work in one long stretch and hand over | the scope is small enough to finish before the session ends |
+
+In Claude Code, the alarm is `/loop 20m <the checklist>`. Codex has no timer
+inside a session: pick lane, schedule or none there.
 
 **The alarm is fragile, and you must say so once, at the start.** A timer
 created inside the session lives only as long as the session. If the window

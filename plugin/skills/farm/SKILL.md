@@ -15,10 +15,11 @@ This skill only buys DigitalOcean droplets. If the person wants a farm on a
 machine they already have, tell them to run `farm/install.sh` on that machine
 (see `farm/README.md` in the murmur repository) and stop.
 
-**Where the scripts are.** `${CLAUDE_PLUGIN_ROOT}` below is the folder of the
-murmur plugin, and Claude Code fills it in. In Codex or another agent, write
-`~/work/murmur/plugin` in its place. If that folder is missing, clone murmur
-there first: `git clone --depth 1 https://github.com/magik-ai/murmur ~/work/murmur`.
+**Where the scripts are.** The commands below run murmur's scripts from
+`${CLAUDE_PLUGIN_ROOT}`, the plugin's folder. Claude Code fills it in, and
+murmur's skill installer for Codex writes it in. If it is ever empty, use
+`~/work/murmur/plugin`, and clone murmur there first if that folder is missing:
+`git clone https://github.com/magik-ai/murmur ~/work/murmur`.
 
 The script does the work. Every step is one call, and every call prints one
 JSON object:
@@ -57,9 +58,11 @@ Four rules hold for the whole run.
   doctl context, and never edit `~/.ssh/config` yourself.
 
 Some steps wait inside the call for up to eight minutes: `apply`, `finish`,
-and `logins` when Codex is on. Run them with a Bash timeout of 600000 ms. If
-one returns 2 with `next` naming itself, or the Bash call times out, run the
-same step again. Nothing is ever bought or installed twice.
+and `logins` when Codex is on. Give such a command ten minutes (in Claude Code,
+a Bash timeout of 600000 ms). If your agent cuts commands off sooner, pass
+`--wait 50` and run the step again while it returns 2. If a step returns 2 with
+`next` naming itself, or the command times out, run the same step again.
+Nothing is ever bought or installed twice.
 
 ## 0. Where the flow stands
 
