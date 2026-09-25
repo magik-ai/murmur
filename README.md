@@ -85,6 +85,9 @@ and a [one-command installer](farm) for the farm.
 
 ## Quick start
 
+New to the terminal? [Getting started from zero](docs/getting-started.md) walks you
+through a new Mac, one command at a time.
+
 ### 1. Set up a repository
 
 On your laptop you need Claude Code, git, the GitHub CLI (`gh`) and
