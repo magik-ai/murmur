@@ -335,8 +335,10 @@ case "${1:-start}" in
         echo "$UNIT: ${state:-unknown}, running on $live"
       elif [ "$state" = "active" ] || [ "$state" = "activating" ]; then
         echo "$UNIT: $state, but no dashboard answers on port $PORT: 'journalctl --user -u $UNIT' says why"
+      elif [ "$state" = "failed" ]; then
+        echo "$UNIT: failed: 'journalctl --user -u $UNIT' says why"
       else
-        echo "$UNIT: ${state:-unknown}, stopped"
+        echo "$UNIT: ${state:-unknown}"
       fi
     elif [ -n "$live" ]; then
       if tmux has-session -t "$SESSION" 2>/dev/null; then
