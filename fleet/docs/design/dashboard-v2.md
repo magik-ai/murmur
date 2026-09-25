@@ -241,9 +241,9 @@ so the numbers do not change.
     tell. Each comes with the sentence the server writes. The table shows when each account was
     last read. "Refresh now" is disabled for sixty seconds after a press.
 14. **Removing a project** is refused while the project has open lanes, and the refusal says how
-    many. It edits only the registry, and keeps a copy of the old file next to it. The checkout
-    and the worktrees stay. The answer names the port block that becomes free. Adding a project
-    defaults its port base to the next free block above the highest one registered.
+    many. It edits only the registry, and keeps a copy of the old file next to it. The checkout and
+    the worktrees stay. The answer names the dev server port block that becomes free. Adding a
+    project defaults its port base to the next free block above the highest one registered.
 15. **Models.** Switching a model on runs its Test, and the buttons say what Test does: for Claude
     Code and Codex it checks the CLI (and Codex's login) and sends no request, and for an added
     engine it sends one short prompt. A provider key is given on the command line
