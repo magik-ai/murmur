@@ -34,6 +34,7 @@ from pathlib import Path
 
 CONFIG = Path(".murmur/config.toml")
 CONTRACT = Path(".murmur/contract.md")
+GENERATED = Path(".claude/generated-files.txt")
 MARKER = "<!-- murmur:contract -->"
 TRACKERS = ["github-issues", "linear", "jira", "notion", "none"]
 NEVER = ["merge", "force-push", "production-writes", "paid-provisioning"]
@@ -260,7 +261,9 @@ def without_contract_sections(template: str) -> str:
     return "\n".join(keep) + "\n"
 
 
-def build_contract(config: dict, template: str) -> str:
+def build_contract(config: dict, template: str, guarded: bool = False) -> str:
+    """The contract. `guarded`: the repository has a list of generated files, and the rule
+    that keeps them from hand edits is written here too, since Codex has no hook to stop one."""
     base = config["base_branch"]
     tracker = config["tracker"]
     never = ", ".join(config["never_without_owner"]) or "nothing is reserved"
@@ -274,6 +277,11 @@ def build_contract(config: dict, template: str) -> str:
             f"Work is tracked in {tracker}. Taking a task, linking the pull request"
             " and posting evidence: `.claude/tracker.md`."
         )
+    generated = (
+        "## Generated files\n\n"
+        f"Never edit a file that `{GENERATED}` lists by hand: regenerate it with the command"
+        " written beside its entry.\n\n"
+    ) if guarded else ""
     head = f"""{MARKER}
 # The contract for agent work in this repository
 
@@ -295,7 +303,7 @@ Never touch a branch another agent has claimed: no push, no rebase, no merge.
 {tracked}
 {FARM_LINES[config['farm']]}
 
-"""
+{generated}"""
     parts = [section(template, heading) for heading in SECTIONS]
     tail = (
         "\n\n## The rest\n\n"
@@ -401,11 +409,16 @@ def cmd_apply(root: Path, use_defaults: bool = False, agents_md: bool = False) -
         (".claude/tracker.md", templates / "trackers" / f"{config['tracker']}.md", "managed"),
         (".github/PULL_REQUEST_TEMPLATE.md", templates / "PULL_REQUEST_TEMPLATE.md", "once"),
         ("docs/GOTCHAS.md", templates / "GOTCHAS.md", "once"),
-        (".claude/generated-files.txt", generated_example(), "once"),
+        (str(GENERATED), generated_example(), "once"),
     ]
-    place(root, CONTRACT, build_contract(config, law), "managed", report)
+    placed: list[dict] = []
     for rel, source, mode in sources:
-        place(root, Path(rel), source.read_text(encoding="utf-8"), mode, report)
+        place(root, Path(rel), source.read_text(encoding="utf-8"), mode, placed)
+    # The contract is built once the files above are in place, so that it names the list of
+    # generated files on the first run too. It still comes first in the report.
+    guarded = (root / GENERATED).is_file()
+    place(root, CONTRACT, build_contract(config, law, guarded), "managed", report)
+    report.extend(placed)
     base = config["base_branch"]
     if (root / "CLAUDE.md").is_file():
         add_pointer(root, Path("CLAUDE.md"), base, report)

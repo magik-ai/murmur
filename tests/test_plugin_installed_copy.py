@@ -6,6 +6,7 @@ tests run the plugin's scripts from such a copy, so a script that reads a file o
 plugin directory fails here, and not only for the people who installed it from the marketplace.
 """
 import ast
+import importlib.util
 import json
 import re
 import shutil
@@ -142,6 +143,27 @@ class InstalledCopy(unittest.TestCase):
         bare = re.sub(r"<!--.*?-->", "", law, flags=re.DOTALL)
         found = set(re.findall(r"<[A-Z][A-Z0-9_ ]+>", bare)) - {"<OWNER>", "<TRACKER>", "<FARM>"}
         self.assertEqual(found, set(blanks))
+
+    def test_the_contract_carries_the_generated_files_rule(self):
+        # Codex has no hook to stop an edit, so the rule reaches it through the contract. The
+        # list is written by the same run, so the first contract names it already.
+        rule = ("Never edit a file that `.claude/generated-files.txt` lists by hand: regenerate "
+                "it with the command written beside its entry.")
+        report = self.apply_report()
+        self.assertEqual(list(report)[:2], [".murmur/config.toml", ".murmur/contract.md"])
+        self.assertEqual(report[".murmur/contract.md"]["action"], "wrote")
+        self.assertIn(rule, (self.project / ".murmur" / "contract.md").read_text())
+        again = self.apply_report()[".murmur/contract.md"]
+        self.assertEqual((again["action"], again["note"]), ("skipped", "identical"))
+        # Without a list there is nothing to guard, and no rule.
+        spec = importlib.util.spec_from_file_location(
+            "murmur_init", self.plugin / "scripts" / "murmur_init.py")
+        init = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(init)
+        config = init.load_config(self.project)
+        template = (self.plugin / "templates" / "CLAUDE.md").read_text()
+        self.assertNotIn("generated-files.txt", init.build_contract(config, template))
+        self.assertIn(rule, init.build_contract(config, template, guarded=True))
 
     def test_a_claude_md_the_person_wrote_gets_no_placeholder_list(self):
         (self.project / "CLAUDE.md").write_text("# Ours\n\nBuild with `make <TARGET>`.\n")
