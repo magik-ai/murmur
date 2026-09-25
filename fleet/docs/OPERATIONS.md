@@ -152,8 +152,9 @@ cd ~/work/murmur/fleet
 The installer prints what it did:
 
 - it links `~/.local/bin/fleet` to the clone;
-- it links the orchestrator skill into `~/.claude/skills/fleet`, and into `~/.codex/skills/fleet`
-  when `~/.codex` exists;
+- it links the orchestrator skill into `~/.claude/skills/fleet`, and into
+  `~/.agents/skills/fleet`, where Codex reads skills, when Codex is on the machine. A link an
+  earlier install left in `~/.codex/skills` is removed;
 - it copies `config/policy.example.toml` and `config/projects.example.toml` to
   `~/.config/fleet/policy.toml` and `projects.toml`, unless those files exist already;
 - it writes `FLEET_HOME` into `~/.config/fleet/env`;
@@ -163,7 +164,7 @@ The installer prints what it did:
 |---|---|
 | `--prefix DIR` | link the `fleet` command into `DIR/bin` instead of `~/.local/bin` |
 | `--no-autosweep` | leave the sweep timer off |
-| `--no-skills` | do not link the orchestrator skill into `~/.claude/skills` or `~/.codex/skills` |
+| `--no-skills` | do not link the orchestrator skill into `~/.claude/skills` or `~/.agents/skills` |
 | `--local` | single machine: record `FLEET_DASH_BIND=127.0.0.1` in `~/.config/fleet/env`, and skip the laptop advice |
 
 The supervisor daemon respawns lanes through the `bin/fleet` of its own clone, so `--prefix` needs

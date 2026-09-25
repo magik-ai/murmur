@@ -17,7 +17,7 @@ usage: ./install.sh [options]
 
   --prefix DIR      where the `fleet` launcher is linked (default: ~/.local, so ~/.local/bin/fleet)
   --no-autosweep    do not enable the 10-minute `fleet sweep` timer
-  --no-skills       do not link the agent skills into ~/.claude/skills and ~/.codex/skills
+  --no-skills       do not link the agent skills into ~/.claude/skills and ~/.agents/skills
   --local           single machine: no ssh shim advice, and the dashboard binds loopback
                     (FLEET_DASH_BIND=127.0.0.1 in ~/.config/fleet/env, which the units and
                     `fleet dashboard` both read)
@@ -77,11 +77,24 @@ if [ "$SKILLS" = 1 ]; then
   mkdir -p ~/.claude/skills
   ln -sfn "$HERE/skills/fleet" ~/.claude/skills/fleet
   DID+=("orchestrator skill   -> ~/.claude/skills/fleet")
-  # Codex reads on-demand skills the same way, so link the same playbook if Codex is here
-  if [ -d ~/.codex ]; then
-    mkdir -p ~/.codex/skills
-    ln -sfn "$HERE/skills/fleet" ~/.codex/skills/fleet 2>/dev/null || true
-    DID+=("orchestrator skill   -> ~/.codex/skills/fleet")
+  # Codex reads a user's skills from ~/.agents/skills, so the same playbook is linked there when
+  # Codex is on this box (it makes ~/.codex when it first runs) or that folder is in use already.
+  if [ -d ~/.codex ] || [ -d ~/.agents ] || command -v codex >/dev/null 2>&1 \
+     || [ -x ~/.local/bin/codex ]; then
+    if mkdir -p ~/.agents/skills 2>/dev/null \
+       && ln -sfn "$HERE/skills/fleet" ~/.agents/skills/fleet 2>/dev/null; then
+      DID+=("orchestrator skill   -> ~/.agents/skills/fleet (Codex)")
+    else
+      DID+=("orchestrator skill   -> could not link into ~/.agents/skills")
+    fi
+  fi
+  # Earlier installs linked it into ~/.codex/skills, where Codex no longer looks. That link goes,
+  # but only when it points into this clone: anything else there is not this script's.
+  old_link=~/.codex/skills/fleet
+  if [ -L "$old_link" ]; then
+    case "$(readlink "$old_link")" in
+      "$HERE"/*) rm -f "$old_link"; DID+=("old skill link       -> ~/.codex/skills/fleet removed");;
+    esac
   fi
 else
   DID+=("skills               -> skipped (--no-skills)")

@@ -298,7 +298,7 @@ The logins:
      `ssh -L 1455:localhost:1455 -t <name> /home/farm/.local/bin/codex login`. The check is
      `codex login status`.
   5. The script reruns `fleet/install.sh` on the farm. It links the fleet skill into
-     `~/.codex/skills` once `~/.codex` exists.
+     `~/.agents/skills`, where Codex reads skills, now that Codex is on the farm.
 - **One real Codex lane**, if you ask for it with `logins --codex-lane <project> --by <code
   name>`. A lane is one agent doing one task on its own branch. The script spawns one with a
   one-line task on a project already registered on the farm, and waits for it to finish.

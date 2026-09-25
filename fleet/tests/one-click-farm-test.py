@@ -1058,6 +1058,63 @@ class InstallerWithoutSystemd(Scratch):
         self.assertEqual(self.calls(), [], "no tool was run before the check")
 
 
+FLEET_INSTALL = os.path.join(FLEET, "install.sh")
+SKILL = os.path.join(os.path.realpath(FLEET), "skills", "fleet")   # install.sh resolves its own path
+
+
+class FleetInstallSkills(Scratch):
+    """fleet/install.sh links the orchestrator skill where Claude Code and Codex read skills:
+    ~/.claude/skills, and ~/.agents/skills once Codex is on the box (step 5 of the logins reruns
+    it for that). ~/.codex/skills, where earlier installs put it, is no longer read."""
+
+    def install(self, *args):
+        env = dict(os.environ, HOME=self.home, FLEET_CONFIG=self.config)
+        done = subprocess.run(["bash", FLEET_INSTALL, "--no-autosweep"] + list(args),
+                              capture_output=True, text=True, timeout=120,
+                              stdin=subprocess.DEVNULL, env=env)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        return done.stdout
+
+    def link(self, *parts):
+        path = os.path.join(self.home, *parts)
+        return os.readlink(path) if os.path.islink(path) else None
+
+    def test_codex_on_the_box_gets_the_skill_in_agents_skills(self):
+        os.makedirs(os.path.join(self.home, ".codex"))
+        said = self.install()
+        self.assertEqual(self.link(".claude", "skills", "fleet"), SKILL)
+        self.assertEqual(self.link(".agents", "skills", "fleet"), SKILL)
+        self.assertIn("~/.agents/skills/fleet", said)
+        self.assertFalse(os.path.lexists(os.path.join(self.home, ".codex", "skills", "fleet")))
+
+    def test_the_old_codex_link_into_this_clone_is_removed_and_no_other(self):
+        old = os.path.join(self.home, ".codex", "skills")
+        os.makedirs(old)
+        os.symlink(SKILL, os.path.join(old, "fleet"))
+        self.install()
+        self.assertIsNone(self.link(".codex", "skills", "fleet"))
+        self.assertEqual(self.link(".agents", "skills", "fleet"), SKILL)
+        # A link someone else made there is theirs.
+        elsewhere = os.path.join(self.home, "another-skill")
+        os.makedirs(elsewhere)
+        os.symlink(elsewhere, os.path.join(old, "fleet"))
+        self.install()
+        self.assertEqual(self.link(".codex", "skills", "fleet"), elsewhere)
+
+    @unittest.skipIf(shutil.which("codex"), "codex is on this PATH, so the case has no box "
+                     "without Codex to look at")
+    def test_no_codex_means_no_agents_folder(self):
+        self.install()
+        self.assertEqual(self.link(".claude", "skills", "fleet"), SKILL)
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".agents")))
+
+    def test_no_skills_links_nothing(self):
+        os.makedirs(os.path.join(self.home, ".codex"))
+        self.install("--no-skills")
+        self.assertIsNone(self.link(".claude", "skills", "fleet"))
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".agents")))
+
+
 class DashboardUnit(Scratch):
     """fleet-dashboard.service: never gives up, and `fleet dashboard start` starts it."""
 
