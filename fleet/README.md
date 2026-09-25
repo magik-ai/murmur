@@ -162,7 +162,8 @@ fleet group assemble lesson             # pushes group/lesson/integration, opens
 ```
 
 Every lane needs a territory and exactly one of `task` or `brief`. A spec whose territories
-overlap is refused before any agent starts. Before it pushes, `assemble` checks the result for
+overlap is refused before any agent starts, and so is a lane whose `by`, `model` or `effort`
+`fleet spawn` would refuse. Before it pushes, `assemble` checks the result for
 conflict markers and syntax errors, and runs the project's `validation` command if
 `projects.toml` sets one. If two lanes conflict, it stops and names the files. It never resolves
 a conflict and never merges the pull request.

@@ -187,6 +187,22 @@ territory = ["src/screens/*.py"]
           refused.returncode != 0 and "overlapping lane territories" in refused.stderr and
           before == after and not (STATE / "groups" / "refused.json").exists())
 
+    # A lane's code name, model and effort reach `fleet spawn`, which refuses any that is not a
+    # plain name. The group must refuse them first, before its record is saved or a lane starts.
+    for key, value in (("by", "o'brien"), ("model", "opus; rm -rf ~"), ("effort", "../high")):
+        bad_spec = ROOT / f"bad-{key}.toml"
+        bad_spec.write_text(f'[[lanes]]\nname = "first"\ntask = "one"\nterritory = ["one/**"]\n'
+                            f'[[lanes]]\nname = "second"\ntask = "two"\n'
+                            f'territory = ["two/**"]\n{key} = {json.dumps(value)}\n')
+        before = len(list((STATE / "state").glob("*.json")))
+        refused = call([str(FLEET), "group", "start", f"bad-{key}", "--project", "demo",
+                        "--spec", str(bad_spec)], check=False)
+        after = len(list((STATE / "state").glob("*.json")))
+        check(f"a lane's {key} that spawn would refuse stops the group before anything starts",
+              refused.returncode != 0 and "invalid" in refused.stderr and "'second'" in refused.stderr
+              and before == after and not (STATE / "groups" / f"bad-{key}.json").exists(),
+              refused.stderr)
+
     # `git clean -xfd` is routine build hygiene. It must not be able to disarm the guard.
     git("clean", "-xfd", cwd=alpha["worktree"])
     check("git clean cannot remove the external pre-push guard", (hook_path / "pre-push").is_file())
