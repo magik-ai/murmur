@@ -75,6 +75,14 @@ check("a subscription preset holds no key variable",
       all(_by[p]["auth_env"] == "" for p in ("claude", "codex")))
 check("every preset points at the vendor's docs",
       all(p["docs"].startswith("https://") for p in P.PRESETS))
+_installer = (LIB.parent.parent / "farm" / "install.sh").read_text()
+check("Claude Code installs with Anthropic's own installer, the command farm/install.sh runs",
+      _by["claude"]["install_hint"] == "curl -fsSL https://claude.ai/install.sh | bash"
+      and _by["claude"]["install_hint"] in _installer, _by["claude"]["install_hint"])
+check("the Claude Code terms say what a lane runs and link Anthropic's terms, and still read safe",
+      "unmodified Claude Code CLI" in _by["claude"]["tos"]
+      and "https://code.claude.com/docs/en/legal-and-compliance" in _by["claude"]["tos"]
+      and P.tos_kind(_by["claude"]["tos"]) == "safe", _by["claude"]["tos"])
 check("the shipped list is copied out, so a caller cannot edit it",
       (lambda rows: (rows[0].__setitem__("label", "scribbled"),
                      P.PRESETS[0]["label"] == "Claude Code")[1])(P.presets()))

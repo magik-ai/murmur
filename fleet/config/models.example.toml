@@ -55,4 +55,4 @@ quality    = "frontier"
 caps       = "Claude subscription; limits visible via `fleet accounts`"
 access     = "your Claude subscription, shared with your own interactive sessions"
 default_on = true
-tos        = "first-party CLI on the Anthropic OAuth subscription"
+tos        = "first-party CLI: the lane runs the unmodified Claude Code CLI with your own subscription login. Anthropic's terms for that login: https://code.claude.com/docs/en/legal-and-compliance"

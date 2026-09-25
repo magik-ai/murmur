@@ -60,17 +60,19 @@ PRESETS = [
         "kind": "subscription",
         "engine": "claude",
         "bin": "claude",
-        "install_hint": "npm install -g @anthropic-ai/claude-code",
+        "install_hint": "curl -fsSL https://claude.ai/install.sh | bash",
         "pull_hint": "",
         "auth_env": "",
         "run": "{bin} -p {task}",
         "health": HEALTH,
-        "tos": "first-party CLI on the Anthropic OAuth subscription; headless use is what it is for",
+        "tos": ("first-party CLI: the lane runs the unmodified Claude Code CLI with your own "
+                "subscription login. Anthropic's terms for that login: "
+                "https://code.claude.com/docs/en/legal-and-compliance"),
         "access": "your Claude subscription, shared with your own interactive sessions",
         # No choice of model here: the claude engine is launched by bin/fleet with the model the
         # lane was spawned with, so a name recorded on this row would never reach the command.
         "variants": [],
-        "docs": "https://docs.claude.com/en/docs/claude-code/overview",
+        "docs": "https://code.claude.com/docs/en/overview",
     },
     {
         "id": "codex",
@@ -87,7 +89,7 @@ PRESETS = [
         "tos": "first-party CLI on the ChatGPT subscription (auth_mode chatgpt)",
         "access": "your ChatGPT subscription",
         "variants": [],
-        "docs": "https://developers.openai.com/codex/cli",
+        "docs": "https://learn.chatgpt.com/docs/codex/cli",
     },
 ]
 

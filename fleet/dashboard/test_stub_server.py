@@ -213,14 +213,15 @@ MODELS = [
      "access": "Your Claude subscription.",
      "role": "the workhorse: most lanes, most of the time",
      "quality": "frontier", "caps": "Two windows, session and weekly.",
-     "tos": "First-party CLI on the Anthropic subscription, made for headless runs.",
+     "tos": "First-party CLI: the lane runs the unmodified Claude Code CLI with your own "
+            "subscription login.",
      "run": "claude -p {task}", "auth_env": "",
      "health": "ok", "health_prompt": "What is 17 plus 25? Reply with the number only.", "health_detail": "",
      "routable": True,
      "models": "opus, sonnet, haiku", "limits": "two windows, session and weekly",
      "command": "claude",
      "installed": True, "path": "/home/farm/.local/bin/claude", "last_test": ago(1800),
-     "install_hint": "npm install -g @anthropic-ai/claude-code",
+     "install_hint": "curl -fsSL https://claude.ai/install.sh | bash",
      "in_catalog": True, "catalog_note": ""},
     # Installed, keyed, switched on, and the last health call did not come back. The table draws
     # Failing and puts the server's own detail under the pill.
@@ -323,18 +324,20 @@ MODELS = [
 MODEL_PRESETS = [
     {"id": "claude", "label": "Claude Code", "color": "#D97757", "kind": "subscription", "tos_kind": "safe", "pull_hint": "",
      "engine": "claude", "bin": "claude",
-     "install_hint": "npm install -g @anthropic-ai/claude-code", "auth_env": "",
+     "install_hint": "curl -fsSL https://claude.ai/install.sh | bash", "auth_env": "",
      "run": "{bin} -p {task}", "health": "What is 17 plus 25? Reply with the number only.",
-     "tos": "first-party CLI on the Anthropic OAuth subscription; headless use is what it is for",
+     "tos": ("first-party CLI: the lane runs the unmodified Claude Code CLI with your own "
+             "subscription login. Anthropic's terms for that login: "
+             "https://code.claude.com/docs/en/legal-and-compliance"),
      "access": "your Claude subscription, shared with your own interactive sessions",
      "variants": [],
-     "docs": "https://docs.claude.com/en/docs/claude-code/overview"},
+     "docs": "https://code.claude.com/docs/en/overview"},
     {"id": "codex", "label": "Codex", "color": "#10A37F", "kind": "subscription", "tos_kind": "safe", "pull_hint": "",
      "engine": "codex", "bin": "codex", "install_hint": "npm install -g @openai/codex",
      "auth_env": "", "run": "{bin} exec {task}", "health": "What is 17 plus 25? Reply with the number only.",
      "tos": "first-party CLI on the ChatGPT subscription (auth_mode chatgpt)",
      "access": "your ChatGPT subscription", "variants": [],
-     "docs": "https://developers.openai.com/codex/cli"},
+     "docs": "https://learn.chatgpt.com/docs/codex/cli"},
     # FICTIONAL contributed presets. None of these services exists and murmur ships none of them:
     # they stand for the one dict a contributor adds to lib/model_presets.py (engine "generic"),
     # and they are here only so the dialog's kept mechanism stays tested. A key engine is given
