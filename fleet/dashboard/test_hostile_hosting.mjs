@@ -964,6 +964,25 @@ for (const [opener, picker, controls] of [
   await context.close();
 }
 
+/* Every price a person reads comes with the day it was read: the size cards' prices too, not
+   only the provider's price sentence. */
+{
+  const { page, context, thrown } = await open();
+  await page.click("[data-add-machine]");
+  await page.waitForTimeout(500);
+  await page.click("#drawer [data-machine-provider='do-droplet']");
+  await page.waitForTimeout(500);
+  const seen = await page.evaluate(() => ({
+    prices: [...document.querySelectorAll("#drawer .h-size .h-price")].map((node) => node.textContent),
+    dated: (document.querySelector("#drawer [data-size-price-date]") || {}).textContent || "",
+  }));
+  check("hosting: the size prices come with the day they were read",
+    seen.prices.length === 3 && /^List prices on 2026-09-23\. /.test(seen.dated),
+    JSON.stringify(seen));
+  check("hosting: nothing threw showing the dated prices", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
 /* The login step flips by itself while it is open, because the login happens somewhere else. */
 {
   let loggedIn = false;
