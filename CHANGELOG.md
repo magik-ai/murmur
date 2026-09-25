@@ -40,6 +40,20 @@ The first public release. It contains:
   branches (with a pre-push guard) and send each other messages through a
   private GitHub repository.
 
+### Security
+
+- The dashboard refuses requests for any host name other than this machine
+  when it listens on a loopback address, so a website cannot read it through
+  DNS rebinding.
+- `fleet spawn --after` no longer runs lane names or other values as code, and
+  spawn refuses names that are not plain.
+- Reading the dashboard can no longer trigger back-to-back GitHub calls.
+- An account name such as `.` can no longer remove every extra account.
+- Claude Code and Codex lanes run without any API-key variables, and secrets
+  are scrubbed from lane briefs, results and logs on the dashboard.
+- The policy in [SECURITY.md](SECURITY.md) says what murmur does and does not
+  protect against.
+
 ### Also included
 
 - `farm/install.sh`: one command that turns an Ubuntu or Debian machine into a farm.

@@ -11,6 +11,9 @@ on:
             "fleet/lib/host_presets.py", "fleet/lib/scrub.py", "fleet/tests/fakes/core/**",
             ".github/workflows/plugin-tests.yml"]
 
+permissions:
+  contents: read
+
 jobs:
   installed-copy:
     runs-on: ubuntu-latest

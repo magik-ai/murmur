@@ -7,6 +7,9 @@ on:
   pull_request:
     paths: ["fleet/**", "farm/**", ".github/workflows/fleet-tests.yml"]
 
+permissions:
+  contents: read
+
 jobs:
   policy:
     runs-on: ubuntu-latest
