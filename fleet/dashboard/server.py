@@ -227,7 +227,7 @@ def free_features():
     """
     return {"hq": bool(hq_binary() and hq_office()),
             "gpu": bool(M.NVIDIA),
-            "cpu_temp": bool(M.LHM_URL),
+            "cpu_temp": bool(M.LHM_URL or M.linux_cpu_sensors()[1]),
             "forge": "github" if shutil.which("gh") else "unknown",
             "health_panel": health_panel_on()}
 
@@ -746,8 +746,12 @@ def _check_gpu_sensor():
 def _check_cpu_temp_sensor():
     if M.LHM_URL:
         return "ok", M.LHM_URL, ""
-    return "off", "CPU temperature is unknown, which warns but never blocks a spawn", \
-        "set FLEET_LHM_URL to a hardware monitor endpoint if this machine has one"
+    name, files = M.linux_cpu_sensors()
+    if files:
+        return "ok", f"{name}: {files[0]}", ""
+    return "off", ("no processor temperature sensor here, so the temperature is not measured; "
+                   "that never warns or blocks a spawn"), \
+        "under WSL, set FLEET_LHM_URL to a LibreHardwareMonitor endpoint on the Windows host"
 
 
 def _check_sweep_timer():

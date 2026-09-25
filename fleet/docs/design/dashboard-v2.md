@@ -46,8 +46,9 @@ ever run on the farm, the Board is the checklist plus the commands that produce 
 name, and `fleet status`.
 
 **Machine strip.** One row of tiles: Load, Memory free, Disk free, Graphics card and Temperature.
-A sensor that is not set up says "Not configured". One that is set up but silent says "No
-answer". Capacity and the sweep countdown are in the header, so they are not tiles.
+A graphics card sensor that is not set up says "Not configured"; a machine with no temperature
+sensor fleet can read says "Not measured". One that is there but silent says "No answer".
+Capacity and the sweep countdown are in the header, so they are not tiles.
 
 **Accounts strip.** One row, one card per subscription, the Claude accounts and Codex together.
 A card shows the name, the vendor's mark, every window as a bar with its percent, and when the

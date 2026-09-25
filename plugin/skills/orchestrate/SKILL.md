@@ -58,10 +58,8 @@ before you spawn.
   exhausted account fails on its first step, having done nothing.
 - **Machine capacity.** Check load, memory and worker count right before you
   spawn (`fleet capacity` prints `OK` or `BLOCK`, with the level `ok`, `warn`
-  or `block`). On `warn` or `block`, spawn fewer, or wait. A `warn` whose only
-  reason is `CPU temp UNKNOWN` is normal on a machine without a temperature
-  sensor: spawn as planned. Never force past a block (`fleet spawn --force`)
-  unless <OWNER> asks for exactly that.
+  or `block`). On `warn` or `block`, spawn fewer, or wait. Never force past a
+  block (`fleet spawn --force`) unless <OWNER> asks for exactly that.
 - **If you have no farm.** Run each lane as a local headless session instead.
   Check your own subscription usage before you start, and run no more lanes at
   once than this machine can hold.

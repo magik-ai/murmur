@@ -806,11 +806,11 @@ function sensorTiles(context, metrics) {
       `${fmt.percent(metrics.gpu.util_pct)} busy, ${metrics.gpu.name || "unnamed card"}`, "done"));
   }
   if (!features.cpu_temp) {
-    out.push(tile("Processor temperature", "Not configured",
-      "No temperature sensor is enabled on this machine.", "pause"));
+    out.push(tile("Processor temperature", "Not measured",
+      "This machine has no processor temperature sensor that fleet can read.", "pause"));
   } else if (metrics.cpu_temp_c == null) {
     out.push(tile("Processor temperature", "No answer",
-      metrics.sensors_unavailable ? "The sensor package is not installed." : "The sensor returned nothing.", "fail"));
+      "The sensor returned nothing on the last read.", "fail"));
   } else {
     out.push(tile("Processor temperature", `${fmt.decimal(metrics.cpu_temp_c, 0)} C`,
       metrics.cpu_temp_source || "", "done"));

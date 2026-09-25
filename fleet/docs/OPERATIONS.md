@@ -693,9 +693,11 @@ hardware blocks a spawn:
 - The defaults are `DEFAULT_POLICY` in `lib/metrics.py`. `[limits]` in
   `~/.config/fleet/policy.toml` overrides them (the example file sets `warn_agents = 15`).
   `fleet metrics` prints every number in force, and where it came from.
-- The CPU temperature comes from a LibreHardwareMonitor web server, named by `FLEET_LHM_URL`.
-  Without it, the temperature is unknown. That adds a warning and never blocks. A `warn` whose
-  only reason is `CPU temp UNKNOWN` is normal on a machine without that sensor: spawn as usual.
+- The CPU temperature comes from the processor's Linux sensor: the `coretemp`, `k10temp`,
+  `zenpower` or `cpu_thermal` driver, or the thermal zone of the processor's package. Under WSL,
+  which has none, `FLEET_LHM_URL` can name a LibreHardwareMonitor web server on the Windows host;
+  when it is set, it is asked first. Without a sensor the temperature is not measured, which never
+  warns and never blocks. Cloud machines usually have none.
 - `fleet spawn --force` skips the capacity check.
 
 ---
@@ -786,7 +788,7 @@ Every setting below is optional and has a working default. Put it in `~/.config/
 | `FLEET_DASH_HEALTH` | off | `on` adds the Health section to the Machine tab: hardware tiles and the prerequisites table |
 | `FLEET_FARM_ALIAS` | the machine's hostname | the ssh host name in account login commands. Set it to the name you actually reach the farm by |
 | `FLEET_NVIDIA_SMI` | `nvidia-smi` on `PATH` | the GPU sensor that `fleet mode auto` and the capacity check read |
-| `FLEET_LHM_URL` | unset | a LibreHardwareMonitor web server for the CPU temperature. Unset, the temperature is unknown and never blocks a spawn |
+| `FLEET_LHM_URL` | unset | a LibreHardwareMonitor web server for the CPU temperature, asked before the Linux sensors. For WSL, which has none |
 | `FLEET_CLAUDE_BIN` | `~/.local/bin/claude`, else `claude` on `PATH` | the Claude Code CLI that lanes run. Set it when Claude Code is outside the services' `PATH` |
 | `FLEET_CODEX_BIN` | `~/.local/bin/codex`, else `codex` on `PATH`, else `/usr/bin/codex` | the Codex CLI that lanes run. Set it when Codex is outside the services' `PATH`. A newer CLI unlocks newer models |
 | `FLEET_CODEX_MODEL` | `gpt-5.6-sol` | the model a Codex lane runs when `fleet spawn` gets no `--model` |

@@ -281,9 +281,8 @@ the table.
 
 - One lane is one coherent slice of work. Lanes that change the same files collide when you merge.
 - Lanes open pull requests and stop. They never merge: you decide what merges.
-- If `fleet capacity` says `warn`, spawn fewer. A `warn` whose only reason is `CPU temp UNKNOWN`
-  is normal on a machine without a temperature sensor: spawn as usual. If it says `BLOCK`, wait.
-  The capacity check blocks only on hardware: memory, disk and temperature.
+- If `fleet capacity` says `warn`, spawn fewer. If it says `BLOCK`, wait. The capacity check
+  blocks only on hardware: memory, disk and temperature.
 - Only committed and pushed work is safe. An open pull request protects a worktree for as long as
   it is open. `--force` on `clean` or `sweep` removes uncommitted work.
 - Give every lane its own test database, and let it use the ports fleet gives it.

@@ -22,10 +22,16 @@ CONFIG = os.path.expanduser(os.environ.get("FLEET_CONFIG", "~/.config/fleet"))
 # nvidia-smi is looked up on PATH. FLEET_NVIDIA_SMI points at it when it lives somewhere PATH does
 # not reach (under WSL it is /usr/lib/wsl/lib/nvidia-smi, which is not always on a service's PATH).
 NVIDIA = os.environ.get("FLEET_NVIDIA_SMI") or shutil.which("nvidia-smi")
-# CPU temp cannot be read from inside WSL; a LibreHardwareMonitor web server on the Windows host
-# exposes it over HTTP. Set FLEET_LHM_URL to that endpoint. Unset or unreachable -> cpu_temp is
-# None, which is a warning, never a block.
+# The CPU temperature. On Linux it comes from the kernel's own sensors: a hwmon driver for the
+# processor, or a thermal zone of its package. Cloud machines and WSL usually have neither, and
+# there the temperature is not measured, which never warns and never blocks. FLEET_LHM_URL names
+# a LibreHardwareMonitor web server instead: under WSL the Windows host can read the sensor and
+# serve it over HTTP. When it is set it is asked first.
 LHM_URL = os.environ.get("FLEET_LHM_URL", "").strip()
+SYS_CLASS = "/sys/class"   # named here so a check can point it at a folder of its own
+CPU_HWMON = ("coretemp", "k10temp", "zenpower", "cpu_thermal")   # Intel, AMD, AMD, Raspberry Pi
+CPU_ZONES = ("x86_pkg_temp", "cpu-thermal", "cpu_thermal")
+NOT_MEASURED = "not measured"
 
 # Starting points, not measurements of your machine. An agent is cheap while it thinks and
 # expensive in short bursts (a front end build, a test run), so the floors exist to leave room
@@ -123,10 +129,64 @@ def gpu():
         return None
 
 
+def _read_text(path):
+    try:
+        with open(path) as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def linux_cpu_sensors():
+    """(name, files): the processor's temperature files under /sys, each in millidegrees C, and
+    the name of the driver or zone they belong to. ("", []) where this machine has none."""
+    for hwmon in sorted(glob.glob(os.path.join(SYS_CLASS, "hwmon", "hwmon*"))):
+        name = _read_text(os.path.join(hwmon, "name"))
+        files = sorted(glob.glob(os.path.join(hwmon, "temp*_input")))
+        if name in CPU_HWMON and files:
+            return name, files
+    for zone in sorted(glob.glob(os.path.join(SYS_CLASS, "thermal", "thermal_zone*"))):
+        name = _read_text(os.path.join(zone, "type"))
+        if name in CPU_ZONES:
+            return name, [os.path.join(zone, "temp")]
+    return "", []
+
+
+def linux_cpu_temp():
+    """(celsius, name) from the Linux sensors: the hottest reading, or (None, "") without one."""
+    name, files = linux_cpu_sensors()
+    readings = []
+    for path in files:
+        try:
+            celsius = int(_read_text(path)) / 1000
+        except ValueError:
+            continue
+        if 0 < celsius < 150:            # a driver with no reading may report 0 or garbage
+            readings.append(celsius)
+    return (round(max(readings), 1), name) if readings else (None, "")
+
+
+def cpu_temp_reading():
+    """(celsius, source): LibreHardwareMonitor when FLEET_LHM_URL is set and answers, else the
+    Linux sensors, else (None, "not measured")."""
+    reading = lhm_cpu_temp()
+    if reading is not None:
+        return reading, "librehardwaremonitor"
+    reading, name = linux_cpu_temp()
+    if reading is not None:
+        return reading, f"{name} (Linux)"
+    return None, NOT_MEASURED
+
+
 def cpu_temp():
+    """The CPU temperature in C, or None where it is not measured."""
+    return cpu_temp_reading()[0]
+
+
+def lhm_cpu_temp():
     """Read CPU temp from a LibreHardwareMonitor web server named by FLEET_LHM_URL.
     Prefers the AMD Tctl/Tdie package sensor; falls back to a 'CPU Core' sensor.
-    No URL configured means no sensor, which is the default."""
+    No URL configured means no reading, which is the default."""
     if not LHM_URL:
         return None
     try:
@@ -311,11 +371,11 @@ def verdict(m, pol):
         blocks.append(f"free disk {m['disk']['free_gb']}GB < {pol['disk_min_gb']}GB")
     if m["gpu"] and m["gpu"]["temp_c"] > pol["gpu_temp_max"]:
         blocks.append(f"GPU {m['gpu']['temp_c']}C > {pol['gpu_temp_max']}C")
+    # A temperature that is not measured is neither a warning nor a block: most machines a farm
+    # runs on (a cloud machine, WSL) have no sensor to read.
     ct = m.get("cpu_temp_c")
     if ct is not None and ct > pol["cpu_temp_max"]:
         blocks.append(f"CPU {ct}C > {pol['cpu_temp_max']}C")
-    if ct is None:
-        warnings.append("CPU temp UNKNOWN (no FLEET_LHM_URL, or the sensor is unreachable)")
     if memory is not None and memory["ram_avail_gb"] < pol["warn_ram_gb"]:
         warnings.append(f"free RAM below warning floor ({pol['warn_ram_gb']}GB)")
     if m["disk"]["free_gb"] < pol["warn_disk_gb"]:
@@ -337,7 +397,7 @@ def verdict(m, pol):
 def collect():
     pol, policy_source = _load_policy()
     gpu_reading = gpu()
-    cpu_reading = cpu_temp()
+    cpu_reading, cpu_source = cpu_temp_reading()
     unavailable = []
     if gpu_reading is None:
         unavailable.append("gpu")
@@ -345,7 +405,7 @@ def collect():
         unavailable.append("cpu_temp")
     m = {"ts": int(time.time()), "load": loadavg(), "mem": mem(), "disk": disk(),
          "gpu": gpu_reading, "cpu_temp_c": cpu_reading,
-         "cpu_temp_source": "librehardwaremonitor" if cpu_reading is not None else "unavailable",
+         "cpu_temp_source": cpu_source,
          "sensors_unavailable": unavailable, "agents": agents()}
     m["capacity"] = verdict(m, pol)
     m["policy"] = pol
