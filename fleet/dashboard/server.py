@@ -118,6 +118,7 @@ TOKEN = os.environ.get("FLEET_DASH_TOKEN", "").strip() or stored_token()
 MAX_BODY_BYTES = 256 * 1024
 DAEMON_UNIT = "fleet-daemon.service"
 SWEEP_TIMER_UNIT = "fleet-sweep.timer"
+DASHBOARD_UNIT = "fleet-dashboard.service"
 # The tmux session `dashboard/run.sh` starts this server in. The variable exists so a suite can
 # drive a dashboard of its own without reading the farm's.
 DASH_SESSION = os.environ.get("FLEET_DASH_SESSION", "").strip() or "fleet-dashboard"
@@ -1389,17 +1390,27 @@ def _dashboard_row():
            "detail": "", "since": None, "actions": [], "read_only": True,
            "fix": "fleet dashboard restart", "refusal": DASHBOARD_SERVICE_REFUSAL}
     socket_address = listening_socket(PORT)
+    # `fleet dashboard enable` installs the dashboard as a user unit, and dashboard/run.sh then
+    # starts, stops and restarts that unit. Without it, run.sh uses a tmux session.
+    rc, out, _err = run_tool(["systemctl", "--user", "is-active", DASHBOARD_UNIT])
+    as_unit = rc == 0 and (out or "").strip() == "active"
     rc, _out, _err = run_tool(["tmux", "has-session", "-t", DASH_SESSION])
     in_tmux = rc == 0
-    if in_tmux and socket_address:
+    if as_unit:
+        row["detail"] = (f"listening on {socket_address}, as the user unit {DASHBOARD_UNIT}"
+                         if socket_address else
+                         f"running as the user unit {DASHBOARD_UNIT}; this machine does not say "
+                         "which socket it is listening on")
+    elif in_tmux and socket_address:
         row["detail"] = f"listening on {socket_address}, in the tmux session {DASH_SESSION}"
     elif in_tmux:
         row.update(state="failed",
                    detail=f"the tmux session {DASH_SESSION} is up but nothing is listening on "
                           f"port {PORT}")
     elif socket_address:
-        row["detail"] = (f"listening on {socket_address}, started outside the tmux session "
-                         f"{DASH_SESSION}, so `fleet dashboard restart` will not find it")
+        row["detail"] = (f"listening on {socket_address}, started outside both the user unit and "
+                         f"the tmux session {DASH_SESSION}, so `fleet dashboard restart` will not "
+                         "find it")
     else:
         row["detail"] = ("serving this page; this machine does not say which socket it is "
                          "listening on")
