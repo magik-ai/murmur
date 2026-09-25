@@ -2602,8 +2602,9 @@ HOSTING_HOSTS_CHECK_TIMEOUT = 60
 
 # Every value below becomes part of an argv, so each is checked against a pattern first and a
 # body that does not match never reaches a command line at all.
-# A machine name is also a host name and a registry table name: lower case, no dots, 2 to 40.
-MACHINE_NAME = re.compile(r"[a-z][a-z0-9-]{1,39}")
+# A machine name is also a host name and a registry table name: lower case, no dots, 2 to 31,
+# the rule `fleet machines` itself applies (lib/machines.py NAME_RE) and the page checks first.
+MACHINE_NAME = re.compile(r"[a-z][a-z0-9-]{1,30}")
 # A provider's size slug and region slug: 2 to 32 of lower case, digits and hyphens. The CLI
 # checks them against the preset; this only keeps a shell-shaped or path-shaped string out of
 # the argument list. A hyphen may not come first, which the bare character class would have
@@ -2785,7 +2786,7 @@ def _provider_field(body, want_job=""):
 def _name_field(body):
     name = str((body or {}).get("name") or "").strip()
     if not MACHINE_NAME.fullmatch(name):
-        return "", ("a machine name is 2 to 40 characters: lower case letters, digits and "
+        return "", ("a machine name is 2 to 31 characters: lower case letters, digits and "
                     "hyphens, starting with a letter")
     return name, ""
 
