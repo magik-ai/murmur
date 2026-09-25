@@ -649,7 +649,8 @@ def _check_tmux():
     path = _which("tmux")
     if path:
         return "ok", path, ""
-    return "missing", "the dashboard and every lane run inside a detached tmux session", \
+    return "missing", ("`fleet dashboard start` runs the dashboard in a detached tmux session "
+                       "until it is installed as a user unit"), \
         "install tmux with this machine's package manager"
 
 
@@ -657,12 +658,13 @@ def _check_systemd_user():
     rc, out, err = run_tool(["systemctl", "--user", "is-system-running"])
     word = (out or err).strip().splitlines()[0] if (out or err).strip() else ""
     if rc == 127:
-        # Lanes themselves run in tmux, so this is not what stops work. What needs a user
-        # manager is the CPU cap behind the power modes, the sweep timer and the dashboard's
-        # own unit.
-        return "off", ("no user manager here, so the power modes and the sweep timer are "
-                       "unavailable; lanes themselves run in tmux and are fine"), \
-            "run this farm on a machine with a systemd user manager to get those"
+        # Each lane runs as a transient systemd user unit (`systemd-run --user` in bin/fleet), so
+        # without a user manager no lane can start. The CPU cap behind the power modes, the sweep
+        # timer and the dashboard's own unit need it too.
+        return "missing", ("no systemd user manager here, so no lane can start: each lane runs "
+                           "as a systemd user unit, and the power modes and the sweep timer "
+                           "need it too"), \
+            "run this farm on a machine with a systemd user manager"
     if word in ("running", "degraded", "starting", "maintenance"):
         return "ok", f"user manager is {word}", ""
     return "error", word or "the user manager did not answer", \
@@ -1220,9 +1222,9 @@ def select_models_request(body):
 # and NEVER on a request: a page redrawing every few seconds would otherwise ask systemd a few
 # thousand questions an hour.
 #
-# The dashboard's own row is read from its tmux session and its listening socket, the two things
-# `dashboard/run.sh status` looks at, and it is read-only: a page that can stop itself answers the
-# next request with nothing at all.
+# The dashboard's own row is read from its user unit, its tmux session and its listening socket,
+# the things `dashboard/run.sh status` looks at, and it is read-only: a page that can stop itself
+# answers the next request with nothing at all.
 
 # `fix` is written out next to `start`, never derived from `verb`: `fleet autosweep` takes
 # on|off|status, so a fix built as "<verb> start" told the reader to run `fleet autosweep start`,

@@ -2370,14 +2370,15 @@ class DashboardHealthTest(unittest.TestCase):
         self.assertEqual(rows["gh"]["state"], "missing")
         self.assertIn("cli.github.com", rows["gh"]["fix"])
         self.assertEqual(rows["tmux"]["state"], "missing")
-        # A machine with no user manager still runs lanes: they live in tmux. Painting that row
-        # red said something untrue about what was blocked.
-        for name in ("systemd_user", "linger"):
-            self.assertEqual(rows[name]["state"], "off", name)
-            self.assertNotIn("lanes cannot", rows[name]["detail"], name)
-        self.assertIn("tmux", rows["systemd_user"]["detail"])
+        self.assertNotIn("lane", rows["tmux"]["detail"])
+        # Each lane runs as a systemd user unit, so a machine with no user manager starts none:
+        # that is missing, not a choice, and the row must not say lanes are fine in tmux.
+        self.assertEqual(rows["systemd_user"]["state"], "missing")
+        self.assertIn("no lane can start", rows["systemd_user"]["detail"])
+        self.assertNotIn("tmux", rows["systemd_user"]["detail"])
         for word in ("power modes", "sweep timer"):
             self.assertIn(word, rows["systemd_user"]["detail"], word)
+        self.assertEqual(rows["linger"]["state"], "off")
         self.assertEqual(rows["hq"]["state"], "missing")
         # With no engine at all, no lane can run: that is missing, not a choice.
         self.assertEqual(rows["claude"]["state"], "missing")
