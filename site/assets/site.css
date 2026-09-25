@@ -219,8 +219,9 @@ footer { padding-block: 56px 64px; border-top: 1px solid var(--line); }
 .footer__brand { display: grid; gap: 14px; justify-items: start; }
 .footer__line { margin: 0; font-size: 17px; line-height: 28px; color: var(--ink); }
 footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
-.footer__cols { display: grid; grid-template-columns: repeat(2, auto); gap: 0 56px; }
-@media (max-width: 720px) { .footer__cols { gap: 28px 48px; } }
+.footer__cols { display: grid; grid-template-columns: repeat(3, auto); gap: 0 56px; }
+.footer__name { font-weight: 550; }
+@media (max-width: 720px) { .footer__cols { grid-template-columns: repeat(2, auto); gap: 28px 48px; } .footer__by { grid-column: 1 / -1; } }
 .footer__cols div { display: grid; gap: 10px; align-content: start; }
 .footer__cols h2 { margin: 0 0 4px; font: 550 13px/16px var(--font-sans); color: var(--ink-muted); }
 .footer__cols a { font-size: 15px; line-height: 22px; color: var(--ink); text-decoration: none; }
