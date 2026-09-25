@@ -109,8 +109,12 @@ class Presets(unittest.TestCase):
                          sorted(["fra1", "ams3", "lon1", "nyc3", "sfo3", "sgp1", "tor1", "blr1",
                                  "syd1"]))
 
-    def test_what_could_not_be_confirmed_says_so(self):
-        self.assertIn("UNVERIFIED", host_presets.preset("do-droplet")["terms"])
+    def test_the_droplet_names_the_ways_digitalocean_documents_to_install_doctl(self):
+        row = host_presets.preset("do-droplet")
+        for way in ("brew install doctl", "sudo snap install doctl", "release archive"):
+            self.assertIn(way, row["terms"])
+        self.assertNotIn("UNVERIFIED", row["terms"])
+        self.assertIn("docs.digitalocean.com/reference/doctl/how-to/install", row["install"])
 
     def test_a_caller_cannot_edit_the_shipped_description(self):
         row = host_presets.preset("do-droplet")
