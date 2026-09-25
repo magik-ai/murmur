@@ -14,7 +14,7 @@ jobs:
   policy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Shell syntax
         run: bash -n fleet/bin/fleet && bash -n fleet/install.sh && bash -n fleet/dashboard/run.sh
       - name: Policy, identity, ports and the env file
