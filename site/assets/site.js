@@ -72,13 +72,21 @@
 
   /* -------------------------------------------------------------------- copy */
   var said = document.getElementById("copied");
+  function announce(words) {
+    if (!said) return;
+    /* Emptied first, so a second copy in a row is read out too, not taken for old news. */
+    said.textContent = "";
+    setTimeout(function () { said.textContent = words; }, 50);
+  }
   Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (button) {
+    var back = 0;
     button.addEventListener("click", function () {
       var text = button.getAttribute("data-copy");
       function done() {
         button.textContent = "Copied";
-        if (said) said.textContent = "Copied to the clipboard";
-        setTimeout(function () { button.textContent = "Copy"; }, 1600);
+        announce("Copied to the clipboard");
+        clearTimeout(back);
+        back = setTimeout(function () { button.textContent = "Copy"; }, 1600);
       }
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done, function () { select(button); });

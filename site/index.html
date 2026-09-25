@@ -76,20 +76,25 @@
             <button role="tab" id="t-farm" aria-selected="false" aria-controls="p-farm" tabindex="-1">On Ubuntu or Debian</button>
           </div>
           <div role="tabpanel" id="p-agent" aria-labelledby="t-agent">
-            <pre><span class="p">&gt; </span>Install murmur for this repo:
+            <div class="cmd">
+              <pre><span class="p" aria-hidden="true">&gt; </span>Install murmur for this repo:
   https://github.com/magik-ai/murmur</pre>
-            <button class="mm-button mm-button--quiet mm-button--small" data-copy="Install murmur for this repo: https://github.com/magik-ai/murmur">Copy</button>
+              <button class="mm-button mm-button--quiet mm-button--small" data-copy="Install murmur for this repo: https://github.com/magik-ai/murmur">Copy</button>
+            </div>
           </div>
           <div role="tabpanel" id="p-plugin" aria-labelledby="t-plugin" class="is-off" aria-hidden="true" inert>
-            <pre><span class="p">&gt; </span>/plugin marketplace add magik-ai/murmur
-<span class="p">&gt; </span>/plugin install murmur@murmur
-<span class="p">&gt; </span>/murmur:init
-<span class="p">&gt; </span>/murmur:doctor</pre>
-            <button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur&#10;/plugin install murmur@murmur&#10;/murmur:init&#10;/murmur:doctor">Copy</button>
+            <ol class="cmds">
+              <li class="cmd"><pre><span class="p" aria-hidden="true">&gt; </span>/plugin marketplace add magik-ai/murmur</pre><button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur" aria-label="Copy /plugin marketplace add magik-ai/murmur">Copy</button></li>
+              <li class="cmd"><pre><span class="p" aria-hidden="true">&gt; </span>/plugin install murmur@murmur</pre><button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin install murmur@murmur" aria-label="Copy /plugin install murmur@murmur">Copy</button></li>
+              <li class="cmd"><pre><span class="p" aria-hidden="true">&gt; </span>/murmur:init</pre><button class="mm-button mm-button--quiet mm-button--small" data-copy="/murmur:init" aria-label="Copy /murmur:init">Copy</button></li>
+              <li class="cmd"><pre><span class="p" aria-hidden="true">&gt; </span>/murmur:doctor</pre><button class="mm-button mm-button--quiet mm-button--small" data-copy="/murmur:doctor" aria-label="Copy /murmur:doctor">Copy</button></li>
+            </ol>
           </div>
           <div role="tabpanel" id="p-farm" aria-labelledby="t-farm" class="is-off" aria-hidden="true" inert>
-            <pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash</pre>
-            <button class="mm-button mm-button--quiet mm-button--small" data-copy="curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash">Copy</button>
+            <div class="cmd">
+              <pre><span class="p" aria-hidden="true">$ </span>curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash</pre>
+              <button class="mm-button mm-button--quiet mm-button--small" data-copy="curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash">Copy</button>
+            </div>
           </div>
         </div>
         <p class="sr-only" aria-live="polite" id="copied"></p>
@@ -269,20 +274,25 @@
           <button role="tab" id="t2-farm" aria-selected="false" aria-controls="p2-farm" tabindex="-1">On Ubuntu or Debian</button>
         </div>
         <div role="tabpanel" id="p2-agent" aria-labelledby="t2-agent">
-          <pre><span class="p">&gt; </span>Install murmur for this repo:
+          <div class="cmd">
+            <pre><span class="p" aria-hidden="true">&gt; </span>Install murmur for this repo:
   https://github.com/magik-ai/murmur</pre>
-          <button class="mm-button mm-button--quiet mm-button--small" data-copy="Install murmur for this repo: https://github.com/magik-ai/murmur">Copy</button>
+            <button class="mm-button mm-button--quiet mm-button--small" data-copy="Install murmur for this repo: https://github.com/magik-ai/murmur">Copy</button>
+          </div>
         </div>
         <div role="tabpanel" id="p2-plugin" aria-labelledby="t2-plugin" class="is-off" aria-hidden="true" inert>
-          <pre><span class="p">&gt; </span>/plugin marketplace add magik-ai/murmur
-<span class="p">&gt; </span>/plugin install murmur@murmur
-<span class="p">&gt; </span>/murmur:init
-<span class="p">&gt; </span>/murmur:doctor</pre>
-          <button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur&#10;/plugin install murmur@murmur&#10;/murmur:init&#10;/murmur:doctor">Copy</button>
+          <ol class="cmds">
+            <li class="cmd"><pre><span class="p" aria-hidden="true">&gt; </span>/plugin marketplace add magik-ai/murmur</pre><button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin marketplace add magik-ai/murmur" aria-label="Copy /plugin marketplace add magik-ai/murmur">Copy</button></li>
+            <li class="cmd"><pre><span class="p" aria-hidden="true">&gt; </span>/plugin install murmur@murmur</pre><button class="mm-button mm-button--quiet mm-button--small" data-copy="/plugin install murmur@murmur" aria-label="Copy /plugin install murmur@murmur">Copy</button></li>
+            <li class="cmd"><pre><span class="p" aria-hidden="true">&gt; </span>/murmur:init</pre><button class="mm-button mm-button--quiet mm-button--small" data-copy="/murmur:init" aria-label="Copy /murmur:init">Copy</button></li>
+            <li class="cmd"><pre><span class="p" aria-hidden="true">&gt; </span>/murmur:doctor</pre><button class="mm-button mm-button--quiet mm-button--small" data-copy="/murmur:doctor" aria-label="Copy /murmur:doctor">Copy</button></li>
+          </ol>
         </div>
         <div role="tabpanel" id="p2-farm" aria-labelledby="t2-farm" class="is-off" aria-hidden="true" inert>
-          <pre><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash</pre>
-          <button class="mm-button mm-button--quiet mm-button--small" data-copy="curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash">Copy</button>
+          <div class="cmd">
+            <pre><span class="p" aria-hidden="true">$ </span>curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash</pre>
+            <button class="mm-button mm-button--quiet mm-button--small" data-copy="curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash">Copy</button>
+          </div>
         </div>
       </div>
     </div>
