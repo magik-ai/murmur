@@ -598,7 +598,7 @@ SERVICE_ROWS = [
      "what": "respawns a lane that carries a restart policy until it delivers"},
     {"id": "sweep_timer", "label": "sweep timer", "unit": "fleet-sweep.timer",
      "actions": ["start", "stop"], "verb": "fleet autosweep", "fix": "fleet autosweep on",
-     "what": "buries merged worktrees and resolved cards every few minutes"},
+     "what": "removes merged worktrees and resolved cards every few minutes"},
     {"id": "dashboard", "label": "This dashboard", "unit": "tmux session and a listening socket",
      "actions": [], "verb": "fleet dashboard", "fix": "fleet dashboard restart",
      "read_only": True, "what": "serves this page"},

@@ -373,6 +373,18 @@ case "$out" in *"fleet drain [status]"*"fleet resume"*) ok "drain: fleet help li
 case "$out" in *gaming*|*playing*|*game-mode*) no "drain: fleet help still talks about games" "$out";;
   *) ok "drain: and says nothing about games";; esac
 
+echo "=== fleet help ==="
+out=$(drain help)
+is "help: fleet kill is listed once" "$(printf '%s\n' "$out" | grep -c '^  fleet kill ')" "1"
+case "$out" in *JANITOR*|*"READ THIS"*|*"Build tooling"*|*"whole rig"*) no "help: it still shouts" "$out";;
+  *) ok "help: it does not shout";; esac
+missing=""
+for c in $(sed -n '/^case "\${1:-help}" in/,/^  help|/p' "$FLEET_BIN" | grep -o '^  [a-z-]*' | tr -d ' '); do
+  case "$c" in help|game-mode) continue;; esac
+  printf '%s\n' "$out" | grep -q "^  fleet $c\b" || missing="$missing $c"
+done
+is "help: every command the dispatcher knows is listed" "$missing" ""
+
 echo "RESULT pass=$P fail=$F"
 
 [ "$F" = 0 ]
