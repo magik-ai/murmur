@@ -36,9 +36,12 @@ Then open <http://127.0.0.1:8000/>.
 
 ## Publish it
 
-murmur.farm is the Cloudflare Worker `murmur`, connected to this repository. Every push to
-`main` publishes this folder; [`wrangler.jsonc`](../wrangler.jsonc) at the repository root
-says what to publish.
+murmur.farm is the Cloudflare Worker `murmur`. The
+[site deploy](../.github/workflows/site-deploy.yml) workflow publishes this folder on every
+push to `main` that changes it, and on demand from the Actions tab;
+[`wrangler.jsonc`](../wrangler.jsonc) at the repository root says what to publish. The
+workflow needs two repository secrets: `CLOUDFLARE_API_TOKEN`, a token made from the "Edit
+Cloudflare Workers" template, and `CLOUDFLARE_ACCOUNT_ID`.
 
 To publish it elsewhere, serve the folder as it is at the root of a domain:
 `site.webmanifest` points to its icons with absolute paths such as `/assets/icon-192.png`.

@@ -1,0 +1,30 @@
+name: site deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "wrangler.jsonc", ".github/workflows/site-deploy.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Forks have no Cloudflare credentials.
+    if: github.repository == 'magik-ai/murmur'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Publish site/ to murmur.farm
+        run: npx --yes wrangler@4 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
