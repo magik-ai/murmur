@@ -69,6 +69,15 @@ class InstalledCopy(unittest.TestCase):
             self.assertTrue(path.is_file(), name)
             self.assertFalse(path.is_symlink(), name)
 
+    def test_every_script_uv_runs_says_it_needs_python_3_11_and_nothing_else(self):
+        # The farm skill runs lib/machines.py with `uv run`, like the scripts: without this block
+        # uv would not know the file needs Python 3.11 and no third-party package.
+        block = ('# /// script\n# requires-python = ">=3.11"\n# dependencies = []\n# ///\n')
+        for path in sorted((self.plugin / "scripts").glob("*.py")) + [
+                self.plugin / "lib" / "machines.py"]:
+            self.assertTrue(path.read_text().startswith("#!/usr/bin/env python3\n" + block),
+                            path.name)
+
     def test_farm_plans_from_the_installed_copy(self):
         # The answers a person gave, and their public key; no doctl on PATH, so the plan says
         # it is the list price and would refuse to buy on it.

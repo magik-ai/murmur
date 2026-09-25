@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
 """The machines this farm owns: a registry, a provider, and no droplet that costs money invisibly.
 
 A machine is a whole farm: systemd user services, tmux, worktrees, the dashboard, the installer
