@@ -18,11 +18,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGIN = REPO / "plugin"
+VERSION = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())["version"]
 
 
 def installed_copy(root: Path) -> Path:
     """The cache layout: <cache>/<marketplace>/<plugin>/<version>, symlinks followed."""
-    target = root / "cache" / "murmur" / "murmur" / "0.1.0"
+    target = root / "cache" / "murmur" / "murmur" / VERSION
     shutil.copytree(PLUGIN, target, symlinks=False)
     return target
 

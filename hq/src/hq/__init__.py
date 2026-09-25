@@ -5,4 +5,4 @@ The CLI lives in `hq.cli`; `bin/hq` and the `hq` console script both call
 paths - comes from `hq.config`.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -8,6 +8,60 @@ follow [Semantic Versioning](https://semver.org/) from the first tagged release.
 
 Nothing yet.
 
+## 0.2.0 - 2026-09-25
+
+murmur now installs through your agent, on a Mac, Windows or Linux, and its
+skills work in Codex as well as in Claude Code.
+
+### Install through your agent
+
+- Paste `Install murmur for this repo: https://github.com/magik-ai/murmur` into
+  Claude Code or Codex. [INSTALL.md](INSTALL.md) takes the agent from checking
+  the computer to a pull request with the repository's setup, and asks the
+  person only for what needs them: passwords, sign-ins and answers.
+- [Getting started from zero](docs/getting-started.md) starts from a new Mac,
+  Windows (through WSL) or Linux computer.
+- murmur.farm starts with "Ask your agent". Every Copy button now pastes one
+  command that works, and a line under each box says what that way needs.
+
+### Codex
+
+- `plugin/scripts/murmur_skills.py install` writes murmur's skills into Codex's
+  `~/.agents/skills` as `murmur-<name>`, with their script paths filled in.
+  `status` and `uninstall` go with it.
+- `murmur_init.py apply --agents-md` points `AGENTS.md` at the contract. A
+  `CLAUDE.md` that init writes next to an `AGENTS.md` starts with `@AGENTS.md`,
+  and the contract carries the rule about generated files, which Codex has no
+  hook for.
+- The doctor takes Codex as well as Claude Code.
+- hq takes Codex's `CODEX_THREAD_ID` as a session key. A Codex session in tmux
+  that registered under `TMUX_PANE` says `hq hello` once more.
+- Without a farm, lanes run as background Claude Code subagents in their own
+  worktrees, or one at a time in Codex.
+
+### Also added
+
+- The `murmur` skill says which skill does what and how to update, repair or
+  uninstall murmur; `/murmur:update` runs the update.
+- The doctor warns when a file init writes is missing, a `.murmur-new` file is
+  waiting, `CLAUDE.md` still has blanks, `CLAUDE.md` or `AGENTS.md` has no
+  pointer to the contract, or the setup is not on the base branch on GitHub.
+- `/murmur:farm` ends by making `fleet` on the laptop run on the farm.
+- A docs test, run in CI, keeps the newcomer docs, the skills and the landing
+  page in agreement.
+- murmur.farm sends HSTS, nosniff and referrer-policy headers.
+
+### Changed
+
+- murmur keeps its clone in `~/work/murmur` on every machine.
+- The README says to commit and push the files `/murmur:init` wrote: agents
+  start their branches from GitHub.
+
+### Fixed
+
+- `/murmur:farm` no longer skips the step that signs the farm in to Claude and
+  Codex.
+
 ## 0.1.0 - 2026-09-25
 
 The first public release. It contains:
