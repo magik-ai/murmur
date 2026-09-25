@@ -787,7 +787,9 @@ cd "$wt" || exit 1
 RUN
   elif [ "$engine" = "claude" ]; then
   local claude_env="" claude_flags=""
-  [ -n "$account_dir" ] && claude_env="export CLAUDE_CONFIG_DIR=\"$account_dir\""
+  # The folder goes into a generated script, so it is quoted for bash with printf %q: a quote,
+  # `$(...)` or backtick in the path (an old account folder, an odd home) stays part of the path.
+  [ -n "$account_dir" ] && claude_env="export CLAUDE_CONFIG_DIR=$(printf '%q' "$account_dir")"
   [ -n "$effort" ] && [ "$engine" = "claude" ] && claude_flags="--effort $effort"
   # --fallback-model moves the lane to sonnet when its own model is overloaded. A lane that
   # already runs sonnet has nothing to move to, so the flag goes only to a lane on another model.

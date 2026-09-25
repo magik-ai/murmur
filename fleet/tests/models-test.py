@@ -1654,6 +1654,37 @@ with world(KEYED_CATALOG, {"keyedcli": {"enabled": True, "health": "ok"}}) as (r
     os.environ.pop("FAKE_LANE", None)
 
 print()
+print("a claude lane's account folder reaches its launcher as one word")
+
+# The launcher is a generated script, and the account folder used to be spliced into it inside
+# double quotes. A folder path holding a quote and a `$(...)` (an account folder an older
+# `fleet accounts add` made, or an odd home directory) then ran as code when the lane started.
+with world() as (room, calls):
+    project(room)
+    _odd = room / 'home" $(touch INJECTED) "x `touch INJECTED2`'
+    (_odd / ".claude").mkdir(parents=True)
+    (_odd / ".claude" / ".credentials.json").write_text("{}")
+    _fake(room / "bin" / "claude", 'printf "%s" "$CLAUDE_CONFIG_DIR" > "' + str(room / "seen")
+          + '"\nexit 0\n')
+    _home = os.environ["HOME"]
+    os.environ["HOME"] = str(_odd)
+    try:
+        _done = fleet("spawn", "--project", "demo", "--lane", "oddhome", "--engine", "claude",
+                      "--account", "default", "--task", "t", "--force")
+        _runs = list((room / "state" / "logs").glob("oddhome-*.run.sh"))
+        if _runs:
+            # Started from inside the room, so whatever an injected command writes lands there.
+            subprocess.run(["bash", str(_runs[0])], env=dict(os.environ), capture_output=True,
+                           timeout=60, cwd=str(room))
+    finally:
+        os.environ["HOME"] = _home
+    check("the lane spawns", _done.returncode == 0 and bool(_runs), _done.stdout + _done.stderr)
+    _ran = [str(path) for name in ("INJECTED", "INJECTED2") for path in room.rglob(name)]
+    check("nothing in the folder's name runs when the lane starts", not _ran, str(_ran))
+    _seen = (room / "seen").read_text() if (room / "seen").exists() else "claude never ran"
+    check("and claude gets the folder exactly as it is", _seen == str(_odd / ".claude"), _seen)
+
+print()
 print("head office mail in a lane's first prompt")
 
 # hq answers an empty inbox with "inbox empty (nothing after <time>; ...)", never with silence.
