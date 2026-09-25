@@ -795,11 +795,20 @@ class Scratch(unittest.TestCase):
             return handle.read()
 
 
-# farm/install.sh stops at its first step when it runs as root ("run this as an ordinary user,
-# not root: the agents run as you"), before anything the cases below look at.
+# farm/install.sh stops at its first checks, before anything the cases below look at: on a box
+# where systemd is not running ("no systemd here", a plain container), and when it runs as root
+# ("run this as an ordinary user, not root: the agents run as you").
 AS_ROOT = os.geteuid() == 0
-REFUSES_ROOT = ("farm/install.sh refuses to run as root and stops at step 1, before what this "
-                "case checks; run the suite as an ordinary user to cover it")
+SYSTEMD = os.path.isdir("/run/systemd/system")
+if not SYSTEMD:
+    STOPS_EARLY = ("systemd is not running here, and farm/install.sh stops at its systemd check, "
+                   "before what this case checks; run the suite on a machine that booted "
+                   "systemd to cover it")
+elif AS_ROOT:
+    STOPS_EARLY = ("farm/install.sh refuses to run as root and stops at step 1, before what this "
+                   "case checks; run the suite as an ordinary user to cover it")
+else:
+    STOPS_EARLY = ""
 
 
 class Installer(Scratch):
@@ -833,7 +842,7 @@ class Installer(Scratch):
         finally:
             os.close(leader)
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_yes_never_asks_even_at_a_terminal(self):
         done = self.on_a_terminal("--yes")
         said = done.stdout + done.stderr
@@ -845,7 +854,7 @@ class Installer(Scratch):
         self.assertIn(["hq", "init", "--repo", "fakeuser/agent-hq-office", "--owner", "fakeuser"],
                       self.calls("hq"))
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_remote_yes_skips_the_single_machine_question_and_takes_the_hq_repo(self):
         done = self.on_a_terminal("--remote", "--yes", "--hq-repo", "owner/old-office")
         said = done.stdout + done.stderr
@@ -856,13 +865,13 @@ class Installer(Scratch):
                       self.calls("hq"))
         self.assertIn(["gh", "repo", "view", "owner/old-office"], self.calls("gh"))
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_a_malformed_hq_repo_is_refused(self):
         done = self.on_a_terminal("--remote", "--yes", "--hq-repo", "not a repo")
         self.assertEqual(done.returncode, 1)
         self.assertIn("--hq-repo is owner/name", done.stdout + done.stderr)
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_tailscale_writes_the_tailscale_bind_and_never_0000(self):
         # Not a single machine, then three defaults, then yes to Tailscale.
         done = self.on_a_terminal(answers="no\n\n\n\nyes\n",
@@ -887,7 +896,7 @@ class Installer(Scratch):
                                                         os.environ.get("PATH", "")]),
                                   FAKE_STATE_DIR=self.fake_state)
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_tailscale_replaces_an_old_wide_bind(self):
         # An older install wrote 0.0.0.0, and the unit loads this file: left alone, the page
         # would listen on every interface of a box with a public address.
@@ -902,7 +911,7 @@ class Installer(Scratch):
         self.assertIn("FLEET_DASH_TOKEN=CANARY\n", env)
         self.assertEqual(self.read("dashboard-run.txt"), "enable\n")
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_tailscale_replaces_every_other_bind_line(self):
         self.with_env("FLEET_DASH_BIND=127.0.0.1\nexport FLEET_DASH_BIND=::\n"
                       "FLEET_DASH_BIND=tailscale\n")
@@ -912,7 +921,7 @@ class Installer(Scratch):
         self.assertEqual([line for line in env.splitlines() if "FLEET_DASH_BIND" in line],
                          ["FLEET_DASH_BIND=tailscale"], env)
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_the_tunnel_leaves_a_loopback_bind_alone(self):
         self.with_env("FLEET_DASH_BIND=127.0.0.1\n")
         done = self.choosing(tailscale=False)
@@ -921,7 +930,7 @@ class Installer(Scratch):
         self.assertEqual([line for line in env.splitlines() if "FLEET_DASH_BIND" in line],
                          ["FLEET_DASH_BIND=127.0.0.1"], env)
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_the_installer_installs_and_enables_the_dashboard_unit(self):
         done = self.on_a_terminal("--remote", "--yes")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
@@ -941,7 +950,7 @@ class Installer(Scratch):
         self.assertEqual(done.returncode, 0, said)
         return said
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_a_4_gb_machine_gets_memory_limits_it_can_spawn_under(self):
         # The example stops every spawn below 6 GB free, which a 4 GB machine never has.
         said = self.installed_on(3.8)
@@ -961,13 +970,13 @@ class Installer(Scratch):
         self.assertNotIn("memory limits sized", again)
         self.assertEqual(self.policy(), policy)
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_an_8_gb_machine_does_not_warn_while_it_is_idle(self):
         said = self.installed_on(7.8)
         limits = tomllib.loads(self.policy())["limits"]
         self.assertEqual((limits["ram_min_gb"], limits["warn_ram_gb"]), (2, 3), said)
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_limits_a_person_set_are_left_alone(self):
         mine = self.example_policy().replace("gpu_temp_max = 87", "gpu_temp_max = 80")
         self.assertNotEqual(mine, self.example_policy())
@@ -978,7 +987,7 @@ class Installer(Scratch):
         self.assertNotIn("memory limits sized", said)
         self.assertEqual(self.policy(), mine)
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_the_logs_are_in_this_users_own_folder(self):
         # A fixed name in /tmp belongs to whoever ran the installer first, and a second user on
         # the same machine could not write it.
@@ -991,7 +1000,7 @@ class Installer(Scratch):
         self.assertTrue(os.path.exists(os.path.join(cache, "murmur", "dashboard.log")), said)
         self.assertNotIn("/tmp/murmur", said)
 
-    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    @unittest.skipIf(STOPS_EARLY, STOPS_EARLY)
     def test_a_16_gb_machine_keeps_the_example_limits(self):
         said = self.installed_on(15.6)
         self.assertNotIn("memory limits sized", said)
@@ -1020,6 +1029,33 @@ class InstallerHelp(unittest.TestCase):
                               timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, self.header())
+
+
+class InstallerWithoutSystemd(Scratch):
+    """A box where systemd is not running, such as a plain container, is told so first, as root
+    or as anyone else, and is left as it was. A `systemctl` command alone used to let the
+    installer through: it edited ~/.bashrc, made ~/.local/bin and fetched uv before it failed."""
+
+    @unittest.skipIf(SYSTEMD, "systemd is running here; this case needs a box without it, such "
+                     "as a plain container")
+    def test_it_stops_before_writing_anything(self):
+        # The installer fakes come first, a `systemctl` among them, so the command is there and
+        # a run that got past the check would still install nothing.
+        env = dict(os.environ, HOME=self.home, FAKE_LOG=self.fake_log, USER="farm",
+                   FLEET_CONFIG=self.config,
+                   XDG_CACHE_HOME=os.path.join(self.home, "cache"),
+                   XDG_CONFIG_HOME=os.path.join(self.home, "config"),
+                   PATH=os.pathsep.join([INSTALLER_FAKES, FAKES, os.environ.get("PATH", "")]))
+        before = sorted(os.listdir(self.home))
+        done = subprocess.run(["bash", INSTALL, "--yes"], capture_output=True, text=True,
+                              timeout=120, stdin=subprocess.DEVNULL, env=env)
+        said = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 1, said)
+        self.assertTrue(done.stderr.startswith("\nstop: no systemd here"), said)
+        self.assertNotIn("1/5", said)
+        # No ~/.bashrc, no ~/.local/bin, no log folder, no config: nothing new at all.
+        self.assertEqual(sorted(os.listdir(self.home)), before)
+        self.assertEqual(self.calls(), [], "no tool was run before the check")
 
 
 class DashboardUnit(Scratch):
