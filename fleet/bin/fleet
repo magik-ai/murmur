@@ -183,6 +183,24 @@ _hq_gate() {
   esac
 }
 
+# The unread head office mail of one agent, for the top of its lane's first prompt, or nothing.
+# hq answers an empty inbox with a line that starts "inbox empty", never with silence.
+_hq_mail() { # $1 = agent
+  local mail bytes cap=24000
+  mail="$(HQ_AGENT="$1" hq inbox 2>/dev/null || true)"
+  case "$mail" in ""|"inbox empty"*) return 0;; esac
+  # Cap it. The prompt goes to the engine as ONE argv string, and Linux caps a single argument
+  # at MAX_ARG_STRLEN (131072) - not at ARG_MAX. A busy night of broadcasts pushed the inbox
+  # past that on its own, and every new lane then died at exec with only a line in <slug>.err.
+  # The agent can always read the rest itself; brief_template already tells it to.
+  bytes=$(printf '%s' "$mail" | wc -c)
+  if [ "$bytes" -gt "$cap" ]; then
+    mail="$(printf '%s' "$mail" | tail -c "$cap")"
+    mail="[older mail truncated - ${bytes} bytes total; run 'hq inbox' for the full set]"$'\n'"$mail"
+  fi
+  printf '%s' "$mail"
+}
+
 # One code name -> ONE mark, forever. The registry WINS: an orchestrator that passes a
 # different --icon/--color on every spawn (which is exactly what happens) cannot scatter
 # its agents across a dozen emoji. Registered on first sight; change it deliberately with
@@ -709,18 +727,8 @@ PY
   if [ "$hq_on" = "1" ]; then
     sys="$sys"$'\n\n'"AGENT-HQ: you are '$hq_agent'. Check mail between tasks with 'hq inbox'; message peers with 'hq msg <agent|all> \"...\"'. Your lane branch '$branch' is already claimed for you: the claim expires by itself after 24 hours, and 'hq release $branch' ends it sooner once the branch is merged. Never push to a branch claimed by someone else."
     local hq_mail
-    hq_mail="$(HQ_AGENT="$hq_agent" hq inbox 2>/dev/null || true)"
-    if [ -n "$hq_mail" ] && [ "$hq_mail" != "inbox empty" ]; then
-      # Cap it. The prompt goes to the engine as ONE argv string, and Linux caps a single argument
-      # at MAX_ARG_STRLEN (131072) - not at ARG_MAX. A busy night of broadcasts pushed the inbox
-      # past that on its own, and every new lane then died at exec with only a line in <slug>.err.
-      # The agent can always read the rest itself; brief_template already tells it to.
-      local mail_bytes mail_cap=24000
-      mail_bytes=$(printf '%s' "$hq_mail" | wc -c)
-      if [ "$mail_bytes" -gt "$mail_cap" ]; then
-        hq_mail="$(printf '%s' "$hq_mail" | tail -c "$mail_cap")"
-        hq_mail="[older mail truncated - ${mail_bytes} bytes total; run 'hq inbox' for the full set]"$'\n'"$hq_mail"
-      fi
+    hq_mail="$(_hq_mail "$hq_agent")"
+    if [ -n "$hq_mail" ]; then
       tasktext="AGENT-HQ MAIL (coordination messages addressed to you - read before working):"$'\n'"$hq_mail"$'\n\n'"---"$'\n\n'"$tasktext"
     fi
   fi
