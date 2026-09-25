@@ -428,15 +428,14 @@ cat <<EOF
   2. Register the repository the agents will work on:
        fleet add-project --name myproj --repo owner/name
 
-  3. Say hello to the head office and spawn the first lane:
-       hq hello $USER-1 --task "first spawn"
+  3. Spawn the first lane. It signs its head office claims and mail with the name after --by:
        fleet capacity
        fleet spawn --project myproj --lane hello --model sonnet --by $USER-1 \\
              --task "Add a line to README.md saying this repository is run by agents as a team. Open a pull request."
        fleet status
 
   Dashboard:  fleet dashboard start     then   fleet dashboard token
-  Check:      fleet capacity   hq whoami   gh auth status
+  Check:      fleet capacity   hq who   gh auth status
   Upgrade:    git -C ~/work/murmur pull    (both tools run from that clone)
   Read next:  ~/work/murmur/docs/12-the-machine.md
 EOF
