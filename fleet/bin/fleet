@@ -239,6 +239,8 @@ cmd_add_project() { # --name --repo owner/name [--path p] [--branch main] [--por
     --path) path="$2"; shift 2;; --branch) branch="$2"; shift 2;;
     --port-base) portbase="$2"; shift 2;; *) echo "unknown $1"; return 1;; esac; done
   [ -n "$name" ] && [ -n "$repo" ] || { echo "need --name and --repo owner/name"; return 1; }
+  # `fleet spawn` refuses a project whose name is not a plain name, so one is never registered.
+  _check_spawn_names name "$name" || return 1
   path="${path:-$HOME/work/$name}"
   if [ ! -d "$path/.git" ]; then
     echo "cloning $repo -> $path"; git clone "https://github.com/$repo.git" "$path"

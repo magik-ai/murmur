@@ -228,6 +228,19 @@ case "$out" in *"registered project 'myproj'"*) ok "and says it registered the p
   *) no "add-project must register myproj" "$out";; esac
 listed=$(FLEET_CONFIG="$FRESH/config" FLEET_STATE="$FRESH/state" "$FLEET_BIN" projects 2>&1)
 is "and 'fleet projects' then lists exactly it" "$listed" "myproj"
+# `fleet spawn` refuses a project whose name is not a plain name, so add-project must not
+# register one: it would sit in the registry as a project no lane can ever use.
+for bad in 'my proj' '../up' '-dash' 'q"uote'; do
+  out=$(FLEET_CONFIG="$FRESH/config" FLEET_STATE="$FRESH/state" \
+        "$FLEET_BIN" add-project --name "$bad" --repo your-org/your-repo \
+        --path "$FRESH/checkout" 2>&1)
+  rc=$?
+  case "$rc:$out" in 0:*) no "add-project refuses the name '$bad'" "$out";;
+    *"is not a plain name"*) ok "add-project refuses the name '$bad', saying why";;
+    *) no "add-project refuses '$bad' with the plain-name rule" "$out";; esac
+done
+is "and registers none of them" \
+  "$(FLEET_CONFIG="$FRESH/config" FLEET_STATE="$FRESH/state" "$FLEET_BIN" projects 2>&1)" "myproj"
 
 echo "=== a policy file that does not parse ==="
 
