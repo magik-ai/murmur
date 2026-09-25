@@ -1,0 +1,8 @@
+// murmur.farm is the Cloudflare Worker "murmur". It is connected to this repository and
+// runs `npx wrangler deploy` on every push to main, which publishes site/ as static files.
+{
+  "name": "murmur",
+  "compatibility_date": "2026-09-23",
+  "assets": { "directory": "./site" },
+  "observability": { "enabled": true }
+}

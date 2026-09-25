@@ -14,6 +14,7 @@ The landing page for murmur: one static page with no build step.
 | `assets/site.js` | This page's behaviour: the install tabs, the Copy buttons and the animations |
 | `assets/shots/` | Screenshots of the plugin and the dashboard, light and dark |
 | `assets/*.svg`, `assets/*.png`, `favicon.ico`, `site.webmanifest` | The marks, the icons and the social preview image |
+| `.assetsignore` | Files kept off the published site, such as this README |
 
 `murmur.css` and `flock.js` are copies of the files in
 [`design/starling-almanac/components/`](../design/starling-almanac/components). Keep them
@@ -35,5 +36,9 @@ Then open <http://127.0.0.1:8000/>.
 
 ## Publish it
 
-Publish the folder as it is to any static host. Serve it at the root of the domain:
+murmur.farm is the Cloudflare Worker `murmur`, connected to this repository. Every push to
+`main` publishes this folder; [`wrangler.jsonc`](../wrangler.jsonc) at the repository root
+says what to publish.
+
+To publish it elsewhere, serve the folder as it is at the root of a domain:
 `site.webmanifest` points to its icons with absolute paths such as `/assets/icon-192.png`.
