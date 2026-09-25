@@ -683,8 +683,8 @@ def run_test(mid):
 # provider's models agents may use, and a lane names one with `fleet spawn --model`. Nothing
 # here runs the provider: switching a model on or off only rewrites the list.
 
-CLAUDE_DEFAULT_MODEL = "sonnet"
-CODEX_FALLBACK_MODEL = "gpt-5.6-sol"
+CLAUDE_FALLBACK_MODEL = "opus"
+CODEX_FALLBACK_MODEL = "gpt-6-sol"
 NO_MODEL_CHOICE = "This provider runs the model its own settings choose; change it there."
 
 
@@ -710,6 +710,12 @@ def _env_file_value(key):
     return ""
 
 
+def claude_default_model():
+    """The model a claude lane runs when spawn names none, resolved as bin/fleet resolves it."""
+    return (os.environ.get("CLAUDE_DEFAULT_MODEL") or os.environ.get("FLEET_CLAUDE_MODEL")
+            or _env_file_value("FLEET_CLAUDE_MODEL") or CLAUDE_FALLBACK_MODEL)
+
+
 def codex_default_model():
     """The model a codex lane runs when spawn names none, resolved as bin/fleet resolves it."""
     return (os.environ.get("CODEX_DEFAULT_MODEL") or os.environ.get("FLEET_CODEX_MODEL")
@@ -720,7 +726,7 @@ def default_model(m):
     """The model a lane on this provider gets when `fleet spawn` names none."""
     engine = str((m or {}).get("engine") or "")
     if engine == "claude":
-        return CLAUDE_DEFAULT_MODEL
+        return claude_default_model()
     if engine == "codex":
         return codex_default_model()
     return str((m or {}).get("variant") or "")

@@ -60,7 +60,8 @@ _engine_bin() { # $1 = command, $2 = the path when it is found nowhere
 CLAUDE_BIN="${CLAUDE_BIN:-${FLEET_CLAUDE_BIN:-$(_engine_bin claude "$HOME/.local/bin/claude")}}"
 CODEX_BIN="${CODEX_BIN:-${FLEET_CODEX_BIN:-$(_engine_bin codex /usr/bin/codex)}}"
 # Codex tiers by REASONING EFFORT on one model, where Claude tiers by model name.
-CODEX_DEFAULT_MODEL="${CODEX_DEFAULT_MODEL:-${FLEET_CODEX_MODEL:-gpt-5.6-sol}}"
+CLAUDE_DEFAULT_MODEL="${CLAUDE_DEFAULT_MODEL:-${FLEET_CLAUDE_MODEL:-opus}}"
+CODEX_DEFAULT_MODEL="${CODEX_DEFAULT_MODEL:-${FLEET_CODEX_MODEL:-gpt-6-sol}}"
 CODEX_DEFAULT_EFFORT="${CODEX_DEFAULT_EFFORT:-medium}"
 # Never let a stray API key divert billing off the subscription (both engines
 # run on their subscription: Claude OAuth, Codex "Logged in using ChatGPT").
@@ -436,7 +437,7 @@ cmd_spawn() {
   esac
   # Claude tiers by MODEL (opus/sonnet/haiku). Codex tiers by REASONING EFFORT on one model.
   if [ "$engine" = "claude" ]; then
-    [ -z "$model" ] && model="sonnet"
+    [ -z "$model" ] && model="$CLAUDE_DEFAULT_MODEL"
     # A typo'd model dies minutes later inside the lane, where it reads as a broken agent.
     case "$model" in sonnet|opus|haiku|fable|'opus[1m]'|'sonnet[1m]'|claude-*) ;; *)
       echo "unknown claude model '$model' (sonnet|opus|haiku|fable|opus[1m]|sonnet[1m] or a full claude-* id)"; return 1;; esac
@@ -901,7 +902,7 @@ PY
       echo "$mid: credential stored ($FLEET_STATE/secrets/$mid.key). Now: fleet models enable $mid";;
     # A provider's models: what it offers (read without sending a prompt) and which are on.
     discover) CODEX_BIN="$CODEX_BIN" "$PY" "$FLEET_HOME/lib/model_discovery.py" discover "$@";;
-    on|off)   CODEX_DEFAULT_MODEL="$CODEX_DEFAULT_MODEL" "$PY" "$FLEET_HOME/lib/models.py" "$sub" "$@";;
+    on|off)   CLAUDE_DEFAULT_MODEL="$CLAUDE_DEFAULT_MODEL" CODEX_DEFAULT_MODEL="$CODEX_DEFAULT_MODEL" "$PY" "$FLEET_HOME/lib/models.py" "$sub" "$@";;
     *) echo "usage: fleet models [list | enable <id> | disable <id> | test <id> | auth <id> | discover <id> [--json] | on <id> <model>... [--confirm-cost <model>...] | off <id> <model>...]";;
   esac
 }
@@ -2113,8 +2114,9 @@ Setup
   fleet hosts list|check          the places a farm can run, and whether their CLI is ready
 
 Notes
-  Claude lanes choose capability with --model (opus, sonnet, haiku). Codex lanes choose it with
-  --effort, on --model gpt-5.6-sol unless you name another. Both run on their subscription login,
+  Claude lanes choose capability with --model (opus, the default, sonnet, haiku). Codex lanes
+  choose it with --effort, on --model gpt-6-sol unless you name another. FLEET_CLAUDE_MODEL and
+  FLEET_CODEX_MODEL change the defaults. Both run on their subscription login,
   never on an API key. --account auto, the default, picks a Claude account with headroom.
 
   fleet sweep never touches a running lane or a card whose pull request is open. It keeps a

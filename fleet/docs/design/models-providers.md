@@ -123,8 +123,9 @@ older `models = "sonnet, opus"` string is read as the first `models_on`, and the
 replaces it. A provider's first saved list starts with its default model, so switching one more
 model on never turns every default lane into a warning.
 
-The default model is `sonnet` for Claude Code. For Codex it is `FLEET_CODEX_MODEL` (from the
-environment or `$FLEET_CONFIG/env`), else `gpt-5.6-sol`. For a `generic` row it is the row's
+For Claude Code the default model is `FLEET_CLAUDE_MODEL` (from the environment or
+`$FLEET_CONFIG/env`), else `opus`. For Codex it is `FLEET_CODEX_MODEL`, read the same way, else
+`gpt-6-sol`. For a `generic` row it is the row's
 `variant`.
 
 **Commands.**

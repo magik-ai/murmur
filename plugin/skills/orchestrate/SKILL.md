@@ -102,7 +102,7 @@ yes.
 - **Cheapest model** for mechanical work: renames, docs, repetitive fixes.
 
 With `fleet`, Claude lanes choose by model (`--model opus`, `sonnet` or
-`haiku`; `sonnet` is the default) and Codex lanes by effort
+`haiku`; `opus` is the default) and Codex lanes by effort
 (`--effort xhigh`, `high`, `medium` or `low`).
 
 ## 6. Spawn

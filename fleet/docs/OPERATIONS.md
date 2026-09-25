@@ -272,10 +272,10 @@ look alike. `fleet identity` shows the marks, and this changes one:
 
 ### Engines, models and tiers
 
-- `--engine claude` is the default. `--model` picks the tier: `opus`, `sonnet` (the default) or
-  `haiku`. It also takes `fable`, `'opus[1m]'`, `'sonnet[1m]'` or a full `claude-*` id. Quote the
+- `--engine claude` is the default. `--model` picks the tier: `opus` (the default,
+  `FLEET_CLAUDE_MODEL`), `sonnet` or `haiku`. It also takes `fable`, `'opus[1m]'`, `'sonnet[1m]'` or a full `claude-*` id. Quote the
   `[1m]` names in a shell.
-- `--engine codex` runs one model (`FLEET_CODEX_MODEL`, default `gpt-5.6-sol`), and `--effort`
+- `--engine codex` runs one model (`FLEET_CODEX_MODEL`, default `gpt-6-sol`), and `--effort`
   picks the tier: `low`, `medium` (the default), `high` or `xhigh`. `--model` picks another
   Codex model.
 - `--effort` works on Claude lanes too, but the levels a Claude model supports depend on the
@@ -803,7 +803,8 @@ Every setting below is optional and has a working default. Put it in `~/.config/
 | `FLEET_LHM_URL` | unset | a LibreHardwareMonitor web server for the CPU temperature, asked before the Linux sensors. For WSL, which has none |
 | `FLEET_CLAUDE_BIN` | `~/.local/bin/claude`, else `claude` on `PATH` | the Claude Code CLI that lanes run. Set it when Claude Code is outside the services' `PATH` |
 | `FLEET_CODEX_BIN` | `~/.local/bin/codex`, else `codex` on `PATH`, else `/usr/bin/codex` | the Codex CLI that lanes run. Set it when Codex is outside the services' `PATH`. A newer CLI unlocks newer models |
-| `FLEET_CODEX_MODEL` | `gpt-5.6-sol` | the model a Codex lane runs when `fleet spawn` gets no `--model` |
+| `FLEET_CLAUDE_MODEL` | `opus` | the model a Claude Code lane runs when `fleet spawn` gets no `--model` |
+| `FLEET_CODEX_MODEL` | `gpt-6-sol` | the model a Codex lane runs when `fleet spawn` gets no `--model` |
 | `FLEET_DAEMON_INTERVAL` | `60` | seconds between two passes of the supervisor daemon |
 | `FLEET_RESPAWN_MAX` | `10` | the most respawns per lane before it is marked `gave_up` |
 | `FLEET_RESPAWN_COOLDOWN` | `600` | the fewest seconds between two respawns of one lane |

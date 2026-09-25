@@ -1368,10 +1368,10 @@ with world() as (room, calls):
             "claude-opus-4-6", "claude-opus-5-5[1m]", "sonnet", "fabled")]
           == [True, True, True, False, False, False, False, False]
           and D.cost_note("codex", "fable") == "")
-    _off = fleet("models", "off", "claude", "sonnet")
+    _off = fleet("models", "off", "claude", "opus")
     check("off refuses the default model",
           _off.returncode != 0 and "stays on" in _off.stderr
-          and "sonnet" in toml_of(M.CONFIG)["claude"]["models_on"], _off.stderr)
+          and "opus" in toml_of(M.CONFIG)["claude"]["models_on"], _off.stderr)
     _off = fleet("models", "off", "claude", "haiku")
     check("off takes another one out",
           _off.returncode == 0 and "haiku" not in toml_of(M.CONFIG)["claude"]["models_on"],
@@ -1463,7 +1463,7 @@ with world(full_catalog()) as (room, calls):
           _no.returncode != 0 and "its own settings choose" in _no.stderr, _no.stderr)
     check("GET /api/engines rows carry models_on and default_model",
           {r["id"]: (r["models_on"], r["default_model"]) for r in SERVER.engines()}
-          .get("claude") == (["sonnet", "opus", "haiku"], "sonnet"))
+          .get("claude") == (["sonnet", "opus", "haiku"], "opus"))
 
 print()
 print("the model reaches the lane")
@@ -1583,12 +1583,19 @@ with world() as (room, calls):
           _runs and "--fallback-model sonnet" in _runs[0].read_text(),
           _runs[0].read_text() if _runs else "no run.sh")
     _plain = fleet("spawn", "--project", "demo", "--lane", "c3", "--engine", "claude",
-                   "--account", "default", "--task", "t", "--force")
+                   "--account", "default", "--model", "sonnet", "--task", "t", "--force")
     _runs = list((room / "state" / "logs").glob("c3-*.run.sh"))
-    check("a lane on the default sonnet is given no fallback onto the model it already runs",
+    check("a lane on sonnet is given no fallback onto the model it already runs",
           _plain.returncode == 0 and _runs and '--model "sonnet"' in _runs[0].read_text()
           and "--fallback-model" not in _runs[0].read_text(),
           _runs[0].read_text() if _runs else _plain.stdout + _plain.stderr)
+    _dflt = fleet("spawn", "--project", "demo", "--lane", "c4", "--engine", "claude",
+                  "--account", "default", "--task", "t", "--force")
+    _runs = list((room / "state" / "logs").glob("c4-*.run.sh"))
+    check("a claude lane with no --model runs opus, falling back to sonnet",
+          _dflt.returncode == 0 and _runs and '--model "opus"' in _runs[0].read_text()
+          and "--fallback-model sonnet" in _runs[0].read_text(),
+          _runs[0].read_text() if _runs else _dflt.stdout + _dflt.stderr)
     _son = fleet("spawn", "--project", "demo", "--lane", "c2", "--engine", "claude",
                  "--account", "default", "--model", "sonnet[1m]", "--task", "t", "--force")
     check("and sonnet[1m], warning because it is not on",
@@ -1826,7 +1833,7 @@ with world(full_catalog()) as (room, calls):
         SERVER.run_tool = lambda argv, **_kw: (_ran.append(argv), (1, "", "ran"))[1]
         try:
             _s, _p = post("/api/models/select", {"id": "claude", "on": ["fable"]})
-            _s2, _p2 = post("/api/models/select", {"id": "claude", "off": ["sonnet"]})
+            _s2, _p2 = post("/api/models/select", {"id": "claude", "off": ["opus"]})
         finally:
             SERVER.run_tool = _real_run_tool
         check("select refuses a noted model not in confirm_cost, with the note, server side",
@@ -1850,11 +1857,11 @@ with world(full_catalog()) as (room, calls):
         check("with the confirm it switches both on and answers the updated row",
               _s == 200 and _p.get("id") == "claude"
               and {"fable", "opus[1m]"} <= set(_p.get("models_on") or [])
-              and _p.get("default_model") == "sonnet", str(_p))
+              and _p.get("default_model") == "opus", str(_p))
         check("the answer is the row itself, the same shape GET /api/engines rows have",
               _s == 200 and set(_p) == set(next(r for r in SERVER.engines()
                                                 if r["id"] == "claude")), str(sorted(_p)))
-        _s, _p = post("/api/models/select", {"id": "claude", "off": ["sonnet"]})
+        _s, _p = post("/api/models/select", {"id": "claude", "off": ["opus"]})
         check("select refuses the default model in off", _s == 400 and "stays on" in _p["error"],
               str(_p))
         _s, _p = post("/api/models/select", {"id": "claude", "off": ["haiku"]})

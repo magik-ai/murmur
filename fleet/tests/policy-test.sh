@@ -325,20 +325,20 @@ print(P.engine_bin("claude") + "|" + P.engine_bin("codex"))' "$LIB_DIR")
 H="$ENG/home"
 is "engines: found nowhere, fleet names where the installers put claude and /usr/bin/codex" \
   "$(engines HOME="$H" PATH="$ENG/empty")" \
-  "$H/.local/bin/claude|/usr/bin/codex|gpt-5.6-sol|python:$H/.local/bin/claude|/usr/bin/codex"
+  "$H/.local/bin/claude|/usr/bin/codex|gpt-6-sol|python:$H/.local/bin/claude|/usr/bin/codex"
 is "engines: an npm install on PATH is found" \
   "$(engines HOME="$H" PATH="$ENG/npm")" \
-  "$ENG/npm/claude|$ENG/npm/codex|gpt-5.6-sol|python:$ENG/npm/claude|$ENG/npm/codex"
+  "$ENG/npm/claude|$ENG/npm/codex|gpt-6-sol|python:$ENG/npm/claude|$ENG/npm/codex"
 cp "$ENG/npm/claude" "$ENG/npm/codex" "$H/.local/bin/"
 is "engines: ~/.local/bin, where the official installers put them, comes before PATH" \
   "$(engines HOME="$H" PATH="$ENG/npm")" \
-  "$H/.local/bin/claude|$H/.local/bin/codex|gpt-5.6-sol|python:$H/.local/bin/claude|$H/.local/bin/codex"
+  "$H/.local/bin/claude|$H/.local/bin/codex|gpt-6-sol|python:$H/.local/bin/claude|$H/.local/bin/codex"
 is "engines: the env file's FLEET_CLAUDE_BIN, FLEET_CODEX_BIN and FLEET_CODEX_MODEL win" \
-  "$(engines HOME="$H" PATH="$ENG/npm" FLEET_CLAUDE_BIN=/opt/claude FLEET_CODEX_BIN=/opt/codex FLEET_CODEX_MODEL=gpt-6-sol)" \
-  "/opt/claude|/opt/codex|gpt-6-sol|python:/opt/claude|/opt/codex"
+  "$(engines HOME="$H" PATH="$ENG/npm" FLEET_CLAUDE_BIN=/opt/claude FLEET_CODEX_BIN=/opt/codex FLEET_CODEX_MODEL=gpt-6-astra)" \
+  "/opt/claude|/opt/codex|gpt-6-astra|python:/opt/claude|/opt/codex"
 is "engines: an explicit CLAUDE_BIN or CODEX_BIN still wins over the env file" \
   "$(engines HOME="$H" PATH="$ENG/npm" CLAUDE_BIN=/x/claude CODEX_BIN=/x/codex FLEET_CLAUDE_BIN=/opt/claude FLEET_CODEX_BIN=/opt/codex)" \
-  "/x/claude|/x/codex|gpt-5.6-sol|python:/x/claude|/x/codex"
+  "/x/claude|/x/codex|gpt-6-sol|python:/x/claude|/x/codex"
 
 echo "=== fleet kill rewrites the lane record whole ==="
 # The dashboard reads a lane's record while `fleet kill` marks it killed. A bare truncate and
