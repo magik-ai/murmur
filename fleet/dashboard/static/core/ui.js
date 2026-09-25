@@ -216,7 +216,8 @@ export const POWER_MODES = [
   ["soft", "Shared", "The agents give way to whatever else you are doing."],
   ["balanced", "Background", "The agents keep a small share and stay out of the way."],
   ["hard", "Paused", "No new agent starts, and the running ones are held back hard."],
-  ["auto", "Automatic", "The farm picks one of the four from how busy the machine is."],
+  ["auto", "Automatic", "Full while the graphics card is idle, Shared while it is in use. "
+    + "With no graphics card sensor it stays on Full."],
 ];
 
 export function powerLabel(id) {

@@ -20,13 +20,14 @@ import { modelsSection } from "./models.js";
    the other while it is being evaluated. */
 import { hostingSection } from "./hosting.js";
 
-/* The four power settings, in plain words, with what each does to the machine's share. */
+/* The power settings, in plain words, with what each does to the machine's share. */
 const POWER = [
   ["full", "Full", "Every core is available to the agents."],
   ["soft", "Shared", "The agents give way to whatever else you are doing."],
   ["balanced", "Background", "The agents keep a small share and stay out of the way."],
   ["hard", "Paused", "No new agent starts, and the running ones are held back hard."],
-  ["auto", "Automatic", "The farm picks one of the four from how busy the machine is."],
+  ["auto", "Automatic", "Full while the graphics card is idle, Shared while it is in use. "
+    + "With no graphics card sensor it stays on Full."],
 ];
 
 const HEALTH_WORD = { ok: "ok", missing: "missing", error: "error", off: "off" };
