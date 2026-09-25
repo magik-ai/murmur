@@ -140,7 +140,9 @@ export async function apiPost(path, body) {
 /* ------------------------------------------------------ error sentences */
 
 const TOOL_HINTS = [
-  [/\bgh\b/, "gh", "sudo apt install gh"],
+  /* Not the distribution's package: Ubuntu 22.04 and Debian 12 ship a gh older than 2.40, which
+     `gh auth status --active` needs. */
+  [/\bgh\b/, "gh", "install gh 2.40 or newer: https://github.com/cli/cli#installation"],
   [/\bhq\b/, "hq", "hq init --repo <owner>/<office>"],
   [/nvidia-smi/, "nvidia-smi", "set FLEET_NVIDIA_SMI to the path of nvidia-smi"],
   [/systemd|systemctl/, "systemd", "loginctl enable-linger $USER"],
