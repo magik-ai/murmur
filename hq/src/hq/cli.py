@@ -262,7 +262,7 @@ def parse_args(ap):
     except SystemExit as stop:
         if stop.code in (0, None) or sys.argv[1:2] != ["check-push"]:
             raise
-        print("hq: WARNING - the push gate could not read its own arguments "
+        print("hq: WARNING - the push check could not read its own arguments "
               f"({' '.join(sys.argv[1:])}); pushing unverified (fail-open)",
               file=sys.stderr)
         raise SystemExit(0) from None
