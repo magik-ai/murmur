@@ -262,10 +262,16 @@ Bug reports, fixes and new engines or providers are welcome. Read
 privately, as [SECURITY.md](SECURITY.md) describes. Everyone taking part
 follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Delivered by
+
+murmur is made by [Ilya Chernyakov](https://chernyakov.ai). You can find him on
+[GitHub](https://github.com/ilya-chernyakov), [X](https://x.com/ilyachernyakov),
+[LinkedIn](https://www.linkedin.com/in/ichernyakov/) and at
+[chernyakov.ai](https://chernyakov.ai).
+
 ## License
 
-murmur is released under the [MIT License](LICENSE). It is maintained by
-[magik-ai](https://github.com/magik-ai).
+murmur is released under the [MIT License](LICENSE).
 
 <br>
 
