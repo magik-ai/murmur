@@ -521,7 +521,7 @@ if [ ! -s "$key" ]; then
   echo "murmur-tailscale-up: no auth key on stdin" >&2
   exit 2
 fi
-tailscale up --authkey "file:$key"
+tailscale up --auth-key "file:$key"
 """
 
 

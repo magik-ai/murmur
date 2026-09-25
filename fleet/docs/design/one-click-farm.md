@@ -357,7 +357,7 @@ why.
    user data. A key file that others can read is refused.
 2. Cloud-init installs the Tailscale package only, and one root-owned helper,
    `/usr/local/sbin/murmur-tailscale-up`. The helper reads a key on stdin into a 0600 file under
-   `/run`, runs `tailscale up --authkey file:<that file>`, and deletes the file. A sudoers entry
+   `/run`, runs `tailscale up --auth-key file:<that file>`, and deletes the file. A sudoers entry
    lets the `farm` user run exactly that helper, with no arguments, with `sudo -n`, and nothing
    else. Cloud-init checks the entry with `visudo -c` and removes it if it does not parse.
 3. After the install, the script runs `sudo -n /usr/local/sbin/murmur-tailscale-up` over ssh,

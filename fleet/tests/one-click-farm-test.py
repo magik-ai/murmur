@@ -691,13 +691,13 @@ class CloudInit(unittest.TestCase):
         self.assertIn("apt-get install -y -qq gh tailscale", text)
         self.assertIn("pkgs.tailscale.com/stable/ubuntu/noble", text)
         self.assertNotIn("tskey", text)
-        self.assertNotIn("authkey file", text.replace('"file:$key"', ""))
+        self.assertNotIn("auth-key file", text.replace('"file:$key"', ""))
         if parsed is None:
             self.skipTest("PyYAML is not installed; the text checks above ran")
         files = {entry["path"]: entry for entry in parsed["write_files"]}
         helper = files["/usr/local/sbin/murmur-tailscale-up"]
         self.assertEqual((helper["owner"], helper["permissions"]), ("root:root", "0755"))
-        self.assertIn('tailscale up --authkey "file:$key"', helper["content"])
+        self.assertIn('tailscale up --auth-key "file:$key"', helper["content"])
         self.assertIn("umask 077", helper["content"])
         self.assertIn("/run/", helper["content"])
         sudoers = files["/etc/sudoers.d/murmur-tailscale"]
@@ -725,7 +725,7 @@ class CloudInit(unittest.TestCase):
         with open(os.path.join(scratch, "argv"), encoding="utf-8") as handle:
             argv = handle.read()
         self.assertNotIn("CANARY", argv)
-        self.assertIn("--authkey file:", argv)
+        self.assertIn("--auth-key file:", argv)
         with open(os.path.join(scratch, "seen"), encoding="utf-8") as handle:
             self.assertEqual(handle.read().strip(), "tskey-auth-CANARY")
         with open(os.path.join(scratch, "mode"), encoding="utf-8") as handle:
