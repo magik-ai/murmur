@@ -9,6 +9,7 @@ fleet/install.sh copies the real example policy, as the real one does, and write
 to $HOME/fleet-install.txt.
 
   FAKE_MEMORY_GB=3.8   the memory `getconf` reports, in GB; without it a 16 GB machine
+  FAKE_GH_VERSION=2.4.0  the version `gh --version` reports; without it 2.60.0
 """
 import os
 import shutil
@@ -29,6 +30,7 @@ printf '%s\\n' "$*" >> "$HOME/fleet-install.txt"
 FLEET = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), *[".."] * 4))
 EXAMPLE_POLICY = os.path.join(FLEET, "config", "policy.example.toml")
 PAGE_SIZE = 4096
+GH_KEYRING = "https://cli.github.com/packages/githubcli-archive-keyring.gpg"
 
 # The stand-in dashboard script records how the installer called it and starts nothing.
 DASHBOARD_RUN = """#!/usr/bin/env bash
@@ -38,7 +40,7 @@ printf '%s\\n' "$*" >> "$HOME/dashboard-run.txt"
 
 def gh(args):
     if args[:1] == ["--version"]:
-        out("gh version 2.60.0 (fake)")
+        out(f"gh version {os.environ.get('FAKE_GH_VERSION') or '2.60.0'} (fake)")
     elif args[:2] == ["auth", "status"]:
         out("Logged in to github.com as fakeuser")
     elif args[:2] == ["api", "user"]:
@@ -99,6 +101,9 @@ def main():
         return 0
     if name == "getconf":
         return getconf(args)
+    if name == "curl" and args == ["-fsSL", GH_KEYRING]:
+        out("a stand-in for GitHub's apt signing key")
+        return 0
     die(f"fake {name}: this test never installs or downloads anything", 1)
 
 

@@ -98,6 +98,12 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # A terminal a person can answer on. /dev/tty exists on every box; it opens only when this run
 # has a controlling terminal (a person at ssh -t, or at curl | bash), never in a headless run.
 have_tty() { (: </dev/tty) 2>/dev/null; }
+# The dashboard runs `gh auth status --active`, which gh 2.40 added. The distribution's gh is older
+# on Ubuntu 22.04 (2.4.0) and Debian 12 (2.23.0), so an old gh is replaced like a missing one.
+gh_new_enough() {
+  gh --version 2>/dev/null |
+    awk 'NR == 1 {split($3, v, "."); ok = v[1] > 2 || (v[1] == 2 && v[2] >= 40)} END {exit !ok}'
+}
 # The long output of apt, the fleet install and the dashboard goes to logs in this user's own
 # folder. A fixed name in /tmp would belong to the first user who ran the installer, and a second
 # user on the same machine could not write it.
@@ -125,7 +131,7 @@ preflight() {
   for pkg in git tmux python3 curl ca-certificates; do
     dpkg -s "$pkg" >/dev/null 2>&1 || { missing_now+=("$pkg"); apt_now+=("$pkg"); }
   done
-  have gh || missing_now+=("gh")
+  { have gh && gh_new_enough; } || missing_now+=("gh")
   if [ ${#missing_now[@]} -eq 0 ]; then return 0; fi
   if [ "$(id -u)" = 0 ]; then return 0; fi
   if sudo -n true >/dev/null 2>&1; then return 0; fi
@@ -136,7 +142,7 @@ preflight() {
   fi
   local gh_note=""
   case " ${missing_now[*]} " in *" gh "*)
-    gh_note=" (gh comes from GitHub's own apt repository: https://github.com/cli/cli/blob/trunk/docs/install_linux.md)";;
+    gh_note=" (gh 2.40 or newer comes from GitHub's own apt repository: https://github.com/cli/cli/blob/trunk/docs/install_linux.md)";;
   esac
   local apt_line="sudo apt-get update && sudo apt-get install -y ${apt_now[*]}"
   [ ${#apt_now[@]} -gt 0 ] || apt_line="the command for gh below"
@@ -166,8 +172,12 @@ python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
   || die "python3 is $pyv; murmur needs 3.11 or newer. Ubuntu 24.04 and later and Debian 12 ship 3.11 or newer and work as they are. On Ubuntu 22.04 run: $py311_line, then run this installer again"
 note "python3 $pyv"
 
-if ! have gh; then
-  note "installing GitHub's CLI from its own repository"
+if ! have gh || ! gh_new_enough; then
+  if have gh; then
+    note "gh $(gh --version | head -1 | awk '{print $3}') is too old (murmur needs 2.40 or newer); installing GitHub's own package over it"
+  else
+    note "installing GitHub's CLI from its own repository"
+  fi
   sudo mkdir -p -m 755 /etc/apt/keyrings
   curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
   sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
