@@ -253,6 +253,7 @@ class Steps(Laptop):
         self.touch("gh-logged-in")
         done = self.farm("finish", "--wait", "10", expect=0)
         self.assertIn("installed", done["said"])
+        self.assertEqual(done["next"], "logins")                       # never straight to open
         self.farm("finish", "--wait", "10", expect=0)
         with open(os.path.join(self.remote, "install-launches"), encoding="utf-8") as handle:
             self.assertEqual(len(handle.read().splitlines()), 1)         # never twice
@@ -263,8 +264,10 @@ class Steps(Laptop):
         waiting = self.farm("logins", expect=2)
         self.assertIn("/home/farm/.local/bin/claude", waiting["run_in_your_terminal"][0])
         self.write_accounts([{"name": "default", "logged_in": True, "email": "p@example.com"}])
-        self.farm("logins", expect=0)
+        self.assertEqual(self.farm("logins", expect=0)["next"], "open")
         self.assertEqual(self.farm("status")["next"], "open")
+        # Once the logins are done, a reinstall leads straight to open.
+        self.assertEqual(self.farm("finish", "--wait", "10", expect=0)["next"], "open")
         opened = self.farm("open", expect=0)
         self.assertTrue(opened["url"].startswith("http://127.0.0.1:"))
         self.farm("open", "--stop", expect=0)
@@ -1340,6 +1343,7 @@ class Tailscale(Laptop):
         self.key_file()
         joined = self.farm("tailscale", expect=0)
         self.assertEqual(joined["url"], f"http://127.0.0.1:{port}")
+        self.assertEqual(joined["next"], "logins")
         with open(os.path.join(self.remote, "ts-key-received"), encoding="utf-8") as handle:
             self.assertEqual(handle.read().strip(), TS_KEY_TEXT)
         for call in self.calls():
@@ -1359,8 +1363,13 @@ class Tailscale(Laptop):
         self.assertIn("chmod 600", refused["said"])
         self.assertFalse(self.flag("ts-key-received"))
 
+    def test_the_tunnel_farm_goes_from_tailscale_to_logins(self):
+        self.ready()
+        self.assertEqual(self.farm("tailscale", expect=0)["next"], "logins")
+
     def assert_fell_back(self, answer):
         self.assertEqual(answer["access"], "tunnel")
+        self.assertEqual(answer["next"], "logins")
         events = self.events()
         bind_at = events.index("env FLEET_DASH_BIND=127.0.0.1", events.index("install"))
         self.assertIn("restart", events[bind_at:])

@@ -15,8 +15,8 @@
     ssh-config      the `Host <name>` block in ~/.ssh/config, and the first, pinning probe
     finish          GitHub on the box (your terminal), then clone and install, non-interactive
     tailscale       join the box to your tailnet, or fall back to the tunnel and say why
-    open            the dashboard in your browser (a tunnel, or the tailnet address)
     logins          Claude subscriptions and Codex: the commands for your terminal, verified
+    open            the dashboard in your browser (a tunnel, or the tailnet address)
     forget-attempt  drop a create whose answer was lost and whose droplet never appeared
     status          where the flow stands and the next step
 
@@ -1314,10 +1314,11 @@ def cmd_finish(args, state):
     _code, active, _err = on_farm(name, ["systemctl", "--user", "is-active", UNIT], timeout=30)
     state.setdefault("farm", {})["finished"] = True
     save_state(state)
+    step = next_for(state)
     said = f"the fleet is installed on {name}; the dashboard service is {active.strip() or '?'}"
-    if access == "tailscale":
+    if step == "tailscale":
         said += "; next, `tailscale` joins the farm to your tailnet"
-    return DONE, {"said": said, "next": "tailscale" if access == "tailscale" else "open"}
+    return DONE, {"said": said, "next": step}
 
 
 # ------------------------------------------------------------------------------- tailscale
@@ -1367,14 +1368,14 @@ def fall_back_to_tunnel(name, state, reason):
     state.setdefault("farm", {})["fallback"] = reason
     save_state(state)
     return DONE, {"said": f"the page is reached through the ssh tunnel instead: {reason}",
-                  "access": "tunnel", "next": "open"}
+                  "access": "tunnel", "next": next_for(state)}
 
 
 def cmd_tailscale(args, state):
     name, _address = remote_ready(state)
     if need(state, "access")[0] != "tailscale":
         return DONE, {"said": "this farm is reached through the tunnel; nothing to do",
-                      "next": "open"}
+                      "next": next_for(state)}
     usable, reason = tailscale_on_laptop()
     if not usable:
         return fall_back_to_tunnel(name, state, reason)
@@ -1414,7 +1415,7 @@ def cmd_tailscale(args, state):
     state.setdefault("farm", {})["tailnet"] = tailnet
     save_state(state)
     return DONE, {"said": f"the farm is on your tailnet at {tailnet}; the page answers at {url}",
-                  "url": url, "next": "open"}
+                  "url": url, "next": next_for(state)}
 
 
 # ------------------------------------------------------------------------------------ open
@@ -1671,7 +1672,7 @@ def cmd_logins(args, state):
             "each as its own email")
     if codex:
         said += "; Codex is installed and logged in"
-    return DONE, {"said": said, "accounts": [rows[a] for a in expected]}
+    return DONE, {"said": said, "accounts": [rows[a] for a in expected], "next": next_for(state)}
 
 
 def codex_step(name, args):
@@ -1773,6 +1774,12 @@ def next_step(state, row):
     if not farm.get("logins"):
         return "logins"
     return "open"
+
+
+def next_for(state):
+    """The step `status` would name next, for a step that has just done its part."""
+    name = answers(state).get("name")
+    return next_step(state, machines.read_registry().get(name) if name else None)
 
 
 def cmd_status(args, state):
