@@ -241,6 +241,14 @@ class InstalledCopy(unittest.TestCase):
         self.assertIn("#cloud-config", plan["cloud_init"])
         self.assertIn("not a live price", plan["said"])
 
+    def test_skills_are_never_written_from_the_installed_copy(self):
+        # The copies would point into a folder that goes with the next update of the plugin.
+        result = self.run_script("murmur_skills.py", "install")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("not in a clone of murmur", result.stderr)
+        self.assertFalse((self.tmp / ".agents").exists())
+
     def test_doctor_runs_from_the_installed_copy(self):
         result = self.run_script("murmur_doctor.py")
         self.assertNotIn("Traceback", result.stdout + result.stderr)
