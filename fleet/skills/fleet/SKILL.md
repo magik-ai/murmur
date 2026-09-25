@@ -65,10 +65,8 @@ Never spawn without an explicit go from the user.
 3. **Check capacity.** Run `fleet capacity` right before you spawn
    (`fleet metrics` has the detail). It prints `OK` or `BLOCK`, the level in
    brackets (`ok`, `warn` or `block`) and the reasons. On `BLOCK` or `[warn]`,
-   tell the user and either hold or spawn fewer agents. A `warn` whose only
-   reason is `CPU temp UNKNOWN` is normal on a machine without a temperature
-   sensor: spawn as planned. Never overload the farm, and never pass `--force`
-   unless the user asks for it.
+   tell the user and either hold or spawn fewer agents. Never overload the
+   farm, and never pass `--force` unless the user asks for it.
 4. **Spawn**, one call per approved lane:
 
    ```bash

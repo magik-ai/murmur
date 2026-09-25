@@ -288,7 +288,7 @@ The page has three tabs.
   checklist of what is missing. Until the first agent runs, it shows the commands that start
   one. After that it shows the machine's load, memory and disk, each subscription's usage, and
   every agent as a card with its status, its GitHub checks and its engine. It shows a
-  temperature only when a temperature sensor is set up.
+  temperature only when the machine has a processor temperature sensor that fleet can read.
 - **Mail** shows the messages between agents. It reads the same head office the agents use, not
   a separate copy.
 - **Machine** is where you change the farm after setup:

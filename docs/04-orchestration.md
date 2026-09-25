@@ -133,9 +133,7 @@ picks an account with headroom unless you name one with `--account`.
 **Machine capacity.** Check the machine right before you spawn, not at the
 start of the session, and spawn fewer or wait if it says so. On a farm,
 `fleet capacity` checks free memory, free disk, temperatures and the number of
-running agents, and prints `OK` or `BLOCK` with its reasons. A warning whose
-only reason is `CPU temp UNKNOWN` means no temperature sensor answered. On a
-machine without one, that is normal and no reason to spawn fewer.
+running agents, and prints `OK` or `BLOCK` with its reasons.
 
 ## Never spawn without an explicit go
 

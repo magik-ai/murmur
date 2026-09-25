@@ -107,12 +107,11 @@ function gpuTile(context, metrics) {
 
 function heatTile(context, metrics) {
   if (!context.features.cpu_temp) {
-    return tile("Temperature", "Not configured",
-      "No temperature sensor is enabled here.", null);
+    return tile("Temperature", "Not measured",
+      "This machine has no processor temperature sensor that fleet can read.", null);
   }
   if (metrics.cpu_temp_c == null) {
-    return tile("Temperature", "No answer",
-      metrics.sensors_unavailable ? "The sensor package is not installed." : "The sensor returned nothing.",
+    return tile("Temperature", "No answer", "The sensor returned nothing on the last read.",
       null);
   }
   return tile("Temperature", `${fmt.decimal(metrics.cpu_temp_c, 0)} C`,

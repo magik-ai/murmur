@@ -53,6 +53,11 @@ def main():
     print("--- no sensors configured ---")
     metrics = load("metrics", {"FLEET_LHM_URL": None, "FLEET_NVIDIA_SMI": "",
                                "FLEET_STATE": state, "PATH": "/nonexistent"})
+    # The Linux sensors are read from /sys; point the module at an empty folder instead, so the
+    # answer does not depend on the machine this suite runs on.
+    no_sys = pathlib.Path(state) / "sys-without-sensors"
+    no_sys.mkdir()
+    metrics.SYS_CLASS = str(no_sys)
     check("no default LibreHardwareMonitor URL", metrics.LHM_URL == "", repr(metrics.LHM_URL))
     check("nvidia-smi is not guessed at a path", not metrics.NVIDIA, repr(metrics.NVIDIA))
     check("cpu_temp is absent, not an error", metrics.cpu_temp() is None)
@@ -63,6 +68,43 @@ def main():
           str(snapshot["sensors_unavailable"]))
     check("a sensorless farm can still spawn", snapshot["capacity"]["can_spawn"] is True,
           str(snapshot["capacity"]["reasons"]))
+    check("and nothing warns: a temperature that is not measured is not a problem",
+          snapshot["capacity"]["level"] == "ok" and snapshot["capacity"]["warnings"] == [],
+          str(snapshot["capacity"]))
+    check("the temperature says it is not measured",
+          snapshot["cpu_temp_source"] == "not measured", snapshot["cpu_temp_source"])
+
+    print("--- the processor's own Linux sensor ---")
+    def fake_sys(name, files, kind="hwmon"):
+        root = pathlib.Path(tempfile.mkdtemp(prefix="sys-", dir=state))
+        folder = root / kind / ("hwmon0" if kind == "hwmon" else "thermal_zone0")
+        folder.mkdir(parents=True)
+        (folder / ("name" if kind == "hwmon" else "type")).write_text(name + "\n")
+        for file, value in files.items():
+            (folder / file).write_text(value + "\n")
+        return str(root)
+
+    metrics.SYS_CLASS = fake_sys("coretemp", {"temp1_input": "52000", "temp2_input": "48000"})
+    snapshot = metrics.collect()
+    check("coretemp (Intel) is read, the hottest input first",
+          snapshot["cpu_temp_c"] == 52.0 and snapshot["cpu_temp_source"] == "coretemp (Linux)",
+          f"{snapshot['cpu_temp_c']} {snapshot['cpu_temp_source']}")
+    check("and it is no longer reported unavailable",
+          "cpu_temp" not in snapshot["sensors_unavailable"], str(snapshot["sensors_unavailable"]))
+    metrics.SYS_CLASS = fake_sys("x86_pkg_temp", {"temp": "61000"}, kind="thermal")
+    check("a thermal zone of the processor's package is read",
+          metrics.cpu_temp_reading() == (61.0, "x86_pkg_temp (Linux)"),
+          str(metrics.cpu_temp_reading()))
+    metrics.SYS_CLASS = fake_sys("acpitz", {"temp": "27800"}, kind="thermal")
+    check("a zone that is not the processor's is not taken for it",
+          metrics.cpu_temp_reading() == (None, "not measured"), str(metrics.cpu_temp_reading()))
+    metrics.SYS_CLASS = fake_sys("k10temp", {"temp1_input": "95000"})
+    snapshot = metrics.collect()
+    check("a hot processor still blocks a spawn",
+          snapshot["capacity"]["can_spawn"] is False
+          and "CPU 95.0C > 92C" in snapshot["capacity"]["reasons"],
+          str(snapshot["capacity"]))
+    metrics.SYS_CLASS = str(no_sys)
 
     mode = load("mode", {"FLEET_LHM_URL": None, "FLEET_NVIDIA_SMI": "",
                          "FLEET_STATE": state, "PATH": "/nonexistent"})

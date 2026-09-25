@@ -2228,7 +2228,8 @@ class DashboardConfigTest(unittest.TestCase):
 
     def test_a_bare_machine_reports_every_optional_part_as_absent(self):
         with fake_tools({}), mock.patch.object(dashboard.M, "NVIDIA", None), \
-                mock.patch.object(dashboard.M, "LHM_URL", ""):
+                mock.patch.object(dashboard.M, "LHM_URL", ""), \
+                mock.patch.object(dashboard.M, "SYS_CLASS", "/nonexistent"):
             payload = self.refreshed()
         self.assertEqual(payload["title"], "murmur")
         self.assertEqual(payload["version"], "abc1234")
@@ -2252,6 +2253,20 @@ class DashboardConfigTest(unittest.TestCase):
         self.assertEqual(payload["features"], {"hq": True, "slice": True, "gpu": True,
                                                "cpu_temp": True, "forge": "github",
                                                "health_panel": True})
+
+    def test_the_processors_linux_sensor_is_a_temperature_feature(self):
+        # Most Linux machines with a sensor have one the kernel reads; no LibreHardwareMonitor.
+        with tempfile.TemporaryDirectory() as sys_class:
+            hwmon = pathlib.Path(sys_class, "hwmon", "hwmon0")
+            hwmon.mkdir(parents=True)
+            (hwmon / "name").write_text("k10temp\n")
+            (hwmon / "temp1_input").write_text("47000\n")
+            with fake_tools({}), mock.patch.object(dashboard.M, "LHM_URL", ""), \
+                    mock.patch.object(dashboard.M, "SYS_CLASS", sys_class):
+                self.assertTrue(dashboard.config_payload()["features"]["cpu_temp"])
+                state, detail, _fix = dashboard._check_cpu_temp_sensor()
+        self.assertEqual(state, "ok")
+        self.assertIn("k10temp", detail)
 
     def test_the_health_section_is_off_unless_the_farm_asks_for_it(self):
         for value, expected in (("", False), ("off", False), ("0", False), ("on", True),
@@ -2325,7 +2340,8 @@ class DashboardHealthTest(unittest.TestCase):
 
     def test_a_bare_machine_names_what_is_missing_and_how_to_get_it(self):
         with fake_tools({}), mock.patch.object(dashboard.M, "NVIDIA", None), \
-                mock.patch.object(dashboard.M, "LHM_URL", ""):
+                mock.patch.object(dashboard.M, "LHM_URL", ""), \
+                mock.patch.object(dashboard.M, "SYS_CLASS", "/nonexistent"):
             rows = self.rows()
         self.assertEqual(set(rows), {"gh", "tmux", "systemd_user", "linger", "hq", "claude",
                                      "codex", "gpu_sensor", "cpu_temp_sensor", "sweep_timer",
