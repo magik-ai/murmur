@@ -46,6 +46,8 @@ KEYS = [
     "farm",
 ]
 STALE_DAYS = 7
+# The agents run in Claude Code or in Codex, and one of the two is enough.
+ENGINES = ("claude", "codex")
 
 OK, WARN, MISSING, OPTIONAL, FIXED = "ok", "warning", "missing", "optional", "fixed"
 
@@ -219,6 +221,17 @@ def check_tool(report: Report, name: str, why: str, required: bool) -> str | Non
     return None
 
 
+def check_engines(report: Report) -> None:
+    found = {name: shutil.which(name) for name in ENGINES}
+    if not any(found.values()):
+        report.add("engines", MISSING,
+                   "neither claude nor codex is on the path, the agents run in one of them")
+        return
+    report.add("engines", OK, "; ".join(f"{name} at {path}" if path else
+                                        f"{name} is not on the path"
+                                        for name, path in found.items()))
+
+
 def check_gh(report: Report) -> None:
     if not shutil.which("gh"):
         report.add("gh", WARN, "not on the path, the tracker and PR steps need it")
@@ -316,7 +329,7 @@ def main() -> int:
     check_tool(report, "uv", "the scripts here run with uv run", True)
     check_gh(report)
     check_tracker(root, report, config)
-    check_tool(report, "claude", "the agents run in it", True)
+    check_engines(report)
     check_stale_branches(root, report)
     check_optional(report, config)
     status = final_status(report)

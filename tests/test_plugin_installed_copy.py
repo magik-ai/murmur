@@ -257,6 +257,59 @@ class InstalledCopy(unittest.TestCase):
         result = self.run_script("murmur_doctor.py")
         self.assertRegex(result.stdout, r"base branch +ok +release/2\.x exists on origin")
 
+    def git(self, *args, cwd=None):
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.tmp)}
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                       cwd=cwd or self.project, env=env, check=True, capture_output=True)
+
+    def pushed_setup(self):
+        """init with the defaults, committed on main and pushed to a bare origin."""
+        origin = self.tmp / "origin.git"
+        self.git("init", "-q", "--bare", str(origin), cwd=self.tmp)
+        self.git("remote", "add", "origin", str(origin))
+        self.apply_report()
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "Set up murmur")
+        self.git("branch", "-M", "main")
+        self.git("push", "-q", "-u", "origin", "main")
+
+    def doctor(self, *programs):
+        """The doctor's rows as {check: (state, detail)}, its status and its exit code. The PATH
+        holds git and, for each program named, a stand-in that exits 0 (`gh auth status` too),
+        so a claude or codex installed on this machine never answers for the one missing."""
+        path = Path(tempfile.mkdtemp(prefix="bin-", dir=self.tmp))
+        (path / "git").symlink_to(shutil.which("git", path="/usr/bin:/bin") or shutil.which("git"))
+        for name in programs:
+            (path / name).write_text("#!/bin/sh\nexit 0\n")
+            (path / name).chmod(0o755)
+        result = subprocess.run([sys.executable, str(self.plugin / "scripts" / "murmur_doctor.py")],
+                                cwd=self.project, env={"PATH": str(path), "HOME": str(self.tmp)},
+                                capture_output=True, text=True, timeout=60)
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
+        rows = {}
+        for line in result.stdout.splitlines()[2:]:
+            found = re.match(r"(\S.*?)  +(ok|warning|missing|optional|fixed)  +(.*)$", line)
+            if found:
+                rows[found.group(1)] = (found.group(2), found.group(3))
+        return rows, result.stdout.rpartition("status: ")[2].strip(), result.returncode
+
+    def test_doctor_takes_claude_or_codex_as_the_engine_and_says_which(self):
+        self.pushed_setup()
+        for engines in (("claude",), ("codex",), ("claude", "codex")):
+            with self.subTest(engines=engines):
+                rows, _status, code = self.doctor("uv", "gh", *engines)
+                state, detail = rows["engines"]
+                self.assertEqual(state, "ok")
+                for name in ("claude", "codex"):
+                    said = f"{name} at " if name in engines else f"{name} is not on the path"
+                    self.assertIn(said, detail)
+                self.assertEqual(code, 0)
+        rows, status, code = self.doctor("uv", "gh")
+        self.assertEqual(rows["engines"], (
+            "missing", "neither claude nor codex is on the path, the agents run in one of them"))
+        self.assertNotIn("claude", rows)
+        self.assertEqual((status, code), ("setup-required", 1))
+
 
 if __name__ == "__main__":
     unittest.main()
