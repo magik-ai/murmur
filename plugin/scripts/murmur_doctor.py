@@ -302,8 +302,11 @@ def check_published(root: Path, report: Report, base: str) -> None:
     if shown is None or shown.returncode != 0:
         faults.append(f"origin/{base} has no {CONTRACT} as of the last fetch")
     if faults:
+        # Committed but not on the base branch yet usually means a pull request waits.
+        advice = ("commit the setup, push it and merge its pull request" if loose else
+                  "merge the pull request that carries it (or push it), then git fetch")
         report.add("setup pushed", WARN, "; ".join(faults) + f"; lanes start from origin/{base},"
-                   " so commit and push the setup")
+                   f" so {advice}")
     else:
         report.add("setup pushed", OK, f"committed, and origin/{base} has {CONTRACT}")
 

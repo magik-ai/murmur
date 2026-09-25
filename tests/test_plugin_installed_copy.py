@@ -389,7 +389,8 @@ class InstalledCopy(unittest.TestCase):
         self.assertIn("not committed: .claude/generated-files.txt, .claude/tracker.md", detail)
         self.assertIn(".murmur/contract.md, CLAUDE.md, docs/GOTCHAS.md;", detail)
         self.assertTrue(detail.endswith(
-            "; lanes start from origin/main, so commit and push the setup"), detail)
+            "; lanes start from origin/main, so commit the setup, push it and merge its"
+            " pull request"), detail)
 
         # Pushed on a branch of its own, and not merged yet: main at origin has no contract.
         self.git("switch", "-q", "-c", "murmur-setup")
@@ -398,7 +399,8 @@ class InstalledCopy(unittest.TestCase):
         self.git("push", "-q", "-u", "origin", "murmur-setup")
         rows, _status, _code = self.doctor("uv", "gh", "claude")
         not_yet = ("warning", "origin/main has no .murmur/contract.md as of the last fetch; lanes "
-                              "start from origin/main, so commit and push the setup")
+                              "start from origin/main, so merge the pull request that carries it "
+                              "(or push it), then git fetch")
         self.assertEqual(rows["setup pushed"], not_yet)
 
         # Merged from another clone: the doctor never fetches, so it sees the merge only after

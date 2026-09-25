@@ -12,7 +12,8 @@ Keep your user in the loop:
   action, ask them to do it in their own terminal window, and wait until they
   say it is done. Never ask for a password, token or key in the chat.
 - If a command fails, show its message to your user and stop. Do not work
-  around it.
+  around it. (A check that ends in `|| true` below may print nothing or exit
+  non-zero; that is its answer, not a failure.)
 - Never commit, stash or discard your user's own changes.
 - Every step is safe to run again. If murmur is already installed, the steps
   check it, update what is old and skip the rest. An install that stopped
@@ -24,7 +25,7 @@ after you install a tool, call it by its full path, as the steps below do.
 ## 1. Check the computer
 
 ```bash
-uname -s; grep -i microsoft /proc/version 2>/dev/null
+uname -s; grep -i microsoft /proc/version 2>/dev/null || true
 ```
 
 - `Darwin`: a Mac.
@@ -43,7 +44,7 @@ uname -s; grep -i microsoft /proc/version 2>/dev/null
 Check each tool, and install only what is missing:
 
 ```bash
-git --version; gh --version; uv --version
+git --version; gh --version; uv --version; curl --version | head -1
 ```
 
 **On a Mac.**
@@ -74,6 +75,8 @@ git --version; gh --version; uv --version
   ```bash
   sudo apt-get update && sudo apt-get install -y git gh curl
   ```
+
+  (On a Mac, curl is already there.)
 
   If apt has no `gh` package, GitHub's own instructions add it:
   <https://github.com/cli/cli/blob/trunk/docs/install_linux.md>.
@@ -109,10 +112,10 @@ When they say it is done, run `gh auth status` again.
 Commits need a name and an email:
 
 ```bash
-git config --global user.name; git config --global user.email
+git config --global user.name || true; git config --global user.email || true
 ```
 
-If either is empty, ask your user what to use. Suggest their GitHub name and
+If either is empty, ask your user what to use. Suggest their GitHub login and
 their private GitHub address, which this prints:
 
 ```bash
@@ -169,7 +172,11 @@ Work from the repository's top folder:
 
 ```bash
 git rev-parse --show-toplevel && git remote get-url origin
+gh repo view --json nameWithOwner,viewerPermission,defaultBranchRef
 ```
+
+`viewerPermission` must be `ADMIN`, `MAINTAIN` or `WRITE`, and
+`defaultBranchRef.name` is the base branch to suggest when init asks for it.
 
 - Not inside a git repository: ask your user which repository to set up, clone
   it with `gh repo clone OWNER/NAME`, and go into it. If they have none, offer
@@ -189,10 +196,12 @@ Run these from the repository's top folder.
    uv run ~/work/murmur/plugin/scripts/murmur_init.py questions
    ```
 
-   It prints a JSON list. Each item has an `id`, a `prompt`, `choices` and a
-   `default`. Ask your user one question at a time: show the choices and the
-   default, and wait for the reply. `ok` or an empty reply means the default.
-   Store each answer before you ask the next question:
+   It prints a JSON list. Each item has an `id`, a `prompt`, a `type`,
+   `choices` and a `default`. Ask your user one question at a time: show the
+   choices and the default, and wait for the reply. An item with
+   `"multiple": true` takes several values, separated by commas. `ok` or an
+   empty reply means the default: store the default as the value. Store each
+   answer before you ask the next question:
 
    ```bash
    uv run ~/work/murmur/plugin/scripts/murmur_init.py answer --id ID --value VALUE
@@ -206,14 +215,27 @@ Run these from the repository's top folder.
    uv run ~/work/murmur/plugin/scripts/murmur_init.py apply
    ```
 
-   Add `--defaults` if your user chose the defaults, and `--agents-md` if they
-   use Codex: Codex reads `AGENTS.md`, so murmur then points it at the contract
-   too. Tell your user in plain words what the report says it wrote:
+   Add `--defaults` only if you skipped the questions. Ask your user whether
+   they also use Codex; if they do, or if you are Codex, add `--agents-md`:
+   Codex reads `AGENTS.md`, so murmur then points it at the contract too.
+
+   Before you run it, check `git status`. If `CLAUDE.md` or `AGENTS.md` has
+   uncommitted edits of your user's, murmur appends to that same file, and the
+   commit below would carry their edits too: tell your user, and let them commit
+   their edits first.
+
+   Tell your user in plain words what the report says it wrote:
    - A `.murmur-new` file means two versions now sit side by side. Your user
      keeps one; never commit a `.murmur-new` file.
    - If it created `CLAUDE.md`, its entry lists `placeholders` such as `<NAME>`
-     and `<DOC>`. Offer to fill them in with your user now, one at a time, or
-     leave them for later.
+     and `<DOC>`. Go through them with your user, one at a time: show the line
+     each one is in, ask for the value, and delete the line if it does not
+     apply to their project. Never make a value up. They may also leave them
+     for later. `<OWNER>`, `<TRACKER>` and `<FARM>` are not blanks: the skills
+     fill them in, so leave them.
+   - If it wrote `.claude/generated-files.txt`, it starts with example entries,
+     and edits to those paths are now blocked. Ask your user which files in
+     their repository are generated, put those in instead, or delete the file.
 3. Save the setup on GitHub. Agents start their branches from GitHub, so they
    do not see files that exist only on this computer. Show your user what
    murmur wrote, and with their yes commit exactly those files, never their own
@@ -237,8 +259,12 @@ Run these from the repository's top folder.
      git add <the files the apply report lists>
      git commit -m "Set up murmur"
      git push -u origin murmur-setup
-     gh pr create --fill
+     gh pr create --fill --base main
      ```
+
+     On a second run, skip what is done: if `gh pr view murmur-setup` shows an
+     open pull request, add any new setup files to that branch instead; if
+     none of the setup files changed, there is nothing to commit.
 
      Ask your user to merge it; never merge it yourself. Tell them they are now
      on the `murmur-setup` branch, and that `git switch -` takes them back.
@@ -293,8 +319,8 @@ Ask which way they prefer.
   for the first agent. A server that has only `root` needs an ordinary user
   first: `adduser NAME && usermod -aG sudo NAME`, then log in as that user. If
   you yourself run on that machine, gh is signed in and `sudo -n true`
-  succeeds, you may run the installer for them with `--yes`, which takes every
-  default.
+  succeeds, you may run the installer for them with every default:
+  `curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash -s -- --yes`.
 - **A Windows PC with WSL** works like a Linux computer, once systemd is on in
   WSL and two settings keep WSL running when its window closes:
   <https://github.com/magik-ai/murmur/blob/main/docs/12-the-machine.md#what-the-machine-must-be>.
