@@ -567,7 +567,8 @@ work is in the base branch. The full rules are in [`SWEEP.md`](SWEEP.md).
 ### `fleet clean`
 
 `fleet clean` removes the worktree and the card of finished lanes: status `done`, `done_no_pr`,
-`pr_open`, `failed`, `ended` or `killed`. It also removes a record that still says running when
+`pr_open`, `failed`, `ended` or `killed`, or the supervisor daemon's `delivered`, `gave_up`,
+`respawned` or `respawn_failed`. It also removes a record that still says running when
 its unit has been gone for 15 minutes. An open pull request does not stop `clean`, because the
 branch is on GitHub. What stops it is work that exists nowhere else:
 
