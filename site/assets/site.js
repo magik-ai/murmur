@@ -61,8 +61,13 @@
     Array.prototype.forEach.call(tabs, function (tab, index) {
       tab.addEventListener("click", function () { choose(tab); });
       tab.addEventListener("keydown", function (event) {
-        if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
-        var next = tabs[(index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+        var next;
+        if (event.key === "ArrowRight") next = tabs[(index + 1) % tabs.length];
+        else if (event.key === "ArrowLeft") next = tabs[(index + tabs.length - 1) % tabs.length];
+        else if (event.key === "Home") next = tabs[0];
+        else if (event.key === "End") next = tabs[tabs.length - 1];
+        else return;
+        event.preventDefault();
         choose(next);
         next.focus();
       });
