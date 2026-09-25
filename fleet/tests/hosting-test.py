@@ -377,6 +377,10 @@ class Create(Farm):
                             "--size", "s-4vcpu-8gb", "--region", "fra1",
                             "--pubkey-file", self.pubkey, "--confirm-usd", "24")
         self.assertIn("the price moved", said)
+        # The same words reach the dashboard and /murmur:farm on a laptop, where there is no
+        # `fleet` to run, so they name the step, not one command.
+        self.assertIn("run the plan again and confirm the new price", said)
+        self.assertNotIn("fleet machines plan", said)
         self.assertEqual(self.read_droplets(), [])
 
     def test_a_stale_price_is_refused_when_the_provider_has_moved_on(self):
