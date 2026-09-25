@@ -1481,7 +1481,7 @@ def create_droplet(name, size, region, person_key, confirm_usd, tailscale=False,
     if abs(typed - usd(price)) > 0.005:
         raise Refused(f"the price moved: you confirmed ${typed:g} a month and "
                       f"{size} costs ${price:g} a month ({note}). Nothing was created; "
-                      f"run `fleet machines plan` again and confirm the new price")
+                      "run the plan again and confirm the new price")
     if source != "live":
         raise Refused(f"DigitalOcean did not give a live price for {size} ({note}), so this "
                       "farm will not buy a droplet on an old number; log doctl in and try again")
