@@ -67,6 +67,18 @@ printf '[hq]\nenabled = true\n' > "$FLEET_CONFIG/policy.toml"
 out=$(PATH="$PATH_WITHOUT_HQ" _hq_gate 2>/dev/null)
 is "enabled = true cannot conjure a binary" "$out" "0"
 
+# fleet run over ssh without a login shell (the laptop shim) may have no ~/.local/bin on PATH,
+# where hq installs. bin/fleet puts it there itself, once.
+SHIM_HOME="$ROOT/shimhome"; mkdir -p "$SHIM_HOME/.local/bin"
+printf '#!/bin/sh\nexit 0\n' > "$SHIM_HOME/.local/bin/hq"; chmod +x "$SHIM_HOME/.local/bin/hq"
+bare_path="$(dirname "$(command -v python3)"):/usr/bin:/bin"
+found=$(HOME="$SHIM_HOME" PATH="$bare_path" FLEET_STATE="$ROOT/shimstate" \
+  bash -c 'source "$1" help >/dev/null; command -v hq' _ "$FLEET_BIN")
+is "fleet finds hq in ~/.local/bin when PATH leaves it out" "$found" "$SHIM_HOME/.local/bin/hq"
+twice=$(HOME="$SHIM_HOME" PATH="$SHIM_HOME/.local/bin:$bare_path" FLEET_STATE="$ROOT/shimstate" \
+  bash -c 'source "$1" help >/dev/null; printf %s "$PATH"' _ "$FLEET_BIN")
+is "and adds nothing when PATH has it already" "$twice" "$SHIM_HOME/.local/bin:$bare_path"
+
 echo "=== the head office push guard a lane gets ==="
 
 # The claims hook cmd_spawn writes into a lane, taken out by its heredoc marker. hq here is a fake

@@ -824,7 +824,8 @@ Each entry starts with what you see, then says what to do.
 ### Setup and access
 
 **`fleet: command not found` over ssh.** A non-interactive ssh session usually has no
-`~/.local/bin` on its `PATH`. Call `~/.local/bin/fleet` by its full path, as the shim does.
+`~/.local/bin` on its `PATH`. Call `~/.local/bin/fleet` by its full path, as the shim does. fleet
+then adds `~/.local/bin` to its own `PATH`, so it still finds `hq` and the engine CLIs there.
 
 **The sweep, the daemon or the lanes stop when you log out.** Linger is off. Run
 `loginctl enable-linger "$USER"` (with `sudo` if it asks), then check it with

@@ -30,6 +30,11 @@ _load_env_file() {
 }
 _load_env_file
 
+# hq, uv and both engine CLIs install into ~/.local/bin. A command run over ssh without a login
+# shell, like the laptop shim, often has no ~/.local/bin on PATH. Without it `command -v hq` fails,
+# and head office quietly switches off for the lanes that command spawns.
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH";; esac
+
 # Playwright's browsers ship without their OS libraries. A host with no passwordless sudo keeps
 # the .debs unpacked user-locally, under the path below. Without this a lane's Chromium dies with
 # "libnspr4.so: cannot open shared object file" and the agent reports a farm limitation rather than
