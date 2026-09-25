@@ -103,15 +103,23 @@ class InstalledCopy(unittest.TestCase):
         again = self.apply_report("--agents-md")["AGENTS.md"]
         self.assertEqual((again["action"], again["note"]), ("skipped", "pointer there"))
         self.assertEqual((self.project / "AGENTS.md").read_text(), text)
+        # The CLAUDE.md came first, with no AGENTS.md to import.
+        self.assertFalse((self.project / "CLAUDE.md").read_text().startswith("@AGENTS.md"))
 
     def test_an_agents_md_the_person_wrote_keeps_its_text_and_gets_the_pointer_once(self):
         (self.project / "AGENTS.md").write_text("# Our product\n\nWhat it is.\n")
-        self.assertEqual(self.apply_report("--agents-md")["AGENTS.md"]["action"], "appended")
+        first = self.apply_report("--agents-md")
+        self.assertEqual(first["AGENTS.md"]["action"], "appended")
         self.assertEqual(self.apply_report("--agents-md")["AGENTS.md"]["action"], "skipped")
         text = (self.project / "AGENTS.md").read_text()
-        self.assertTrue(text.startswith("# Our product\n\nWhat it is.\n\n<!-- murmur:contract -->\n"),
-                        text)
+        self.assertTrue(
+            text.startswith("# Our product\n\nWhat it is.\n\n<!-- murmur:contract -->\n"), text)
         self.assertEqual(text.count("<!-- murmur:contract -->"), 1)
+        # Claude Code reads AGENTS.md only while there is no CLAUDE.md: the new one imports it.
+        law = (self.project / "CLAUDE.md").read_text()
+        self.assertTrue(law.startswith("@AGENTS.md\n\n<!--"), law[:80])
+        self.assertIn("importing AGENTS.md", first["CLAUDE.md"]["note"])
+        self.assertEqual(first["CLAUDE.md"]["action"], "wrote")
 
     def test_a_fresh_claude_md_lists_the_placeholders_still_to_fill(self):
         entry = self.apply_report()["CLAUDE.md"]

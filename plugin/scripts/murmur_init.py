@@ -17,6 +17,8 @@ CLAUDE.md or AGENTS.md gets a four-line pointer to the contract, once.
 
 Codex reads AGENTS.md and never CLAUDE.md. `apply --agents-md` writes an
 AGENTS.md that holds only a title and the pointer when the repository has none.
+Claude Code reads AGENTS.md only while there is no CLAUDE.md, so a CLAUDE.md
+written beside an AGENTS.md begins with the line @AGENTS.md, which imports it.
 """
 
 from __future__ import annotations
@@ -408,10 +410,18 @@ def cmd_apply(root: Path, use_defaults: bool = False, agents_md: bool = False) -
     if (root / "CLAUDE.md").is_file():
         add_pointer(root, Path("CLAUDE.md"), base, report)
     else:
-        fresh = (fill_template(without_contract_sections(law), config) + "\n"
+        # Claude Code reads AGENTS.md only while there is no CLAUDE.md, so a new CLAUDE.md
+        # imports the AGENTS.md the repository already has.
+        imports = (root / "AGENTS.md").is_file()
+        fresh = (("@AGENTS.md\n\n" if imports else "")
+                 + fill_template(without_contract_sections(law), config) + "\n"
                  + pointer_block(base) + "\n")
         place(root, Path("CLAUDE.md"), fresh, "managed", report)
-        report[-1]["note"] = "from the template, some placeholders still to fill"
+        if imports:
+            report[-1]["note"] = ("from the template, importing AGENTS.md so Claude Code still "
+                                  "reads it; some placeholders still to fill")
+        else:
+            report[-1]["note"] = "from the template, some placeholders still to fill"
         report[-1]["placeholders"] = placeholders(fresh)
     if (root / "AGENTS.md").is_file():
         add_pointer(root, Path("AGENTS.md"), base, report)
