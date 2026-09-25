@@ -213,7 +213,7 @@ is "a port base that is not a number is refused" "$?" "2"
 echo "=== the shipped example registry ==="
 
 # install.sh copies config/projects.example.toml to ~/.config/fleet/projects.toml verbatim, and
-# the README, `fleet help` and install.sh all end by telling a new operator to register `myproj`.
+# the README and both installers end by telling a new operator to register `myproj`.
 # A live placeholder table under that name made the first command of a fresh install fail.
 EXAMPLE="$(dirname "$FLEET_BIN")/../config/projects.example.toml"
 FRESH="$ROOT/fresh"; mkdir -p "$FRESH/config" "$FRESH/state" "$FRESH/checkout"

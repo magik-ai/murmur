@@ -50,9 +50,8 @@ allow_spawn   = false
 # with no user.email configured would otherwise fail a lane's first commit with
 # "unable to auto-detect email address", which reads as a broken agent; a box
 # that has one would quietly re-author every lane commit as the operator.
-# Set email_format if your deployment wants its own shape. A farm that has been
-# committing under a real address writes that shape here, or the authorship of
-# every later lane commit changes.
+# Set email_format for an address shape of your own. If your lanes already commit
+# under a real address, write that shape here, so their authorship stays the same.
 [identity]
 author_format = "{agent} (agent)"
 # email_format = "you+{agent}@example.com"
@@ -63,13 +62,13 @@ author_format = "{agent} (agent)"
 # glyphs  = ["●", "■", "▲", "◆"]
 # colours = ["#5b8def", "#3fb950", "#d29922", "#a371f7"]
 
-# ── Head office (agent-hq), optional ──────────────────────────────────────────
+# ── Head office (hq), optional ────────────────────────────────────────────────
 # A cross-agent coordination layer: one claim per branch, a pre-push guard that refuses
 # a branch claimed by somebody else, and unread mail folded into a lane's first prompt.
 # It needs the `hq` CLI on PATH first: no binary, no head office, whatever this says.
-# With the binary present, `enabled = false` is the only way to switch it off. Delete the
-# table and every spawn warns and keeps it ON, because a farm that has always run head
-# office must not lose its claims and its mail to an upgrade. An off fleet installs no
+# With the binary present, `enabled = false` is the only way to switch it off. Without
+# this table, every spawn warns and keeps head office on, so a missing table never
+# drops a farm's claims and mail in silence. With head office off, fleet installs no
 # claims hook and adds no AGENT-HQ paragraph to a brief.
 [hq]
 enabled = true
