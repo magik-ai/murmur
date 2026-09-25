@@ -1694,14 +1694,14 @@ def codex_step(name, args):
     if code != 0:
         return ([printed(name, [CODEX_BIN, "login"], extra=["-L", "1455:localhost:1455"])],
                 ["codex"])
-    # The fleet's installer links its skill into ~/.codex/skills only once ~/.codex exists,
-    # which the login has just made.
+    # The fleet's installer links its skill into ~/.agents/skills, where Codex reads a user's
+    # skills, once Codex is on the box (the login has just made ~/.codex).
     on_farm(name, ["bash", f"{REMOTE_REPO}/fleet/install.sh"], timeout=300)
-    code, _out, _err = on_farm(name, ["test", "-L", FARM_HOME + "/.codex/skills/fleet"],
+    code, _out, _err = on_farm(name, ["test", "-L", FARM_HOME + "/.agents/skills/fleet"],
                                timeout=30)
     if code != 0:
         raise Stop("Codex is logged in but the fleet skill is not linked into "
-                   f"{FARM_HOME}/.codex/skills; run `bash {REMOTE_REPO}/fleet/install.sh` on "
+                   f"{FARM_HOME}/.agents/skills; run `bash {REMOTE_REPO}/fleet/install.sh` on "
                    "the farm and look at what it says")
     if args.codex_lane:
         return codex_lane(name, args)
