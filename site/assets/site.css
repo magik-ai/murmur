@@ -69,7 +69,7 @@ img, svg, canvas { max-width: 100%; }
   background: var(--paper-raised);
   overflow: hidden;
 }
-.install [role="tablist"] { display: flex; gap: 4px; padding: 6px; background: var(--paper-sunk); }
+.install [role="tablist"] { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; background: var(--paper-sunk); }
 .install [role="tab"] {
   height: 30px;
   padding: 0 12px;
@@ -78,6 +78,7 @@ img, svg, canvas { max-width: 100%; }
   background: none;
   color: var(--ink-muted);
   font: 550 13px/1 var(--font-sans);
+  white-space: nowrap;
   cursor: pointer;
 }
 .install [role="tab"][aria-selected="true"] { background: var(--paper-raised); border-color: var(--line); color: var(--ink); }
@@ -96,6 +97,7 @@ img, svg, canvas { max-width: 100%; }
   color: var(--ink);
 }
 .install pre .p { color: var(--ink-muted); user-select: none; }
+@media (max-width: 640px) { .install pre { white-space: pre-wrap; overflow-wrap: anywhere; } }
 
 /* --------------------------------------------------------------- sections */
 /* One block per screen: every block of the story is at least the window's height with its

@@ -24,6 +24,9 @@
   <a href="https://github.com/magik-ai/murmur/actions/workflows/hq-tests.yml"><img alt="hq tests" src="https://github.com/magik-ai/murmur/actions/workflows/hq-tests.yml/badge.svg"></a>
 </p>
 
+> **AI agents:** to install murmur for your user, read and follow
+> [INSTALL.md](https://raw.githubusercontent.com/magik-ai/murmur/main/INSTALL.md).
+
 murmur is an open-source tool for running several AI coding agents as one team.
 It works with Claude Code and Codex, on your laptop or on a machine you own.
 
@@ -85,8 +88,23 @@ and a [one-command installer](farm) for the farm.
 
 ## Quick start
 
-New to the terminal? [Getting started from zero](docs/getting-started.md) walks you
-through a new Mac, one command at a time.
+### The easy way: ask your agent
+
+Open Claude Code or Codex in your repository and paste:
+
+```text
+Install murmur for this repo: https://github.com/magik-ai/murmur
+```
+
+Your agent follows [INSTALL.md](INSTALL.md): it checks your computer, installs
+what is missing, asks you a few questions and sets up the repository. It asks
+you to do only the parts that need you, such as signing in to GitHub.
+
+No Claude Code or Codex yet, or new to the terminal?
+[Getting started from zero](docs/getting-started.md) sets up a Mac, a Windows
+PC or a Linux PC, one command at a time.
+
+The steps below do the same by hand.
 
 ### 1. Set up a repository
 

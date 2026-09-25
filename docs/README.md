@@ -2,7 +2,7 @@
 
 The handbook explains the method behind murmur: how to run several coding agents on one repository as a team. Read the chapters in order. Each one gives a rule, the reason for it (often a real incident) and a short list for adopting it in a day. Fill-in files for your own repository are in [`templates/`](../templates/).
 
-New to all of this? [Getting started from zero](getting-started.md) goes from a new Mac to your first team of agents, one command at a time.
+New to all of this? [Getting started from zero](getting-started.md) goes from a new Mac, Windows PC or Linux PC to your first team of agents, one command at a time.
 
 - [00 Start here](00-start-here.md): the four roles, the law file, a plan for your first week, and the words this handbook uses.
 - [01 Repo law](01-repo-law.md): how to write the file that says how work happens in your repository.

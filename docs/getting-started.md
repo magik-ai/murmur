@@ -1,169 +1,170 @@
 # Getting started from zero
 
-This guide takes you from a new Mac to a team of agents that open pull requests
-on your repository. You do not need to know the terminal: copy each command,
-paste it into Terminal and press Return.
+This guide takes you from a new computer to a team of agents that open pull
+requests on your repository. It works on a Mac, on Windows and on Linux. You
+install one program yourself, Claude Code, and it installs the rest. You do not
+need to know the terminal: copy each command, paste it, and press Enter.
 
 You need:
 
 - a GitHub account;
 - a Claude subscription (Pro or Max);
-- a Mac. On Linux or Windows, see [other computers](#other-computers).
+- a computer: a Mac, a Windows PC, or a Linux PC.
 
-Your Mac is where you give agents work and read what they did. Agents can run
-right on it. A **farm**, an always-on machine that keeps agents working while
-your Mac sleeps, is optional: part 4 rents one for you.
+## Step 1. Install Claude Code
 
-## Part 1. Set up the Mac
+Do the part for your computer, then go on to step 2.
 
-You do this once. It takes about 15 minutes.
+### On a Mac
 
-1. Open Terminal: press Cmd+Space, type `Terminal` and press Return.
-2. Install Homebrew, the tool that installs the other tools:
-
-   ```bash
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   ```
-
-   It asks for your Mac password. Nothing appears while you type it; that is
-   normal. When it finishes, it prints a few lines under **Next steps**. Copy
-   them, paste them and press Return.
-3. Install git, GitHub's command-line tool `gh` and `uv`:
-
-   ```bash
-   brew install git gh uv
-   ```
-
-4. Install Claude Code:
+1. Open Terminal: press Cmd+Space, type `Terminal` and press Enter.
+2. Install Claude Code:
 
    ```bash
    curl -fsSL https://claude.ai/install.sh | bash
    ```
 
-   Then close Terminal and open it again, so that it finds the new command.
-5. Sign in to GitHub:
+3. Close Terminal and open it again, so that it finds the new command.
 
-   ```bash
-   gh auth login
+### On Windows
+
+murmur runs on Windows inside WSL: a Linux (Ubuntu) that Windows runs for you.
+You need Windows 11, or Windows 10 version 2004 or newer.
+
+1. Right-click the Start button and choose **Terminal (Admin)**. On Windows 10
+   it is called **Windows PowerShell (Admin)**.
+2. Install WSL, then restart the computer:
+
+   ```powershell
+   wsl --install
    ```
 
-   Choose `GitHub.com`, then `HTTPS`, answer `Y`, then choose
-   `Login with a web browser`. Copy the code it shows, press Return, and paste
-   the code in the browser.
-6. Sign in to Claude:
+3. After the restart, open **Ubuntu** from the Start menu. It asks you to choose
+   a user name and a password.
+4. In the Ubuntu window, install Claude Code. To paste in Ubuntu, right-click
+   or press Ctrl+Shift+V:
 
    ```bash
-   claude
+   curl -fsSL https://claude.ai/install.sh | bash
    ```
 
-   The first time, it asks how to sign in. Choose your Claude subscription, not
-   an API key, and finish in the browser. Then type `/exit`.
+5. Close Ubuntu and open it again. From now on, do everything in Ubuntu, not in
+   PowerShell.
 
-## Part 2. Set up your repository
+### On Linux
 
-7. Copy your repository to the Mac and go into its folder:
+1. Open a terminal.
+2. Install Claude Code:
 
    ```bash
-   gh repo clone your-name/your-repo
-   cd your-repo
+   curl -fsSL https://claude.ai/install.sh | bash
    ```
 
-   No repository yet? Create one with `gh repo create my-app --private --clone`,
-   then `cd my-app`.
-8. Start Claude Code in that folder:
+   If it says `curl: command not found`, run `sudo apt install -y curl` first.
+3. Close the terminal and open it again.
 
-   ```bash
-   claude
-   ```
+## Step 2. Sign in to Claude
 
-9. Type these four commands in Claude Code, one at a time:
+```bash
+claude
+```
+
+The first time, it asks how to sign in. Choose your Claude subscription, not an
+API key, and finish in the browser. If no browser opens, copy the link it prints
+into your browser.
+
+## Step 3. Let Claude install murmur
+
+In Claude Code, paste:
+
+```text
+Install murmur for this repo: https://github.com/magik-ai/murmur
+```
+
+If you started Claude Code outside your project's folder, name your repository
+in the same message, for example
+`Install murmur for my repo your-name/your-app: https://github.com/magik-ai/murmur`.
+If you have no repository yet, say so, and Claude creates one.
+
+Claude follows murmur's [install steps](../INSTALL.md). It installs git,
+GitHub's tool `gh` and `uv` if they are missing, asks you a few questions with
+defaults, sets up your repository and opens a pull request with the setup. Some
+steps need you: signing in to GitHub, typing your password. Claude shows the
+exact command. Open a second terminal window, run it there, and tell Claude
+when it is done.
+
+## Step 4. Run your first team
+
+You do not need a farm for this: the agents run on your computer.
+
+1. In Claude Code, describe a goal and ask for a team, for example:
 
    ```text
-   /plugin marketplace add magik-ai/murmur
-   /plugin install murmur@murmur
-   /murmur:init
-   /murmur:doctor
+   fan this out: add a dark mode switch to the settings page
    ```
 
-   `/murmur:init` asks seven questions. Answer `ok` to each one to keep the
-   default. `/murmur:doctor` checks the setup and tells you if anything is
-   missing. If Claude Code does not know `/murmur:init` yet, type
-   `/reload-plugins` and try again.
+2. Claude splits the goal into lanes, one agent per task, and shows you the
+   plan. Nothing starts until you say so. Type `go`.
+3. Each agent works on its own branch and opens a pull request. Read them on
+   GitHub. You decide what merges: tell Claude which pull requests to merge.
 
-## Part 3. Run your first team
+The agents work while your computer is on and awake. For work that goes on
+while it is off, add a farm.
 
-You do not need a farm for this: the agents run on your Mac.
+## Step 5. Add a farm (optional)
 
-10. In Claude Code, describe a goal and ask for a team, for example:
+A farm is an always-on Linux machine that runs agents for you. Tell Claude you
+want one:
 
-    ```text
-    fan this out: add a dark mode switch to the settings page
-    ```
+```text
+Set up a murmur farm for me.
+```
 
-11. Claude splits the goal into lanes, one agent per task, and shows you the
-    plan. Nothing starts until you say so. Type `go`.
-12. Each agent works on its own branch and opens a pull request. Read them on
-    GitHub. You decide what merges: tell Claude which pull requests to merge.
+It offers two ways:
 
-The agents stop while your Mac sleeps. For work that goes on overnight, add a
-farm.
+- **Rent a DigitalOcean server.** You need a DigitalOcean account with a
+  payment method. Claude shows the monthly price and buys nothing until you
+  type that price back. Then it installs murmur on the server and opens its
+  dashboard. It asks you for one API token from DigitalOcean: paste it in your
+  terminal when Claude says so, never in the chat.
+- **Use a Linux computer you own:** Ubuntu 22.04 or newer, Debian 12 or newer,
+  or a Windows PC with WSL. You run one command on that computer, and it
+  installs everything. On Windows, first switch on the two settings in
+  [chapter 12](12-the-machine.md#what-the-machine-must-be) that keep WSL
+  running when its window is closed.
 
-## Part 4. Add a farm (optional)
+A Mac cannot be a farm yet, because the farm's services need Linux:
+[#8](https://github.com/magik-ai/murmur/issues/8) tracks it.
 
-A farm is a Linux server that runs agents while your Mac sleeps. The easiest
-farm is a DigitalOcean server that murmur rents and sets up for you.
+Agents on a farm run without asking before each command, so they can do
+anything your user can do on that machine. Keep only what they need on it.
+[Chapter 12](12-the-machine.md) explains the farm in full.
 
-13. Create an account at [digitalocean.com](https://www.digitalocean.com) and
-    add a payment method.
-14. In Claude Code, in your repository, type:
+## Prefer Codex?
 
-    ```text
-    /murmur:farm
-    ```
+Install it instead of Claude Code in step 1 with
+`curl -fsSL https://chatgpt.com/codex/install.sh | sh`, sign in with
+`codex login`, then paste the same message from step 3 into Codex. The team
+commands in step 4 are Claude Code's; with Codex, murmur's farm runs your
+agents.
 
-    It guides you through the rest, one step at a time:
+## Doing it by hand
 
-    - It offers to install `doctl`, DigitalOcean's command-line tool. Say yes.
-    - It asks you to create an API token on DigitalOcean (API, then Generate
-      New Token) and to run `doctl auth init --context murmur` in Terminal.
-      Paste the token in Terminal, never in the chat.
-    - It offers to create an ssh key. Say yes.
-    - It asks a few questions. The defaults are fine.
-    - It shows the monthly price. Nothing is bought until you type that price
-      back.
-    - It creates the server, installs murmur on it, and gives you the commands
-      that sign the server in to GitHub and Claude. Run them in Terminal.
-    - It opens the farm's dashboard in your browser.
+If you would rather not let an agent install anything:
 
-From then on, the lanes run on the farm. [Chapter 12](12-the-machine.md)
-explains the farm in full.
-
-## Other computers
-
-- **A Mac mini, or another Mac that stays on.** Follow parts 1 to 3 on it: the
-  agents run on it while it is awake. A Mac cannot be a farm yet, because the
-  farm's services run on systemd, which only Linux has. Support for a Mac as a
-  farm is planned.
-- **A Linux computer** with Ubuntu 22.04 or newer, or Debian 12 or newer, can be
-  a farm. Sign in as your usual user, not root, and run:
-
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash
-  ```
-
-  It installs everything and prints the next steps. [farm/](../farm/README.md)
-  says what it does.
-- **Windows.** Use WSL2 with Ubuntu, then follow the Linux steps.
-  [Chapter 12](12-the-machine.md#what-the-machine-must-be) shows the two
-  settings that keep it running.
-- **A Linux laptop.** Install git, `gh` and `uv` with your package manager,
-  Claude Code with the command in step 4, then continue with part 2.
+- **Mac:** install [Homebrew](https://brew.sh), then run
+  `brew install git gh uv`.
+- **Linux and WSL:** run `sudo apt update && sudo apt install -y git gh curl`,
+  then `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+- Sign in to GitHub with `gh auth login`: choose `GitHub.com`, `HTTPS`, `Y`
+  and `Login with a web browser`.
+- Then follow the [quick start in the README](../README.md#1-set-up-a-repository).
 
 ## If something goes wrong
 
 | What you see | What to do |
 | --- | --- |
-| `command not found: brew` | Run the lines Homebrew printed under **Next steps**, or open a new Terminal window |
-| `command not found: claude` | Close Terminal and open it again |
+| `command not found` right after an install | Close the terminal and open it again |
+| No browser opens when you sign in | Copy the link from the terminal into your browser |
+| Claude asks you to run a command yourself | Run it in a second terminal window, then tell Claude it is done |
 | Claude Code does not know `/murmur:init` | Type `/reload-plugins`, or type `/exit` and start `claude` again |
-| `gh` says you are not logged in | Run `gh auth login` again |
