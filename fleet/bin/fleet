@@ -2078,7 +2078,7 @@ fleet: headless Claude Code and Codex agents on the farm
                                   the models a provider offers, read without a prompt
   fleet models on|off <id> <model>... [--confirm-cost <model>...]
                                   switch a provider's models on or off for lanes
-  fleet machines list|plan|create|add|check|adopt|destroy|forget
+  fleet machines list|plan|create|add|check|adopt|destroy|forget|forget-attempt
                                   farms you own: this one, droplets it created, your own boxes
   fleet hosts list|check          where a farm runs: your own machine (ssh) or a DigitalOcean Droplet
   fleet accounts [list]           Claude subscription accounts: session and weekly use,

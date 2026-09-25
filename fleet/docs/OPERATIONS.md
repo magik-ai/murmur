@@ -744,6 +744,9 @@ fleet machines destroy <NAME> --confirm <NAME>
   needs the machine's name twice.
 - `adopt <NAME>` writes back the record of a Droplet this farm created and then lost.
   `forget <NAME>` drops a record and leaves the machine alone.
+- `forget-attempt <NAME>` is for a create whose answer from DigitalOcean was lost. Once the wait
+  for its Droplet is over, it drops the attempt, or adopts the Droplet if one did appear. A new
+  create then needs the price confirmed again.
 - fleet uses the `doctl` login context `murmur`. `FLEET_DOCTL_CONTEXT` names another one.
 - The `/murmur:farm` command of the murmur Claude Code plugin runs the same steps from your laptop.
 
