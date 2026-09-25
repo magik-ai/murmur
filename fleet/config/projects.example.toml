@@ -7,11 +7,11 @@
 # port. The bases are the project's own business; set them in [<project>.ports]. Without that
 # table, fleet uses vite = port_base (5200 when that is not set either), api = 8100, e2e = 6100.
 #
-# The example below is COMMENTED OUT on purpose. install.sh copies this file to
-# ~/.config/fleet/projects.toml as it stands, and a live table here would claim the very name the
-# README and `fleet help` tell a new operator to register, so `fleet add-project --name myproj`
-# would refuse it as already registered with different settings. Uncomment and edit, or just run
-# add-project and let it write the table for you.
+# The example below is commented out. install.sh copies this file to ~/.config/fleet/projects.toml
+# as it stands, and a live table here would take the name that the README and the installers tell
+# a new operator to register: `fleet add-project --name myproj` would then refuse it as already
+# registered with different settings. Uncomment and edit, or run add-project and let it write the
+# table for you.
 #
 # [myproj]
 # repo      = "your-org/your-repo"
