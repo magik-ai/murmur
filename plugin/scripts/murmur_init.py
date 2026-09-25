@@ -313,17 +313,20 @@ def fill_template(text: str, config: dict) -> str:
     return rebase_text(out, config["base_branch"])
 
 
-# A blank the person fills in: upper-case words in angle brackets, such as <OWNER> or
+# A blank the person fills in: upper-case words in angle brackets, such as <NAME> or
 # <KIND OF WORK>. A single letter is not one, so a type such as Result<T> is not taken for a
 # blank, and neither is anything inside an HTML comment, where the template's own <PLACEHOLDER>
-# names the blanks instead of being one.
+# names the blanks instead of being one. The role words are no blanks either: they may stay,
+# and the session hook tells every agent what they mean in this repository.
 PLACEHOLDER = re.compile(r"<[A-Z][A-Z0-9_]+(?: [A-Z0-9_]+)*>")
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+ROLE_WORDS = {"<OWNER>", "<TRACKER>", "<FARM>"}
 
 
 def placeholders(text: str) -> list[str]:
     """The blanks still in the text, each once, in the order they first appear."""
-    return list(dict.fromkeys(PLACEHOLDER.findall(COMMENT.sub("", text))))
+    found = PLACEHOLDER.findall(COMMENT.sub("", text))
+    return [blank for blank in dict.fromkeys(found) if blank not in ROLE_WORDS]
 
 
 def place(root: Path, rel: Path, content: str, mode: str, report: list[dict]) -> None:

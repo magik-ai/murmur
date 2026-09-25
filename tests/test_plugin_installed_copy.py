@@ -124,12 +124,16 @@ class InstalledCopy(unittest.TestCase):
         self.assertEqual(len(blanks), len(set(blanks)))
         for blank in blanks:
             self.assertIn(blank, law)
-        # What init fills in is no blank any more, and the template's comment only names them.
-        for gone in ("<ORG>", "<REPO>", "<PRODUCT>", "<TRACKER>", "<PLACEHOLDER>"):
+        # What init fills in is no blank any more, the role words never were (the session hook
+        # says what they mean), and the template's comment only names the blanks.
+        for gone in ("<ORG>", "<REPO>", "<PRODUCT>", "<OWNER>", "<TRACKER>", "<FARM>",
+                     "<PLACEHOLDER>"):
             self.assertNotIn(gone, blanks)
-        # Every upper-case blank the file still holds outside a comment is on the list.
+        self.assertIn("<OWNER>", law)
+        # Every other upper-case word in angle brackets outside a comment is on the list.
         bare = re.sub(r"<!--.*?-->", "", law, flags=re.DOTALL)
-        self.assertEqual(set(re.findall(r"<[A-Z][A-Z0-9_ ]+>", bare)), set(blanks))
+        found = set(re.findall(r"<[A-Z][A-Z0-9_ ]+>", bare)) - {"<OWNER>", "<TRACKER>", "<FARM>"}
+        self.assertEqual(found, set(blanks))
 
     def test_a_claude_md_the_person_wrote_gets_no_placeholder_list(self):
         (self.project / "CLAUDE.md").write_text("# Ours\n\nBuild with `make <TARGET>`.\n")
