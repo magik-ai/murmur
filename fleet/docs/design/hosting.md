@@ -370,7 +370,7 @@ since when it is old. So an expired login never costs the page its machine table
 
 | Route | Answer |
 |---|---|
-| `GET /api/machines` | `{at, stale_since, error, pending, this: {name, address}, total_monthly_usd, machines: [...]}` |
+| `GET /api/machines` | `{at, stale_since, error, pending, this: {name, address}, total_monthly_usd, machines: [...], provider_error}` |
 | `GET /api/hosts` | `{at, stale_since, error, pending, providers: [...]}` |
 
 `pending` is true until the first pass has run. `error` is the refresher's sentence when a
@@ -384,7 +384,8 @@ that bills, `detail` ends with the price sentence.
 
 `fleet machines list --json` itself prints `{this, total_monthly_usd, machines, error}`. There,
 `error` says that DigitalOcean was not asked or did not answer, so the rows are the registry's
-word alone.
+word alone. The dashboard passes it on as `provider_error` (its own `error` is the refresher's),
+and the machines card says it above the rows.
 
 A provider row carries `id`, `label`, `summary`, `color`, `job`, `stage`, `cli`,
 `cli_installed`, `login_state`, `account`, `detail`, `checked_at`, `login`, `install`, `terms`,
