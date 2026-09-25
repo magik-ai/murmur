@@ -94,7 +94,7 @@ run. A failed pass keeps the last good values, and `stale_since` says since when
 | `/api/projects` | POST `{name, repo, branch?, port_base?}` | runs `fleet add-project` as a job, because it clones the repository: `202 {job, name, repo, port_base, sentence}` | write |
 | `/api/agent/log?slug&tail=200` | GET | `{slug, file, lines: [...], truncated, missing}`: the lane's log as readable lines, at most 2000, with the path confined to `$FLEET_STATE/logs` | read |
 | `/api/agent/msg` | POST `{slug, text}` | runs `fleet msg <slug> <text>`, which the lane reads at its next checkpoint: `{ok, slug, detail}` | write |
-| `/api/mail/boxes` | GET | `{..., boxes: [{name, number, numbers, updated_at, last_at, count_24h}]}` from the head office's `inbox` issues, one row per name | read |
+| `/api/mail/boxes` | GET | `{..., boxes: [{name, number, numbers, updated_at, last_at, count_24h}], boxes_cut_at}` from the head office's `inbox` issues, one row per name; `boxes_cut_at` is the list's limit (1000) when the office answered with that many issues, else 0 | read |
 | `/api/mail/thread?box&since` | GET | `{..., box, messages: [{sender, at, text, created_at}], window_hours}`, read from the issue's comments; `since` is ISO 8601 | read |
 | `/api/mail/feed?hours=24` | GET | `{..., events: [{at, at_label, kind, text}], hours}`, where `kind` is `mail`, `claim` or `session`: branch claims first, then newest first, assembled here from the threads, `hq who` and `hq claims`, never by running `hq feed` | read |
 | `/api/mail/who` | GET | `{..., sessions: [{name, state, age_hours, since, task}]}` from `hq who`, where `state` is `live` or `stale` | read |
