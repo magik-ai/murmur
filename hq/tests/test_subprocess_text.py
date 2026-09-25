@@ -104,4 +104,4 @@ def test_the_push_gate_survives_an_accented_agent_name_under_an_ascii_locale(tmp
     assert "Traceback" not in result.stderr
     # And it is not merely surviving: the gate ran, rather than falling open on
     # a crash it could not read.
-    assert "push gate failed unexpectedly" not in result.stderr
+    assert "push check failed unexpectedly" not in result.stderr

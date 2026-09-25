@@ -276,7 +276,7 @@ def cmd_check_push(args):
     try:
         gate(args)
     except Exception as error:
-        print(f"hq: WARNING - the push gate failed unexpectedly "
+        print(f"hq: WARNING - the push check failed unexpectedly "
               f"({type(error).__name__}: {error}); pushing unverified (fail-open)",
               file=sys.stderr)
 
@@ -328,8 +328,8 @@ def say_state_may_be_wrong(cfg):
         return
     where = str(cfg.state) if cfg.state.exists() else f"{cfg.state}, which does not exist,"
     print(f"    (a `home` set in that config file could not be read, so "
-          f"{where} may not be this machine's state dir; set HQ_HOME if the "
-          f"gate is to be sure it read the right cache)", file=sys.stderr)
+          f"{where} may not be this machine's state dir; set HQ_HOME so that the "
+          f"push check reads the right cache)", file=sys.stderr)
 
 
 def gate(args):
@@ -364,7 +364,7 @@ def gate(args):
             if is_sovereign(me, cfg):
                 print(f"hq: note - {repo}#{args.branch} is claimed by {owner} "
                       f"(from the local cache under {cfg.state}, read despite the "
-                      f"config file above); sovereign push allowed", file=sys.stderr)
+                      f"config file above); owner's push allowed", file=sys.stderr)
                 return
             print(
                 f"hq: PUSH BLOCKED - {repo}#{args.branch} is claimed by {owner} "
@@ -397,7 +397,7 @@ def gate(args):
         if cached:
             if is_sovereign(me, cfg):
                 print(f"hq: note - {repo}#{args.branch} is claimed by {cached.get('owner')} "
-                      f"(from cache, {cfg.repo} unreachable); sovereign push allowed",
+                      f"(from cache, {cfg.repo} unreachable); owner's push allowed",
                       file=sys.stderr)
                 return
             print(
@@ -425,7 +425,7 @@ def gate(args):
         return
     if is_sovereign(me, cfg):
         print(f"hq: note - {repo}#{args.branch} is claimed by {owner}; "
-              f"sovereign push allowed", file=sys.stderr)
+              f"owner's push allowed", file=sys.stderr)
         return
     print(
         f"hq: PUSH BLOCKED - {repo}#{args.branch} is claimed by {owner} "

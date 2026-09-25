@@ -395,7 +395,7 @@ bot_email = "hq@example.invalid"
 | Key | Default | Variable | What it is |
 | --- | --- | --- | --- |
 | `repo` | none | `HQ_REPO` | The head office, as `OWNER/NAME`. Every command except `init`, `install`, `whoami`, `hook` and `check-push` needs it. |
-| `owner` | nobody | `HQ_OWNER` | The person in charge. A claim never blocks this name's pushes: hq prints a note ending `sovereign push allowed` instead. This name may also release any claim. |
+| `owner` | nobody | `HQ_OWNER` | The person in charge. A claim never blocks this name's pushes: hq prints a note ending `owner's push allowed` instead. This name may also release any claim. |
 | `bot_name` | `hq` | `HQ_BOT_NAME` | Author name of the commits on the `claims` branch. |
 | `bot_email` | `hq@example.invalid` | `HQ_BOT_EMAIL` | Author email of those commits. |
 | `home` | `~/.agent-hq` | `HQ_HOME` | The state directory. |
@@ -541,7 +541,7 @@ the guard cannot know where it is: `home` is set in the broken file. hq says
 so:
 
 ```text
-    (a `home` set in that config file could not be read, so /home/you/.agent-hq may not be this machine's state dir; set HQ_HOME if the gate is to be sure it read the right cache)
+    (a `home` set in that config file could not be read, so /home/you/.agent-hq may not be this machine's state dir; set HQ_HOME so that the push check reads the right cache)
 ```
 
 Set `HQ_HOME` on any machine whose state directory is not the default. Then

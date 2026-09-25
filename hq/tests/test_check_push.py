@@ -98,7 +98,7 @@ def test_the_sovereign_is_warned_and_let_through(offline, monkeypatch, capsys):
     monkeypatch.setenv("HQ_AGENT", "alice")
     check()
     error = capsys.readouterr().err
-    assert "sovereign push allowed" in error
+    assert "owner's push allowed" in error
     assert "BLOCKED" not in error
 
 
@@ -260,7 +260,7 @@ def test_an_unforeseen_crash_in_the_gate_fails_open(monkeypatch, capsys):
     monkeypatch.setattr(claims, "fetch_claims", explode)
     check()  # no SystemExit: exit 0, the push goes through
     error = capsys.readouterr().err
-    assert "push gate failed unexpectedly" in error
+    assert "push check failed unexpectedly" in error
     assert "RuntimeError: git went missing" in error
     assert "fail-open" in error
 
@@ -419,7 +419,7 @@ def test_a_malformed_config_lets_the_sovereign_through_with_a_note(
     check()
 
     error = capsys.readouterr().err
-    assert "sovereign push allowed" in error
+    assert "owner's push allowed" in error
     assert "BLOCKED" not in error
 
 
@@ -444,7 +444,7 @@ def test_a_broken_config_does_not_stop_the_gate_resolving_a_name(
 
     error = capsys.readouterr().err
     assert "BLOCKED" not in error      # alice's own claim, read under her own name
-    assert "push gate failed unexpectedly" not in error
+    assert "push check failed unexpectedly" not in error
 
 
 def test_a_broken_config_says_the_state_dir_it_searched_may_be_wrong(
