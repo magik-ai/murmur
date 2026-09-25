@@ -565,6 +565,16 @@ function priceOfSize(context) {
   return size ? Number(size.monthly_usd) : 0;
 }
 
+/* Every price a person reads carries the day it was read (lib/host_presets.py LIST_PRICE_NOTE,
+   which the provider's price sentence ends with). The size cards' prices get it here. */
+function sizePriceDate(preset) {
+  const read = /\blist price on (\d{4}-\d{2}-\d{2})\b/.exec(String(preset.pricing || ""));
+  if (!list(preset.sizes).length || !read) return null;
+  return h("p", { class: "muted", key: "size-price-date", "data-size-price-date": "" },
+    `List prices on ${read[1]}. The plan asks DigitalOcean for today's price before anything is `
+    + "bought.");
+}
+
 function sizeCards(context, preset) {
   const sizes = list(preset.sizes);
   if (!sizes.length) return null;
@@ -629,6 +639,7 @@ function dropletFields(context, preset) {
       + "it runs, and the key your laptop reaches it with."),
     nameField(context),
     sizeCards(context, preset),
+    sizePriceDate(preset),
     h("label", { class: "m-field", key: "region" },
       h("span", { class: "m-label" }, "Region"),
       h("select", {
