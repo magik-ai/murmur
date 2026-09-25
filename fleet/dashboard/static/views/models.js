@@ -163,7 +163,7 @@ async function modelAction(context, model, action) {
   try {
     const answer = await apiPost("/api/models", { action, id: model.id });
     if (answer && answer.error) toast(answer.error, "bad");
-    else if (action === "test") toast(`${model.label || model.id} was asked to answer.`);
+    else if (action === "test") toast(`${model.label || model.id} was tested.`);
     else toast(`${model.label || model.id} is ${action === "enable" ? "on" : "off"}.`);
   } catch (error) {
     toast(serverReason(error) || `${model.label || model.id} did not answer.`, "bad");
@@ -191,6 +191,18 @@ async function removeModel(context, id) {
   }
 }
 
+/* What Test does, said on its button. For Claude Code and Codex it sends no request: it checks
+   that the CLI is where a lane runs it, and for Codex that the CLI is logged in. An engine
+   someone added is sent one short prompt, and its answer is checked. */
+export function testTitle(model) {
+  const engine = String((model || {}).engine || "");
+  if (engine === "claude") return "Checks that the Claude Code CLI is installed. It sends no request.";
+  if (engine === "codex") {
+    return "Checks that the Codex CLI is installed and logged in. It sends no request.";
+  }
+  return "Sends the model one short prompt and checks its answer.";
+}
+
 /* The same three actions wherever the model is drawn: in its row, in its drawer, and in the
    last step of the add dialog. Written once, so the three can never drift apart and offer a
    switch in one place and not in another. */
@@ -206,10 +218,11 @@ function modelActions(context, model, where) {
       "aria-pressed": String(Boolean(model.enabled)),
       /* The press this button is about to send, not one of the two: a model that is on sends
          "disable", and guarding against "enable" left the switch live while it worked, so a
-         double click sent two real requests. */
+         double click sent the press twice. */
       disabled: access.writable && local.busy !== `${model.id}:${next}` ? null : true,
-      title: blocked() || `Press to switch ${model.label || model.id} `
-        + `${model.enabled ? "off" : "on"}. It sends one real request.`,
+      title: blocked() || (model.enabled
+        ? `Press to switch ${model.label || model.id} off.`
+        : `Press to switch ${model.label || model.id} on. It runs the Test first.`),
       onclick: () => modelAction(context, model, next),
     /* The word on a button is the press it makes, never the state the row is already in: a
        button reading "On" beside a pill reading "Off" is two words for one thing, and the
@@ -222,7 +235,7 @@ function modelActions(context, model, where) {
       class: "ghost-button small",
       "data-model-test": model.id,
       disabled: access.writable && local.busy !== `${model.id}:test` ? null : true,
-      title: blocked() || "One real request to the provider.",
+      title: blocked() || testTitle(model),
       onclick: () => modelAction(context, model, "test"),
     }, local.busy === `${model.id}:test` ? "Testing" : "Test"));
   }
@@ -1048,9 +1061,9 @@ async function registerModel(context, preset) {
   }
 }
 
-/* A test is one real request to a provider and can take a while. The page's own tick is three
-   seconds and only repaints; this asks for the row again every two, on its own clock, because
-   the flip from "asking" to an answer is the single thing the reader is waiting for. */
+/* A test can take a while: an added engine is sent a prompt and waited for. The page's own
+   tick is three seconds and only repaints; this asks for the row again every two, on its own
+   clock, because the flip from "asking" to an answer is the single thing the reader waits for. */
 function pollWhileTesting(context) {
   if (local.modelPoll) return;
   local.modelPoll = setInterval(() => {

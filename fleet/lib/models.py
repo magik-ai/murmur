@@ -5,8 +5,9 @@ declarative; the toggles and health live in ~/.fleet/models-state.json, so activ
 never rewrites its description.
 
 Health check on enable: a model is only spawnable when it is BOTH enabled AND last-health-ok, so
-flipping a switch back on fires a real test request (does the CLI run, does the sub authenticate,
-what do the limits look like) before any lane is routed to it.
+flipping a switch back on runs health_check() before any lane is routed to it. For Claude Code and
+Codex that sends no request: it checks the CLI a lane runs (and Codex's login file). An engine
+added as a contribution is sent one short prompt, and its answer is checked.
 
 A farm's catalog is also written from here: add_model() turns one of lib/model_presets.py's
 services into an entry in ~/.config/fleet/models.toml (creating it from the shipped example on
@@ -151,7 +152,8 @@ def listing():
 
 
 def health_check(mid):
-    """Fire a real test request. Returns (health, detail, limits). Never raises."""
+    """Can this model run a lane? Returns (health, detail, limits). Never raises. Claude Code and
+    Codex are checked without a request; any other engine is sent the health prompt."""
     m = effective(mid)
     if not m:
         return "fail", "no such model", ""
