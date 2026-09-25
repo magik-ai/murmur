@@ -1306,6 +1306,32 @@ for (const [hash, name] of [["#/mail", "mail"], ["#/machine", "machine"]]) {
   await context.close();
 }
 
+/* The page signs mail with FLEET_DASH_HQ_AGENT, which /api/config reports as hq_agent. The
+   composer and the echo of a sent message must name that, not a fixed "dashboard". */
+{
+  const config = await (await fetch(`${BASE}/api/config`)).json();
+  const { page, context, thrown } = await open({
+    hash: "#/mail",
+    overrides: {
+      "/api/config": JSON.stringify({ ...config, hq_agent: "console" }),
+      "/api/mail/send": JSON.stringify({ ok: true, to: "all", from: "console" }),
+    },
+  });
+  const under = await page.evaluate(() => document.querySelector(".composer .readonly-note").textContent);
+  check("the composer names the office name the farm set, not a fixed one",
+    under === "Sent as console, not as you", under);
+  await page.fill("#mailText", "the schema lane is done");
+  await page.click("#mailSend");
+  await page.waitForTimeout(1200);
+  const who = await page.evaluate(() => {
+    const row = document.querySelector("[data-echo] .who b");
+    return row ? row.textContent : "";
+  });
+  check("and so does the echo of a sent message", who === "console", who);
+  check("a renamed sender breaks nothing", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
 {
   const { page, context } = await open({
     hash: "#/mail",
