@@ -26,8 +26,8 @@ Fields, all present on every preset so a reader never has to guess:
   engines   the fleet engines this hosting can run
 
 Accuracy. Every command, flag and number below was read from the vendors' own pages on
-2026-09-23. Where a page could not confirm something, the preset says UNVERIFIED in its `terms`
-rather than inventing a flag. Prices move: the droplet numbers are labelled "list
+2026-09-23. Where a page could not confirm something, the preset leaves it out rather than
+inventing a flag. Prices move: the droplet numbers are labelled "list
 price on 2026-09-23" and `fleet machines plan` prefers the live price from the provider.
 """
 import copy
@@ -90,16 +90,15 @@ PRESETS = [
         "color": "#0069FF",
         "job": "machine",
         "cli": "doctl",
-        # doctl's command reference was read, not its packaging page, so the install line
-        # sends a person to the vendor rather than naming a package that may be wrong on their
-        # system. The terms sentence says so.
+        # DigitalOcean's install page gives a different command for each system, so the install
+        # line sends a person to that page. The terms sentence names the three it gives.
         "install": "see https://docs.digitalocean.com/reference/doctl/how-to/install/",
         "login": "doctl auth init --context murmur",
         "whoami": ["doctl", "account", "get", "-o", "json", "--context", DOCTL_CONTEXT],
         "docs": "https://docs.digitalocean.com/reference/doctl/",
-        "terms": ("a real Ubuntu VM where this farm's installer runs unchanged; the exact "
-                  "package name for doctl on your system is UNVERIFIED, so the install line "
-                  "sends you to DigitalOcean's own page"),
+        "terms": ("a real Ubuntu VM where this farm's installer runs unchanged. DigitalOcean "
+                  "documents three ways to install doctl: `brew install doctl` on macOS, "
+                  "`sudo snap install doctl` on Ubuntu, or the release archive from GitHub"),
         "stage": "ga",
         "pricing": ("billed per second up to the monthly cap; a powered-off droplet is still "
                     f"billed, only Destroy stops it ({LIST_PRICE_NOTE})"),
