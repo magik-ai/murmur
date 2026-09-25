@@ -146,8 +146,11 @@ such as a front-end build or a test run. Two bursts at once on a 4 GB machine ca
 memory.
 
 The default limits in fleet suit a large machine: no new agent starts while less than 6 GB of
-memory is free. On a smaller machine, if `fleet capacity` says `BLOCK` because of free RAM, open
-`~/.config/fleet/policy.toml` and lower `ram_min_gb` and `warn_ram_gb` in its `[limits]` table.
+memory is free, and fleet warns below 8 GB. On a machine with less than 12 GB of memory, the
+installer in the next section lowers both: to 1 GB and 2 GB on a 4 GB machine, and to 2 GB and
+3 GB on an 8 GB machine. It changes them only while they are still the shipped values. If
+`fleet capacity` still says `BLOCK` because of free RAM, open `~/.config/fleet/policy.toml` and
+lower `ram_min_gb` and `warn_ram_gb` in its `[limits]` table.
 
 ## Set it up with one command
 

@@ -243,23 +243,73 @@ ask farm_alias "The ssh alias you will use for this box from your laptop" "farm"
 grep -q '^FLEET_FARM_ALIAS=' "$fleet_env" 2>/dev/null || echo "FLEET_FARM_ALIAS=$farm_alias" >> "$fleet_env"
 
 policy="${FLEET_CONFIG:-$HOME/.config/fleet}/policy.toml"
+# fleet/install.sh copies the example policy, which already has an [hq] table. A policy.toml
+# without one gets `enabled = true`: fleet keeps head office on anyway, and says so on every spawn.
 if ! grep -q '^\[hq\]' "$policy" 2>/dev/null; then
   printf '\n[hq]\nenabled = true\n' >> "$policy"
   note "policy.toml: head office on for every lane"
 fi
-# The shipped limits assume a big box (spawns stop below 6 GB free). Size them to this machine
-# once, so a small VPS can spawn at all; the numbers are yours to tune in policy.toml afterwards.
-if ! grep -q '^\[limits\]' "$policy" 2>/dev/null; then
-  total_gb=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
-  cpus=$(nproc 2>/dev/null || echo 2)
-  if [ "$total_gb" -gt 0 ] && [ "$total_gb" -lt 12 ]; then
-    floor=$(( total_gb / 4 )); [ "$floor" -ge 1 ] || floor=1
-    warn=$(( floor + 1 ))
-    agents=$(( cpus * 2 )); [ "$agents" -ge 2 ] || agents=2
-    printf '\n[limits]\nram_min_gb = %s\nwarn_ram_gb = %s\nmax_agents = %s\n' "$floor" "$warn" "$agents" >> "$policy"
-    note "policy.toml: limits sized for ${total_gb} GB and ${cpus} CPUs (spawns stop below ${floor} GB free, at most ${agents} agents)"
-  fi
-fi
+# The example's memory limits suit a big machine: no spawn while less than 6 GB is free, a
+# warning below 8 GB. Below 12 GB of memory, lower both to fit this machine. Only while [limits]
+# is still exactly the example's: a limit you changed is yours, and a later run leaves it alone.
+phys_pages=$(getconf _PHYS_PAGES 2>/dev/null || true)
+page_size=$(getconf PAGE_SIZE 2>/dev/null || true)
+sized=$(python3 - "$policy" "$FLEET_SRC/config/policy.example.toml" "$phys_pages" "$page_size" <<'PY'
+import os
+import re
+import sys
+import tempfile
+import tomllib
+
+policy, example, pages, page_size = sys.argv[1:5]
+if not (pages.isdigit() and page_size.isdigit()):
+    raise SystemExit(0)
+gb = int(pages) * int(page_size) / 1024 ** 3
+if not 0 < gb < 12:
+    raise SystemExit(0)
+try:
+    with open(example, "rb") as handle:
+        shipped = tomllib.load(handle).get("limits")
+    with open(policy, "rb") as handle:
+        text = handle.read().decode()
+    mine = tomllib.loads(text).get("limits")
+except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+    raise SystemExit(0)
+if not isinstance(mine, dict) or mine != shipped:
+    raise SystemExit(0)
+floor = max(1, round(gb / 4))
+values = {"ram_min_gb": floor, "warn_ram_gb": floor + 1}
+table, lines = "", []
+for line in text.splitlines(keepends=True):
+    header = re.match(r"\s*\[([^\[\]]+)\]", line)
+    if header:
+        table = header.group(1).strip()
+    key = re.match(r"(\s*(ram_min_gb|warn_ram_gb)\s*=\s*)[0-9.]+", line)
+    if table == "limits" and key:
+        line = key.group(1) + str(values[key.group(2)]) + line[key.end():]
+    lines.append(line)
+new = "".join(lines)
+limits = tomllib.loads(new).get("limits", {})
+if any(limits.get(name) != value for name, value in values.items()):
+    raise SystemExit(0)
+temporary = ""
+try:
+    fd, temporary = tempfile.mkstemp(prefix="policy.toml.", dir=os.path.dirname(policy))
+    with os.fdopen(fd, "w") as handle:
+        handle.write(new)
+    os.chmod(temporary, os.stat(policy).st_mode & 0o777)
+    os.replace(temporary, policy)
+except OSError as exc:
+    if temporary and os.path.exists(temporary):
+        os.unlink(temporary)
+    print(f"policy.toml: memory limits not sized ({exc}); on this {gb:.1f} GB machine, lower "
+          "ram_min_gb and warn_ram_gb by hand")
+    raise SystemExit(0)
+print(f"policy.toml: memory limits sized for {gb:.1f} GB: no spawn while less than {floor} GB "
+      f"is free, a warning below {floor + 1} GB")
+PY
+) || sized=""
+[ -z "$sized" ] || note "$sized"
 
 if [ "$single" != "yes" ] && [ "$single" != "y" ] && [ "$OFFER_TAILSCALE" = 1 ]; then
   ts="yes"

@@ -105,10 +105,10 @@ uv run ${CLAUDE_PLUGIN_ROOT}/scripts/murmur_farm.py answer --id size --value s-4
 ```
 
 - `size`: say each size's price. Do not promise how many agents a size runs.
-  The 2 vCPU size has 4 GB of memory, and with the default limits a spawn
-  needs 6 GB free. If `fleet capacity` on the farm then blocks on free memory,
-  the person lowers `ram_min_gb` and `warn_ram_gb` in
-  `~/.config/fleet/policy.toml` there.
+  The farm's installer sizes the memory limits to the machine: on the 2 vCPU
+  size (4 GB), a new agent starts while 1 GB of memory is free. If
+  `fleet capacity` on the farm still blocks on free memory, the person lowers
+  `ram_min_gb` and `warn_ram_gb` in `~/.config/fleet/policy.toml` there.
 - `access`: the choices are only the ones this laptop can use. Tailscale is
   offered only when this laptop is on a tailnet, and never under WSL.
 - `name`: the script refuses a name that the person's ssh config or the

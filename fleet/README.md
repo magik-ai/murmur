@@ -185,8 +185,9 @@ a conflict and never merges the pull request.
   touched, open a pull request, never merge, and stop.
 - **Capacity.** `lib/metrics.py` blocks a new spawn when free memory or free disk is below a floor,
   or when the GPU or CPU is too hot. The number of agents never blocks; it only raises a warning.
-  With the default limits, a spawn needs 6 GB of free memory. On a smaller machine, lower
-  `ram_min_gb` and `warn_ram_gb` in `~/.config/fleet/policy.toml`. A `warn` whose only reason is
+  With the default limits, a spawn needs 6 GB of free memory. On a machine with less than 12 GB,
+  `farm/install.sh` lowers `ram_min_gb` and `warn_ram_gb` in `~/.config/fleet/policy.toml` to
+  fit; after an install by hand, lower them yourself. A `warn` whose only reason is
   `CPU temp UNKNOWN` is normal on a machine without a temperature sensor.
 - **Clean-up.** The sweep timer removes the worktree of a lane whose pull request has merged. It
   also clears finished lanes that have no open pull request, 15 minutes after they end. It keeps

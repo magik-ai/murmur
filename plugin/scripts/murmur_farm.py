@@ -823,7 +823,9 @@ def live_sizes():
                  else size["monthly_usd"],
                  "price": "today's price" if price is not None else host_presets.LIST_PRICE_NOTE}
         if size["vcpu"] <= 2:
-            entry["note"] = "cheaper, and it runs one or two agents at a time"
+            # farm/install.sh sizes the memory limits to a machine this small.
+            entry["note"] = ("cheaper, for light work: a new agent starts while at least 1 GB "
+                             "of memory is free")
         sizes.append(entry)
     return sizes
 

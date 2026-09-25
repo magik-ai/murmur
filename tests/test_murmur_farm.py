@@ -223,7 +223,10 @@ class Steps(Laptop):
                          ["name", "size", "region", "access", "codex", "accounts", "hq_repo"])
         self.assertEqual(asked[1]["default"], "s-4vcpu-8gb")
         self.assertEqual(asked[2]["default"], "fra1")
-        self.assertIn("one or two agents", asked[1]["choices"][0]["note"])
+        small = asked[1]["choices"][0]["note"]
+        self.assertIn("light work", small)
+        self.assertIn("1 GB of memory is free", small)
+        self.assertNotIn("agents at a time", small)
         self.answer_all()
         self.assertEqual(self.farm("questions")["questions"], [])
         self.assertEqual(self.farm("status")["next"], "plan")

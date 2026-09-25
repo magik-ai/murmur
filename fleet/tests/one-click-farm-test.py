@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 import urllib.request
 
@@ -758,6 +759,7 @@ INSTALL = os.path.join(ROOT, "farm", "install.sh")
 RUN_SH = os.path.join(FLEET, "dashboard", "run.sh")
 SERVER = os.path.join(FLEET, "dashboard", "server.py")
 UNIT = os.path.join(FLEET, "systemd", "fleet-dashboard.service")
+EXAMPLE_POLICY = os.path.join(FLEET, "config", "policy.example.toml")
 
 
 def free_port():
@@ -924,6 +926,62 @@ class Installer(Scratch):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(self.read("dashboard-run.txt"), "enable\n")
         self.assertIn("fleet-dashboard.service enabled", done.stdout)
+
+    def example_policy(self):
+        with open(EXAMPLE_POLICY, encoding="utf-8") as handle:
+            return handle.read()
+
+    def policy(self):
+        return self.read("config", "fleet", "policy.toml")
+
+    def installed_on(self, gigabytes):
+        done = self.on_a_terminal("--remote", "--yes", FAKE_MEMORY_GB=str(gigabytes))
+        said = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 0, said)
+        return said
+
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    def test_a_4_gb_machine_gets_memory_limits_it_can_spawn_under(self):
+        # The example stops every spawn below 6 GB free, which a 4 GB machine never has.
+        said = self.installed_on(3.8)
+        self.assertIn("memory limits sized for 3.8 GB", said)
+        policy, example = self.policy(), self.example_policy()
+        limits = tomllib.loads(policy)["limits"]
+        self.assertEqual((limits["ram_min_gb"], limits["warn_ram_gb"]), (1, 2), said)
+        # Only those two numbers change; every other line, comment and limit stays the example's.
+        changed = [(old, new) for old, new in zip(example.splitlines(), policy.splitlines())
+                   if old != new]
+        self.assertEqual(len(policy.splitlines()), len(example.splitlines()))
+        self.assertEqual([new.split("#")[0].split() for _old, new in changed],
+                         [["ram_min_gb", "=", "1"], ["warn_ram_gb", "=", "2"]], changed)
+        self.assertNotIn("max_agents", policy + said)
+        # The next run finds limits that are no longer the example's and leaves them alone.
+        again = self.installed_on(7.8)
+        self.assertNotIn("memory limits sized", again)
+        self.assertEqual(self.policy(), policy)
+
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    def test_an_8_gb_machine_does_not_warn_while_it_is_idle(self):
+        said = self.installed_on(7.8)
+        limits = tomllib.loads(self.policy())["limits"]
+        self.assertEqual((limits["ram_min_gb"], limits["warn_ram_gb"]), (2, 3), said)
+
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    def test_limits_a_person_set_are_left_alone(self):
+        mine = self.example_policy().replace("gpu_temp_max = 87", "gpu_temp_max = 80")
+        self.assertNotEqual(mine, self.example_policy())
+        os.makedirs(self.config, exist_ok=True)
+        with open(os.path.join(self.config, "policy.toml"), "w", encoding="utf-8") as handle:
+            handle.write(mine)
+        said = self.installed_on(3.8)
+        self.assertNotIn("memory limits sized", said)
+        self.assertEqual(self.policy(), mine)
+
+    @unittest.skipIf(AS_ROOT, REFUSES_ROOT)
+    def test_a_16_gb_machine_keeps_the_example_limits(self):
+        said = self.installed_on(15.6)
+        self.assertNotIn("memory limits sized", said)
+        self.assertEqual(self.policy(), self.example_policy())
 
 
 class DashboardUnit(Scratch):

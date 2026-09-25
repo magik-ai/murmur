@@ -135,8 +135,9 @@ whether this is your only machine. When it is not, it offers Tailscale. It write
 the config and runs the dashboard as a user service. `~/work/murmur/farm/install.sh --help` lists
 its flags, and [chapter 12 of the handbook](../../docs/12-the-machine.md) walks through it.
 
-If `fleet capacity` blocks on free memory on a small machine, lower `ram_min_gb` and `warn_ram_gb`
-in `~/.config/fleet/policy.toml` (see [capacity](#capacity)).
+On a machine with less than 12 GB of memory, the installer also lowers `ram_min_gb` and
+`warn_ram_gb` in `~/.config/fleet/policy.toml` to fit it (see [capacity](#capacity)). If
+`fleet capacity` still blocks on free memory, lower them yourself.
 
 ### Installing fleet by hand
 
@@ -681,6 +682,9 @@ hardware blocks a spawn:
 | `warn_agents` | 24 | warn at this many running agents |
 
 - The number of running agents never blocks a spawn. It only raises a warning.
+- On a machine with less than 12 GB of memory, `farm/install.sh` sets `ram_min_gb` to about a
+  quarter of the memory (at least 1) and `warn_ram_gb` to 1 more. It does this only while
+  `[limits]` is still the example's, so a limit you changed stays as you set it.
 - The defaults are `DEFAULT_POLICY` in `lib/metrics.py`. `[limits]` in
   `~/.config/fleet/policy.toml` overrides them (the example file sets `warn_agents = 15`).
   `fleet metrics` prints every number in force, and where it came from.
