@@ -1,0 +1,67 @@
+/* The Models section: the providers table and a provider's sidebar list. Every cell is one line
+   (the one-line table rule): a fixed layout shares the width out, and a long value is cut with an
+   ellipsis and carried whole in the cell's title. Colours are theme tokens only. */
+
+.mo-providers { table-layout: fixed; }
+.mo-providers td { max-width: none; }
+/* Access takes what is left, so the fixed actions column is never squeezed below its width. */
+.mo-providers th.mo-provider { width: 20%; }
+.mo-providers th.mo-col-status { width: 14%; }
+.mo-providers th.mo-col-models { width: 10%; }
+.mo-providers th.mo-col-last { width: 10%; }
+/* The actions column is the same 276px as in every other table. */
+.mo-providers th.mo-col-actions { width: 276px; }
+.mo-providers .pill { max-width: 100%; }
+
+/* The name is a button that opens the sidebar, and it is cut like any other cell. */
+.mo-name {
+  display: flex; align-items: center; gap: 8px;
+  max-width: 100%; min-width: 0; padding: 0; border: 0; background: none;
+  color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.mo-name .m-dot { margin-top: 0; }
+.mo-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mo-name:hover b { color: var(--accent); text-decoration: underline; }
+/* A row murmur no longer ships keeps its name and says so beside it, on the same one line. The
+   pill yields first, down to its mark, and the name keeps what is left: at 1024 the full pill
+   pushed the name to nothing, and a name cut to nothing cannot be clicked. */
+.mo-provider-cell { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.mo-provider-cell .mo-name { min-width: 0; }
+.mo-orphan { flex: 0 1000 auto; min-width: 22px; overflow: hidden; }
+.mo-row-actions { gap: 6px; flex-wrap: nowrap; align-items: center; overflow: hidden; }
+.mo-row-actions > * { flex: none; }
+
+/* A phone keeps the table and its one line per row, and drops the columns the sidebar already
+   carries: how it is paid for, the last test and the buttons are all one tap away there. */
+@media (max-width: 640px) {
+  .mo-providers .mo-col-access, .mo-providers .mo-col-last, .mo-providers .mo-col-actions { display: none; }
+  .mo-providers th.mo-provider { width: 38%; }
+  .mo-providers th.mo-col-status { width: 40%; }
+  .mo-providers th.mo-col-models { width: 22%; }
+}
+
+/* The sidebar's one list of models. */
+.mo-list-block { display: grid; gap: 10px; min-width: 0; }
+.mo-list-head { align-items: center; gap: 8px; }
+.mo-list-head h3 { margin: 0; }
+.mo-list { table-layout: fixed; }
+.mo-list td { max-width: none; }
+.mo-list th.mo-tick { width: 32px; padding: 0 0 0 10px; }
+.mo-list td.mo-tick { padding: 0 0 0 10px; }
+.mo-list td.mo-tick input { margin: 0; vertical-align: middle; }
+.mo-list th.mo-label { width: 24%; }
+.mo-list th.mo-id { width: 24%; }
+.mo-list th.mo-tag { width: 164px; }
+.mo-list .pill { max-width: 100%; }
+.mo-note { color: var(--text-dim); }
+.mo-note.mo-cost-note { color: var(--tone-wait); }
+.mo-byname { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.mo-byname input { width: 100%; min-width: 0; max-width: 100%; }
+.mo-cost ul { margin: 0; padding-left: 18px; }
+.mo-cost li { overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .mo-list th.mo-id, .mo-list td.mo-id { display: none; }
+  .mo-list th.mo-label { width: 28%; }
+  .mo-list th.mo-tag { width: 142px; }
+}

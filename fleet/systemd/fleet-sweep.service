@@ -1,0 +1,13 @@
+[Unit]
+Description=fleet post-merge worktree janitor (sweep)
+# Installed and enabled by `fleet autosweep on`, which substitutes __FLEET__ with the
+# absolute fleet path. Runs WITHOUT --force, so it only ever removes worktrees whose
+# branch GitHub reports as MERGED and that are clean and not held by a live agent.
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin
+# Operator overrides (FLEET_HOME, FLEET_DASH_BIND, tuning) live in one file rather than in
+# each unit. Read last, so it wins over the defaults above. The leading '-' makes it optional.
+EnvironmentFile=-%h/.config/fleet/env
+ExecStart=__FLEET__ sweep

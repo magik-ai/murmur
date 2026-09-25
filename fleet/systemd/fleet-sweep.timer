@@ -1,0 +1,10 @@
+[Unit]
+Description=run fleet sweep periodically (post-merge worktree janitor)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=__INTERVAL__min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

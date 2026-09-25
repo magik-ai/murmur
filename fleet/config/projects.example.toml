@@ -1,0 +1,28 @@
+# Registered projects. Copy to ~/.config/fleet/projects.toml (or use `fleet add-project`).
+# Each project is a repo the fleet can spawn workers against; the worker grounds
+# itself in that repo's own CLAUDE.md.
+#
+# Ports: each lane is handed base+slot for its dev server, its API and its e2e harness, so two
+# lanes of one project never fight over a port. The bases are the project's own business; set
+# them in [<project>.ports]. Omit the table and fleet uses vite = port_base (5200), api = 8100,
+# e2e = 6100, which is what it used when those numbers were hardcoded.
+#
+# The example below is COMMENTED OUT on purpose. install.sh copies this file to
+# ~/.config/fleet/projects.toml as it stands, and a live table here would claim the very name the
+# README and `fleet help` tell a new operator to register, so `fleet add-project --name myproj`
+# would refuse it as already registered with different settings. Uncomment and edit, or just run
+# add-project and let it write the table for you.
+#
+# [myproj]
+# repo      = "your-org/your-repo"
+# path      = "~/work/myproj"
+# branch    = "main"
+# port_base = 5200        # legacy spelling of ports.vite_base, still honoured
+# # Optional command run after a clean `fleet group assemble`, from the temporary
+# # integration worktree. It must exit non-zero to block the integration PR.
+# # validation = "./scripts/validate.sh"
+#
+# [myproj.ports]
+# vite_base = 5200
+# api_base  = 8100
+# e2e_base  = 6100

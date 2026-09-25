@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""The tools fleet/dashboard/run.sh and the dashboard server reach for, faked.
+
+One script, linked under each name (systemctl, tmux, ss, tailscale). Every call is recorded in
+$FAKE_LOG like every other fake here. Nothing starts, stops or listens:
+
+  FAKE_STATE_DIR=<dir>          where `systemctl --user start|enable --now` leaves a marker
+  FAKE_DASH_PORT=<port>         the port `ss` reports as listening once the marker is there
+  FAKE_TAILSCALE_ANSWERS=a|b|c  what `tailscale ip -4` prints, one answer per call, the last one
+                                repeated; an empty answer prints nothing (no address yet)
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _fakelib import flag, out, record  # noqa: E402
+
+
+def marker():
+    return os.path.join(flag("FAKE_STATE_DIR", "/nonexistent"), "dashboard-started")
+
+
+def systemctl(args):
+    if "--user" not in args:
+        return 1
+    rest = [a for a in args if a != "--user"]
+    if rest[:1] == ["show-environment"]:
+        out("HOME=/fake")
+        return 0
+    if rest[:1] == ["start"] or rest[:2] == ["enable", "--now"]:
+        with open(marker(), "w", encoding="utf-8") as handle:
+            handle.write("started\n")
+        return 0
+    if rest[:1] == ["stop"]:
+        if os.path.exists(marker()):
+            os.unlink(marker())
+        return 0
+    if rest[:1] == ["is-active"]:
+        out("active" if os.path.exists(marker()) else "inactive")
+        return 0 if os.path.exists(marker()) else 3
+    return 0
+
+
+def tailscale(args):
+    if args[:2] != ["ip", "-4"]:
+        return 0
+    answers = flag("FAKE_TAILSCALE_ANSWERS").split("|")
+    counter = os.path.join(flag("FAKE_STATE_DIR", "/tmp"), "tailscale-calls")
+    calls = 0
+    if os.path.exists(counter):
+        with open(counter, encoding="utf-8") as handle:
+            calls = int(handle.read().strip() or 0)
+    with open(counter, "w", encoding="utf-8") as handle:
+        handle.write(str(calls + 1))
+    answer = answers[min(calls, len(answers) - 1)]
+    if answer:
+        out(answer)
+    return 0
+
+
+def main():
+    argv = record()
+    name, args = argv[0], argv[1:]
+    if name == "systemctl":
+        return systemctl(args)
+    if name == "tmux":
+        return 1 if args[:1] in (["has-session"], ["kill-session"]) else 0
+    if name == "ss":
+        if os.path.exists(marker()):
+            out(f"LISTEN 0 5 127.0.0.1:{flag('FAKE_DASH_PORT', '7878')} 0.0.0.0:*")
+        return 0
+    if name == "tailscale":
+        return tailscale(args)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

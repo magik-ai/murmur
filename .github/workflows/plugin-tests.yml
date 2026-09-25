@@ -1,0 +1,25 @@
+name: plugin tests
+
+on:
+  push:
+    branches: [main]
+    paths: ["plugin/**", "templates/**", "tests/**", "fleet/lib/machines.py",
+            "fleet/lib/host_presets.py", "fleet/lib/scrub.py", "fleet/tests/fakes/core/**",
+            ".github/workflows/plugin-tests.yml"]
+  pull_request:
+    paths: ["plugin/**", "templates/**", "tests/**", "fleet/lib/machines.py",
+            "fleet/lib/host_presets.py", "fleet/lib/scrub.py", "fleet/tests/fakes/core/**",
+            ".github/workflows/plugin-tests.yml"]
+
+jobs:
+  installed-copy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: The plugin works from a cache copy with nothing outside it
+        run: python tests/test_plugin_installed_copy.py -v
+      - name: /murmur:farm step by step, against fakes (no cloud call)
+        run: python tests/test_murmur_farm.py -v

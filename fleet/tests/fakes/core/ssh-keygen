@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""A fake ssh-keygen: makes a key pair on disk, prints a fingerprint, forgets a host key.
+
+Real enough for the farm's machines key to exist with the right modes, and nothing more.
+
+  FAKE_LOG=<path>              every call appended as one JSON line {argv, stdin}
+  FAKE_SSH_FINGERPRINT=<text>  the MD5 fingerprint `-l` prints (default aa:bb:cc:dd:ee:ff)
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fakelib import die, flag, out, record, value_after  # noqa: E402
+
+PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+
+
+def main():
+    argv = record()
+    args = argv[1:]
+    path = value_after(args, "-f")
+
+    if "-R" in args:                                   # forget a host key: nothing to do
+        return 0
+
+    if "-l" in args:                                   # print a fingerprint
+        out(f"256 MD5:{flag('FAKE_SSH_FINGERPRINT', 'aa:bb:cc:dd:ee:ff')} "
+            f"{value_after(args, '-C') or 'murmur'} (ED25519)")
+        return 0
+
+    if "-y" in args:                                   # the public half of a private key
+        out(f"{PUBLIC} murmur")
+        return 0
+
+    if "-t" in args:                                   # make a key pair
+        if not path:
+            die("ssh-keygen: no output file given")
+        folder = os.path.dirname(path)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n"
+                         "-----END OPENSSH PRIVATE KEY-----\n")
+        os.chmod(path, 0o600)
+        comment = value_after(args, "-C") or "murmur"
+        with open(path + ".pub", "w", encoding="utf-8") as handle:
+            handle.write(f"{PUBLIC} {comment}\n")
+        os.chmod(path + ".pub", 0o644)
+        out(f"Your identification has been saved in {path}")
+        return 0
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

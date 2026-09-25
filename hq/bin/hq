@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""hq - a thin wrapper so a clone runs without being installed.
+
+The whole CLI is the `hq` package under `src/`. This file exists so a clone is
+usable the moment it is cloned, and so `hq install` has something to link:
+that command symlinks THIS path, in THIS clone, into the bin dir, and `git
+pull` here is then the upgrade with no reinstall step. `Path.resolve()` follows
+the symlink, so `src/` is found beside the real file, not beside the link.
+
+It is not the head office's cache clone: the head office holds claims and
+mailboxes, not a copy of hq.
+
+An installed copy (`uv tool install --from . hq-cli`, `pipx install .`,
+`pip install .`) gets the same `main()` through the `hq` console script and
+does not need this file.
+"""
+
+import sys
+from pathlib import Path
+
+# The python floor, checked BEFORE the package is imported, because the failure
+# it prevents happens at import time: `hq.config` imports `tomllib`, which
+# arrived in 3.11, so on an older interpreter this no-install path would print a
+# ModuleNotFoundError traceback that never names the real requirement.
+# `requires-python` guards an install; nothing guards `python3 bin/hq`, and the
+# interpreter here is whatever `python3` happens to be on that machine.
+#
+# The push gate is the reason this is more than a nicer message. The pre-push
+# hook reads any non-zero exit from `check-push` as a blocked push, so on a
+# machine whose `python3` is older, a stack trace about a missing module would
+# freeze EVERY push. An hq that cannot start knows nothing about any claim, and
+# not knowing is never evidence of one, so the gate warns and lets the push
+# through, exactly as it does for a config file it cannot read.
+NEEDS = (3, 11)
+if sys.version_info < NEEDS:
+    detail = ("needs python %d.%d or newer, this is python %s (%s); run it with a "
+              "newer interpreter, or install it with "
+              "`uv tool install --from . hq-cli`"
+              % (NEEDS[0], NEEDS[1],
+                 ".".join(str(part) for part in sys.version_info[:3]),
+                 sys.executable))
+    if sys.argv[1:2] == ["check-push"]:
+        sys.stderr.write("hq: WARNING - %s; pushing unverified (fail-open)\n" % detail)
+        raise SystemExit(0)
+    raise SystemExit("hq: %s" % detail)
+
+SRC = Path(__file__).resolve().parent.parent / "src"
+if (SRC / "hq" / "cli.py").exists():
+    # The clone wins over any installed copy: whoever ran this path meant this code.
+    sys.path.insert(0, str(SRC))
+
+from hq.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    main()

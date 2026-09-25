@@ -1,0 +1,41 @@
+name: fleet tests
+
+on:
+  push:
+    branches: [main]
+    paths: ["fleet/**", "farm/**", ".github/workflows/fleet-tests.yml"]
+  pull_request:
+    paths: ["fleet/**", "farm/**", ".github/workflows/fleet-tests.yml"]
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: bash -n fleet/bin/fleet && bash -n fleet/install.sh && bash -n fleet/dashboard/run.sh
+      - name: Policy, identity, ports and the env file
+        run: bash fleet/tests/policy-test.sh fleet/bin/fleet
+      - name: Sensors and supervisor
+        run: |
+          cd fleet
+          python3 tests/sensors-test.py
+          python3 tests/supervisor-test.py lib/supervisor.py
+      - name: Stream parser
+        run: |
+          cd fleet
+          python3 tests/model-switch-test.py
+          bash tests/silent-start-test.sh
+      - name: Dashboard and the model catalog
+        run: |
+          cd fleet
+          python3 dashboard/test_server.py
+          python3 dashboard/test_github_access.py
+          node dashboard/test_token_fragment.mjs
+          python3 tests/models-test.py
+      - name: Hosting (scrub, machines, hosts)
+        run: |
+          cd fleet
+          for test in tests/scrub-test.py tests/hosting-test.py tests/one-click-farm-test.py; do
+            if [ -f "$test" ]; then python3 "$test" || exit 1; fi
+          done

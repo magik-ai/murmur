@@ -1,0 +1,8 @@
+{
+  "name": "murmur",
+  "description": "Open-source orchestrator for coding agents: run Claude Code and Codex as a team, with repository setup and checks, a DigitalOcean farm, skills for orchestration, merging and night mode, and hooks that keep sessions inside the team's rules",
+  "version": "0.1.0",
+  "author": {
+    "name": "magik-ai"
+  }
+}

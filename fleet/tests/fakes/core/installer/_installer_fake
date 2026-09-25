@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Every tool farm/install.sh reaches for after its preflight, faked, so a test can run the
+installer from its first line to its last on a scratch HOME without changing the machine.
+
+One script, linked under each name it answers to (gh, hq, loginctl, systemctl, uv, claude,
+apt-get, curl, getconf). Each call is recorded in $FAKE_LOG like every other fake here. Nothing
+is downloaded, installed or logged in to: `gh repo clone` makes a stand-in murmur checkout whose
+fleet/install.sh copies the real example policy, as the real one does, and writes its own argv
+to $HOME/fleet-install.txt.
+
+  FAKE_MEMORY_GB=3.8   the memory `getconf` reports, in GB; without it a 16 GB machine
+"""
+import os
+import shutil
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _fakelib import die, out, record  # noqa: E402
+
+# The real fleet/install.sh makes the fleet's config directory and copies the example policy
+# there when there is none; so does the stand-in, with the real example.
+FLEET_INSTALL = """#!/usr/bin/env bash
+conf="${FLEET_CONFIG:-$HOME/.config/fleet}"
+mkdir -p "$conf"
+[ -f "$conf/policy.toml" ] || cp "$(dirname "$0")/config/policy.example.toml" "$conf/policy.toml"
+printf '%s\\n' "$*" >> "$HOME/fleet-install.txt"
+"""
+# This file is fleet/tests/fakes/core/installer/_installer_fake.
+FLEET = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), *[".."] * 4))
+EXAMPLE_POLICY = os.path.join(FLEET, "config", "policy.example.toml")
+PAGE_SIZE = 4096
+
+# The stand-in dashboard script records how the installer called it and starts nothing.
+DASHBOARD_RUN = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$HOME/dashboard-run.txt"
+"""
+
+
+def gh(args):
+    if args[:1] == ["--version"]:
+        out("gh version 2.60.0 (fake)")
+    elif args[:2] == ["auth", "status"]:
+        out("Logged in to github.com as fakeuser")
+    elif args[:2] == ["api", "user"]:
+        out("fakeuser")
+    elif args[:2] == ["repo", "clone"]:
+        target = args[3]
+        os.makedirs(os.path.join(target, "fleet"), exist_ok=True)
+        os.makedirs(os.path.join(target, "hq", "bin"), exist_ok=True)
+        path = os.path.join(target, "fleet", "install.sh")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(FLEET_INSTALL)
+        os.chmod(path, 0o755)
+        os.makedirs(os.path.join(target, "fleet", "config"), exist_ok=True)
+        shutil.copy(EXAMPLE_POLICY, os.path.join(target, "fleet", "config",
+                                                 "policy.example.toml"))
+        with open(os.path.join(target, "hq", "bin", "hq"), "w", encoding="utf-8") as handle:
+            handle.write("raise SystemExit(0)\n")
+        os.makedirs(os.path.join(target, "fleet", "dashboard"), exist_ok=True)
+        path = os.path.join(target, "fleet", "dashboard", "run.sh")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(DASHBOARD_RUN)
+        os.chmod(path, 0o755)
+    elif args[:2] == ["repo", "view"]:
+        out("{}")
+    else:
+        die("fake gh: not a call the installer makes: " + " ".join(args))
+    return 0
+
+
+def getconf(args):
+    """The two values the installer multiplies into this machine's memory."""
+    if args == ["PAGE_SIZE"]:
+        out(str(PAGE_SIZE))
+    elif args == ["_PHYS_PAGES"]:
+        gigabytes = float(os.environ.get("FAKE_MEMORY_GB") or 16)
+        out(str(int(gigabytes * 1024 ** 3 // PAGE_SIZE)))
+    else:
+        die("fake getconf: not a value the installer asks for: " + " ".join(args))
+    return 0
+
+
+def main():
+    argv = record()
+    name, args = argv[0], argv[1:]
+    if name == "gh":
+        return gh(args)
+    if name == "loginctl":
+        if "Linger" in args:
+            out("yes")
+        return 0
+    if name == "uv":
+        out("uv 0.5.0")
+        return 0
+    if name == "claude":
+        out("2.1.0 (Claude Code)")
+        return 0
+    if name in ("hq", "systemctl"):
+        return 0
+    if name == "getconf":
+        return getconf(args)
+    die(f"fake {name}: this test never installs or downloads anything", 1)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

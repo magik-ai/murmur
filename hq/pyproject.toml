@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hq-cli"
+version = "0.1.0"
+description = "Coordination for a fleet of coding agents pushing under one GitHub login"
+readme = "README.md"
+# 3.11 is the oldest supported python: the config file is read with the
+# standard library's tomllib, which arrived in 3.11.
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["agents", "coordination", "github", "git", "cli"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Version Control :: Git",
+]
+# No runtime dependencies: hq has to work on a machine where the only
+# reliable things are python, git and gh, so it uses nothing else.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+hq = "hq.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/magik-ai/murmur"
+Source = "https://github.com/magik-ai/murmur/tree/main/hq"
+Issues = "https://github.com/magik-ai/murmur/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,27 @@
+<!-- @dsCard group="Forms" height=170 subtitle="Checkbox, radio, switch" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>preview</title>
+<style>body{margin:0;padding:16px;background:var(--paper)}</style></head>
+<body class="mm-root">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--space-4)">
+  <div style="display:grid;gap:var(--space-3);align-content:start">
+    <label class="mm-check"><input type="checkbox" checked>Open a pull request</label>
+    <label class="mm-check"><input type="checkbox">Run the browser tests</label>
+    <label class="mm-check"><input type="checkbox" id="ind">Every project</label>
+  </div>
+  <div style="display:grid;gap:var(--space-3);align-content:start">
+    <label class="mm-radio"><input type="radio" name="r" checked>Opus</label>
+    <label class="mm-radio"><input type="radio" name="r">Sonnet</label>
+    <label class="mm-radio"><input type="radio" name="r" disabled>Fable, bills credits</label>
+  </div>
+  <div style="display:grid;gap:var(--space-3);align-content:start">
+    <label class="mm-switch"><input type="checkbox" role="switch" checked>Sweep every ten minutes</label>
+    <label class="mm-switch"><input type="checkbox" role="switch">Night mode</label>
+  </div>
+</div>
+<script>
+document.getElementById("ind").indeterminate = true;
+</script>
+</body>
+</html>

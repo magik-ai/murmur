@@ -1,0 +1,1048 @@
+/* murmur dashboard: tokens, layout, components. One file, sectioned.
+   Every colour in this file is a token. A literal belongs in the token blocks below and
+   nowhere else, so a theme can be changed in one place and a check can prove it. */
+
+/* ---------------------------------------------------------------- 1. tokens */
+
+:root {
+  color-scheme: light;
+  --accent: #5B4A8A;
+  --accent-hover: #4C3D7A;
+  /* One step paler than the Almanac's lilac field: a selected row, tab or card carries small
+     state words, and on the field itself amber and green read at 4.1 to 1. */
+  --accent-soft: #E8DBEF;
+  --accent-text: #F7EEDC;
+  --bg: #F7EEDC;
+  --surface: #FBF6EC;
+  --surface-2: #EFE3CC;
+  --surface-3: #E3D7C3;
+  --line: #DAD1C4;
+  --line-strong: #877C7C;
+  --text: #2B1F2E;
+  --text-dim: #6A5A68;
+  --text-faint: #6A5A68;
+  --tone-run: #3B5591;
+  --tone-wait: #8E5410;
+  --tone-fail: #9B3746;
+  --tone-done: #3D6B52;
+  --tone-pause: #6A5A68;
+  --tone-run-bg: #C9CEF0;
+  --tone-wait-bg: #F3E2A6;
+  --tone-fail-bg: #EDCBD2;
+  --tone-done-bg: #CBE3D3;
+  --tone-pause-bg: #EFE3CC;
+  --skeleton: #EFE3CC;
+  --skeleton-hi: #FFFBF3;
+  /* Twelve marks. A code name is given one of these by its own module; a colour that arrives
+     from a server is never written into the page, it only picks which of these twelve to use. */
+  --mark-0: #c2584a; --mark-1: #a8701f; --mark-2: #8a7d1a; --mark-3: #5e8a35;
+  --mark-4: #2f8a5c; --mark-5: #1c8783; --mark-6: #2a80a8; --mark-7: #4a74c4;
+  --mark-8: #6a6ad0; --mark-9: #8a5fc4; --mark-10: #b0509f; --mark-11: #c1526f;
+  --shadow-1: none;
+  --shadow-2: none;
+  --scrim: rgba(43, 31, 46, 0.28);
+  --chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M3 4.6l3 3 3-3' stroke='%236A5A68' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --accent: #B7A6EC;
+    --accent-hover: #CABCF4;
+    --accent-soft: #3E3844;
+    --accent-text: #1F1C24;
+    --bg: #1F1C24;
+    --surface: #28242E;
+    --surface-2: #181620;
+    --surface-3: #25222B;
+    --line: #3C383D;
+    --line-strong: #86817E;
+    --text: #EDE6D9;
+    --text-dim: #B3A9B3;
+    --text-faint: #B3A9B3;
+    --tone-run: #9EBFE3;
+    --tone-wait: #E9BD6E;
+    --tone-fail: #EE9A92;
+    --tone-done: #A8C99A;
+    --tone-pause: #B3A9B3;
+    --tone-run-bg: #3A3845;
+    --tone-wait-bg: #413C39;
+    --tone-fail-bg: #403840;
+    --tone-done-bg: #3B3C40;
+    --tone-pause-bg: #181620;
+    --skeleton: #181620;
+    --skeleton-hi: #312C38;
+    --mark-0: #f09080; --mark-1: #e0a45c; --mark-2: #c9b84e; --mark-3: #96c46a;
+    --mark-4: #5fc892; --mark-5: #47c5bf; --mark-6: #5cbde8; --mark-7: #86aef5;
+    --mark-8: #a3a6f8; --mark-9: #c193f0; --mark-10: #e388d3; --mark-11: #f0889f;
+    --shadow-1: none;
+    --shadow-2: none;
+    --scrim: rgba(12, 10, 16, 0.6);
+    --chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M3 4.6l3 3 3-3' stroke='%23B3A9B3' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: #B7A6EC;
+  --accent-hover: #CABCF4;
+  --accent-soft: #3E3844;
+  --accent-text: #1F1C24;
+  --bg: #1F1C24;
+  --surface: #28242E;
+  --surface-2: #181620;
+  --surface-3: #25222B;
+  --line: #3C383D;
+  --line-strong: #86817E;
+  --text: #EDE6D9;
+  --text-dim: #B3A9B3;
+  --text-faint: #B3A9B3;
+  --tone-run: #9EBFE3;
+  --tone-wait: #E9BD6E;
+  --tone-fail: #EE9A92;
+  --tone-done: #A8C99A;
+  --tone-pause: #B3A9B3;
+  --tone-run-bg: #3A3845;
+  --tone-wait-bg: #413C39;
+  --tone-fail-bg: #403840;
+  --tone-done-bg: #3B3C40;
+  --tone-pause-bg: #181620;
+  --skeleton: #181620;
+  --skeleton-hi: #312C38;
+  --mark-0: #f09080; --mark-1: #e0a45c; --mark-2: #c9b84e; --mark-3: #96c46a;
+  --mark-4: #5fc892; --mark-5: #47c5bf; --mark-6: #5cbde8; --mark-7: #86aef5;
+  --mark-8: #a3a6f8; --mark-9: #c193f0; --mark-10: #e388d3; --mark-11: #f0889f;
+  --shadow-1: none;
+  --shadow-2: none;
+  --scrim: rgba(12, 10, 16, 0.6);
+  --chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M3 4.6l3 3 3-3' stroke='%23B3A9B3' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+/* Wide-gamut refinement. The sRGB values above stay the fallback; these keep the five status
+   colours at the same perceived strength in both themes, which hex alone cannot promise. */
+@supports (color: oklch(0.5 0.1 280)) {
+  :root {
+    --mark-0: oklch(0.55 0.14 25); --mark-1: oklch(0.55 0.14 55); --mark-2: oklch(0.55 0.14 85); --mark-3: oklch(0.55 0.14 120);
+    --mark-4: oklch(0.55 0.14 150); --mark-5: oklch(0.55 0.14 180); --mark-6: oklch(0.55 0.14 210); --mark-7: oklch(0.55 0.14 240);
+    --mark-8: oklch(0.55 0.14 265); --mark-9: oklch(0.55 0.14 290); --mark-10: oklch(0.55 0.14 320); --mark-11: oklch(0.55 0.14 350);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --mark-0: oklch(0.75 0.13 25); --mark-1: oklch(0.75 0.13 55); --mark-2: oklch(0.75 0.13 85); --mark-3: oklch(0.75 0.13 120);
+      --mark-4: oklch(0.75 0.13 150); --mark-5: oklch(0.75 0.13 180); --mark-6: oklch(0.75 0.13 210); --mark-7: oklch(0.75 0.13 240);
+      --mark-8: oklch(0.75 0.13 265); --mark-9: oklch(0.75 0.13 290); --mark-10: oklch(0.75 0.13 320); --mark-11: oklch(0.75 0.13 350);
+    }
+  }
+  :root[data-theme="dark"] {
+    --mark-0: oklch(0.75 0.13 25); --mark-1: oklch(0.75 0.13 55); --mark-2: oklch(0.75 0.13 85); --mark-3: oklch(0.75 0.13 120);
+    --mark-4: oklch(0.75 0.13 150); --mark-5: oklch(0.75 0.13 180); --mark-6: oklch(0.75 0.13 210); --mark-7: oklch(0.75 0.13 240);
+    --mark-8: oklch(0.75 0.13 265); --mark-9: oklch(0.75 0.13 290); --mark-10: oklch(0.75 0.13 320); --mark-11: oklch(0.75 0.13 350);
+  }
+}
+
+:root {
+  /* The Starling Almanac: Instrument Sans for everything inside the app, headings included, and
+     IBM Plex Mono for what the instruments print. The serif never appears in here. */
+  --font-ui: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  /* Nothing is square: cards and dialogs on the md step, controls on the sm step. */
+  --radius: 12px;
+  --radius-sm: 7px;
+  --radius-xs: 6px;
+  /* One height for every control on a screen (buttons, fields, selects, switches), and one
+     smaller step for the buttons that sit inside a table row or a card. */
+  --control: 34px;
+  --control-sm: 28px;
+  --head: 40px;
+  --row: 40px;
+  /* The state marks, drawn in the state's own ink through a mask: a state reads by its shape as
+     well as its colour. Running is a bird in flight, never a dot. */
+  --m-run: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M0.4 6Q3.2 1.8 6 6.8Q8.8 1.8 11.6 6Q8.8 5.2 6 9.4Q3.2 5.2 0.4 6Z' fill='black'/></svg>");
+  --m-wait: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><circle cx='6' cy='6' r='3.7' stroke='black' stroke-width='1.6' fill='none'/></svg>");
+  --m-fail: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M3.6 3.6l4.8 4.8M8.4 3.6l-4.8 4.8' stroke='black' stroke-width='1.8' stroke-linecap='round'/></svg>");
+  --m-done: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.6 6.4l2.3 2.3 4.6-4.9' stroke='black' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  --m-pause: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M4.4 3.4v5.2M7.6 3.4v5.2' stroke='black' stroke-width='1.8' stroke-linecap='round'/></svg>");
+  --m-live: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><circle cx='6' cy='6' r='3.3' fill='black'/></svg>");
+  --sidebar: 216px;
+  --gap: 24px;
+  --motion: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion: 1ms; }
+  * { animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
+}
+
+/* ------------------------------------------------------------- 2. base */
+
+* { box-sizing: border-box; }
+
+/* A class that sets display beats the browser's own rule for [hidden], and then a closed
+   drawer stays on the screen. This one line is what keeps `element.hidden = true` honest. */
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/20px var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 600; }
+h1 { font-size: 14px; }
+h2 { font-size: 15px; line-height: 22px; }
+h3 { font-size: 13px; }
+p { margin: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+kbd {
+  display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px;
+  font: 500 11px/1 var(--font-mono);
+  border: 1px solid var(--line-strong); border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  color: var(--text-dim);
+}
+code, .mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.num { font-feature-settings: "tnum" 1; }
+.muted { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.skip {
+  position: absolute; left: -999px; top: 0; z-index: 60;
+  background: var(--surface); padding: 8px 12px; border-radius: var(--radius);
+}
+.skip:focus { left: 8px; top: 8px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ------------------------------------------------------------- 3. layout */
+
+#app {
+  display: grid;
+  grid-template-columns: var(--sidebar) minmax(0, 1fr);
+  grid-template-rows: 56px minmax(0, 1fr);
+  grid-template-areas: "side top" "side view";
+  min-height: 100vh;
+}
+
+#sidebar {
+  grid-area: side;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.side-head {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+/* The mark: the lamp-lit bird and the seven it watches, one drawing in two inks. The name
+   beside it is the one place the serif appears inside the app, because it is the logo, not a
+   heading. */
+.mark { width: 24px; height: 24px; flex: none; background: url("/static/mark.svg") center / contain no-repeat; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mark { background-image: url("/static/mark-dusk.svg"); } }
+:root[data-theme="dark"] .mark { background-image: url("/static/mark-dusk.svg"); }
+.mark-name { font: 480 19px/1 "Fraunces", Georgia, serif; font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 24; letter-spacing: -0.01em; }
+
+#navlinks { padding: 10px 8px; display: flex; flex-direction: column; gap: 1px; flex: 1; }
+.navlink {
+  display: flex; align-items: center; gap: 10px;
+  height: var(--control); padding: 0 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--motion) var(--ease), color var(--motion) var(--ease);
+}
+.navlink:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+.navlink[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+.navlink svg { width: 16px; height: 16px; flex: none; }
+.navlink .count {
+  margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--text-faint);
+}
+.side-foot { padding: 10px 16px; border-top: 1px solid var(--line); font-size: 11px; }
+
+/* The header has two groups and nothing else: on the left how the
+   farm is, in plain words; on the right what the reader can change, every piece the same
+   field or button at the same height. The page's name is not here: the sidebar already says
+   which tab is open, so the title stays for a screen reader only. */
+#topbar {
+  grid-area: top;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 16px 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 20;
+}
+.top-status { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.top-controls { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.top-tools { display: flex; align-items: center; gap: 8px; flex: none; }
+/* A project name may be forty characters, and a select sizes itself to its longest option: the
+   two fields give way before Search and the theme do. */
+.top-controls .field-label { flex: 0 1 auto; min-width: 120px; max-width: 280px; }
+.top-controls .field-label select { flex: 1 1 auto; min-width: 0; max-width: none; }
+.freshness, .sweep-note { color: var(--text-dim); font-size: 12px; white-space: nowrap; }
+.freshness.stale, .sweep-note.bad { color: var(--tone-wait); }
+
+#view { grid-area: view; padding: 20px 24px 64px; min-width: 0; }
+
+/* A tab that holds itself to the window: the shell stops scrolling and the view is given
+   exactly what is left, so the panes inside it can own their own scrolling. */
+body.fixed-page { overflow: hidden; }
+body.fixed-page #app { height: 100vh; }
+body.fixed-page #view {
+  min-height: 0; overflow: hidden; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.readonly-strip { flex: none; margin-bottom: 12px; font-size: 12px; }
+body.fixed-page .readonly-strip { margin-bottom: 0; }
+
+@media (max-width: 900px) {
+  :root { --sidebar: 56px; }
+  .mark-name, .navlink span.label, .side-foot, .navlink .count { display: none; }
+  /* The labels are gone at this width, so the link is only as wide as its icon unless it is
+     told otherwise. A navigation target smaller than a fingertip is not a navigation target. */
+  .navlink { justify-content: center; padding: 0; min-width: 40px; }
+  .side-head { justify-content: center; padding: 0; }
+  #view { padding: 16px; }
+}
+
+@media (max-width: 600px) {
+  #app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: "top" "side" "view";
+  }
+  #sidebar {
+    height: auto; position: static; border-right: 0; border-bottom: 1px solid var(--line);
+  }
+  .side-head { display: none; }
+  #navlinks { flex-direction: row; overflow-x: auto; padding: 6px; gap: 4px; }
+  .navlink { flex: none; }
+  /* On a phone the header is two rows rather than one that scrolls sideways: the farm's state
+     with Search and the theme, then the two fields side by side at half the width each. */
+  #topbar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "status tools" "controls controls";
+    padding: 8px 12px; row-gap: 8px; column-gap: 8px;
+  }
+  .top-status { grid-area: status; gap: 12px; }
+  .top-tools { grid-area: tools; }
+  .top-controls { grid-area: controls; margin-left: 0; }
+  .top-controls .field-label { flex: 1 1 0; min-width: 0; }
+  /* On a phone the filters share the width in equal halves instead of each sizing itself to
+     its longest option, which stacked them at four different widths. */
+  .pane-controls .field-label, .pane-controls .search { flex: 1 1 140px; max-width: none; }
+  .field-label select { flex: 1 1 auto; max-width: none; }
+  #paletteOpen kbd { display: none; }
+}
+
+/* --------------------------------------------------------- 4. controls */
+
+/* One control system. Every button, field, select and switch on a screen is one height and
+   speaks one type, so a row of them lines up without anybody lining it up. Without it, a
+   single filter row held a 12px caption beside a 13px select beside a 24px bubble beside a 34px
+   switch. */
+button { font: inherit; color: inherit; }
+
+.ghost-button, .button {
+  height: var(--control);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text);
+  font: 550 13px/1 var(--font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--motion) var(--ease), border-color var(--motion) var(--ease);
+}
+.ghost-button:hover, .button:hover { background: var(--surface-2); }
+.button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.button[disabled], .ghost-button[disabled], select[disabled], input[disabled], textarea[disabled] { opacity: 0.5; cursor: not-allowed; }
+.button[disabled]:hover, .ghost-button[disabled]:hover { background: transparent; }
+.button.primary[disabled]:hover { background: var(--accent); }
+.button.small, .ghost-button.small { height: var(--control-sm); padding: 0 10px; font-size: 12px; }
+
+/* The field rule has no weight of its own (:where), so any view that shapes one of its fields
+   (the palette's borderless box, a port field's width) wins without a fight. */
+select, textarea, :where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="hidden"])) {
+  font: 400 13px/20px var(--font-ui);
+  height: var(--control);
+  padding: 0 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--line-strong);
+  background-color: var(--surface);
+  color: var(--text);
+  min-width: 0;
+  /* A project name is written by whoever registered it, and a select sizes itself to its
+     longest option. Without a ceiling one long name drags the whole page sideways. */
+  max-width: min(240px, 100%);
+}
+::placeholder { color: var(--text-dim); opacity: 1; }
+select:focus-visible, textarea:focus-visible, input:focus-visible { border-color: var(--accent); outline-offset: 1px; }
+/* The select draws its own chevron, 12px and inset 10px, and its text stops well short of it:
+   the browser's own arrow sat on the right border. */
+select {
+  -webkit-appearance: none; appearance: none;
+  padding-right: 32px;
+  background-image: var(--chevron);
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+  text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+  cursor: pointer;
+}
+textarea { height: auto; padding: 7px 10px; resize: vertical; min-height: 64px; max-width: 100%; }
+input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; }
+.field { display: inline-flex; min-width: 0; }
+
+/* A filter carries its own name inside its border ("Status  Any"): the name and the value are
+   one control of one height in one type, never a caption floating beside a box. */
+.field-label {
+  display: inline-flex; align-items: center;
+  height: var(--control); min-width: 0; max-width: 100%;
+  padding-left: 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-dim); font: 400 13px/20px var(--font-ui);
+}
+.field-label > span { flex: none; white-space: nowrap; }
+.field-label select, .field-label input {
+  height: calc(var(--control) - 2px);
+  border: 0; border-radius: var(--radius-xs); background-color: transparent;
+  padding-left: 6px;
+}
+.field-label:focus-within { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
+.field-label select:focus-visible, .field-label input:focus-visible { outline: none; }
+
+/* One control, three settings. Three side by side did not fit a phone header, and a header
+   that has to be scrolled sideways is a header a reader will not find things in. */
+.icon-button {
+  width: var(--control); height: var(--control); flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.icon-button:hover { background: var(--surface-2); color: var(--text); }
+.icon-button svg { width: 16px; height: 16px; }
+
+/* A few settings side by side that take effect at once: a sunk track, the chosen one raised. */
+.segmented {
+  display: inline-flex; gap: 2px; padding: 3px; flex: none;
+  height: var(--control);
+  border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.segmented button {
+  height: calc(var(--control) - 6px); padding: 0 10px;
+  border: 1px solid transparent; border-radius: 5px;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  font: 550 12.5px/1 var(--font-ui); white-space: nowrap;
+  transition: background var(--motion) var(--ease), color var(--motion) var(--ease);
+}
+.segmented button:hover { color: var(--text); }
+.segmented button[aria-pressed="true"] { background: var(--surface); border-color: var(--line); color: var(--text); }
+.segmented button[disabled] { cursor: not-allowed; opacity: 0.55; }
+
+/* Twenty filters wrap onto a second line, which is fine. What is not fine is a row of chips
+   at two different heights, so the height is fixed and the rows are centred on each other. */
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; row-gap: 6px; }
+.chip {
+  height: var(--control); flex: none; display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong); background: transparent;
+  color: var(--text-dim); cursor: pointer; font: 550 12.5px/1 var(--font-ui);
+}
+.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.chip .count { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* A name, not a state: the engine a lane runs on, a project, a region. */
+.tag {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  height: 20px; padding: 0 7px; border-radius: var(--radius-xs);
+  border: 1px solid var(--line-strong); background: transparent;
+  font: 400 11.5px/1 var(--font-mono); color: var(--text-dim); white-space: nowrap;
+}
+
+/* --------------------------------------------------- 5. status vocabulary */
+
+/* A state is a mark and a word in the state's own ink, like a note in an almanac margin: no
+   bubble, no fill, and it is only as tall as the line it sits on. Each state has its own
+   shape, so it reads without colour. The class keeps its old name so every view keeps it. */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; vertical-align: middle;
+  font: 550 12.5px/16px var(--font-ui); white-space: nowrap;
+  color: var(--text-dim);
+  max-width: 100%; min-width: 0;
+}
+.pill .pill-text { overflow: hidden; text-overflow: ellipsis; }
+.pill .dot, .check .dot {
+  width: 12px; height: 12px; flex: none; background: currentColor;
+  -webkit-mask: var(--m-pause) center / contain no-repeat; mask: var(--m-pause) center / contain no-repeat;
+}
+.pill.run { color: var(--tone-run); }
+.pill.wait { color: var(--tone-wait); }
+.pill.fail { color: var(--tone-fail); }
+.pill.done { color: var(--tone-done); }
+.pill.run .dot, .check.run .dot { width: 14px; -webkit-mask-image: var(--m-run); mask-image: var(--m-run); }
+.pill.wait .dot { -webkit-mask-image: var(--m-wait); mask-image: var(--m-wait); }
+.pill.fail .dot { -webkit-mask-image: var(--m-fail); mask-image: var(--m-fail); }
+.pill.done .dot { -webkit-mask-image: var(--m-done); mask-image: var(--m-done); }
+.pill.run .dot { animation: breathe 2.4s var(--ease) infinite; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+/* The rail is the sunk paper, as the system draws it: on the night theme the old step was one
+   shade off the card, so a bar at 8% floated with no track to read it against. */
+.bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--motion) var(--ease); }
+.bar.wait > i { background: var(--tone-wait); }
+.bar.fail > i { background: var(--tone-fail); }
+.bar.done > i { background: var(--tone-done); }
+
+.flash { animation: flash 280ms var(--ease); }
+@keyframes flash { from { background: var(--accent-soft); } to { background: transparent; } }
+
+/* --------------------------------------------------------- 6. surfaces */
+
+.section { margin-bottom: var(--gap); }
+.section-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 12px; min-height: var(--control);
+}
+.section-head h2 { font: 600 15px/22px var(--font-ui); letter-spacing: -0.005em; }
+/* A table inside a section that holds two of them is named by a smaller heading above it. */
+.subhead { font: 600 13px/20px var(--font-ui); color: var(--text-dim); margin: 16px 0 8px; }
+.section-head + .subhead { margin-top: 0; }
+.subhead-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 16px 0 8px; }
+.subhead-row .subhead { margin: 0; }
+.subhead-row .muted { font-size: 12px; }
+
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  min-width: 0;
+}
+.card-pad { padding: 14px 16px; }
+/* The handful of layout jobs a view would otherwise write into a style attribute. */
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.spacer { margin-left: auto; }
+.gap { height: var(--gap); }
+.gap-sm { height: 12px; }
+.wrap { white-space: normal; }
+.skeleton.value { height: 24px; width: 48px; }
+
+.grid { display: grid; gap: 12px; }
+/* A name is written by an agent and can be any length. Nothing a route sent may set the
+   width of a column, so every cell in a grid is allowed to be narrower than its content. */
+.grid > * { min-width: 0; }
+.grid.cards { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.grid.tiles { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.grid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+
+.kv { display: grid; grid-template-columns: minmax(96px, auto) minmax(0, 1fr); gap: 4px 14px; }
+.kv dt { color: var(--text-dim); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+.metric { display: flex; flex-direction: column; gap: 3px; color: var(--text); }
+a.metric { text-decoration: none; }
+a.metric:hover .value { color: var(--accent); }
+.metric .label { color: var(--text-dim); font: 550 12px/16px var(--font-ui); }
+.metric .value {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 22px; letter-spacing: -0.02em;
+}
+.metric .value.sm { font-size: 15px; }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+/* A table inside a card has the card's edge already: a second border inside it drew a double
+   rim round every table on the Machine tab. */
+.card > .tablewrap { border: 0; border-radius: inherit; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; line-height: 20px; }
+/* Column names are words, in the sans, even over a column of figures. */
+thead th {
+  height: var(--head);
+  text-align: left; padding: 0 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-dim); font: 550 12px/16px var(--font-ui); white-space: nowrap;
+}
+thead th:has(.sortby) { padding: 0; }
+.sortby {
+  height: var(--head); width: 100%; padding: 0 12px;
+  background: none; border: 0; cursor: pointer;
+  color: inherit; font: inherit; text-align: inherit;
+}
+.sortby:hover { color: var(--text); }
+/* Every table's actions sit in one last column of one width, and every button in it is the same
+   size, so the actions line up down a table and from one table to the next.
+   Three buttons at most; a destructive one is always last, in the danger ink. */
+th.actions, td.actions { width: 276px; min-width: 276px; max-width: 276px; text-align: right; }
+th.actions.one, td.actions.one { width: 104px; min-width: 104px; max-width: 104px; }
+/* Between a phone and a 1600px window the widest tables lay out in fixed columns, so
+   they fit the window instead of scrolling sideways: a cell that does not fit is cut, with its
+   whole text on the title, and the machines lose their Last check column.
+   A phone keeps the sideways scroll: six columns do not share 358px. */
+@media (min-width: 641px) and (max-width: 1599px) {
+  table.h-machines, table.m-services { table-layout: fixed; }
+  table.h-machines th, table.m-services th { overflow: hidden; text-overflow: ellipsis; }
+  table.h-machines .h-col-last { display: none; }
+  table.m-services .m-col-svc { width: 17%; }
+  table.m-services .m-col-svc-state { width: 11%; }
+  table.m-services .m-col-change { width: 12%; }
+}
+/* The agents table has eight columns, and below 1600 it lays them out in fixed shares so it
+   fits the window: a cut cell keeps its words on its title, as the Machine tables do. */
+@media (min-width: 641px) and (max-width: 1599px) {
+  table.agents-table { table-layout: fixed; }
+  table.agents-table th { overflow: hidden; text-overflow: ellipsis; }
+  table.agents-table th:nth-child(1) { width: 22%; }
+  table.agents-table th:nth-child(2) { width: 11%; }
+  table.agents-table th:nth-child(3) { width: 14%; }
+  table.agents-table th:nth-child(4) { width: 17%; }
+  table.agents-table th:nth-child(5) { width: 12%; }
+  table.agents-table .model-cell { display: flex; overflow: hidden; }
+}
+/* Accounts need the fixed columns only below 1440: at 1440 its three subscription windows fit
+   the natural layout, and fixed columns would cut the third. */
+@media (min-width: 641px) and (max-width: 1439px) {
+  table.m-accounts { table-layout: fixed; }
+  table.m-accounts th { overflow: hidden; text-overflow: ellipsis; }
+  table.m-accounts .m-col-account { width: 24%; }
+  table.m-accounts .m-col-login { width: 20%; }
+  table.m-accounts .m-col-read { width: 12%; }
+  table.m-accounts td.m-windows { max-width: none; }
+}
+td.actions .row, td.actions > .p-inline { justify-content: flex-end; flex-wrap: nowrap; gap: 6px; }
+td.actions .button, td.actions .ghost-button {
+  width: 80px; height: var(--control-sm); padding: 0 6px; justify-content: center;
+  font-size: 12px; overflow: hidden;
+}
+td.actions .danger { color: var(--tone-fail); }
+/* The sorted column says so with the same chevron the selects draw, turned for ascending. */
+.sortby.asc::after, .sortby.desc::after {
+  content: ""; display: inline-block; width: 10px; height: 10px; margin-left: 4px; vertical-align: -1px;
+  background: var(--chevron) center / contain no-repeat;
+}
+.sortby.asc::after { transform: rotate(180deg); }
+tbody tr.clickable:focus-visible td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+tbody td {
+  height: var(--row); padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;
+}
+tbody tr:last-child td { border-bottom: 0; }
+/* The buttons in a cell are one line like the rest of the row: at phone width a wrapped Start,
+   Stop, Restart made two rows of the Services table twice as tall as the others. */
+tbody td .row { flex-wrap: nowrap; }
+tbody tr.clickable { cursor: pointer; }
+tbody tr.clickable:hover td { background: var(--surface-2); }
+td.num { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: right; }
+/* .num puts figures in mono; a header over them is still a word. */
+thead th.num { text-align: right; font-family: var(--font-ui); }
+/* A command in a cell is a word in the line, never a block the width of the column. */
+td code.cmd, td .cmd {
+  display: inline; padding: 2px 6px; border: 0;
+  border-radius: var(--radius-xs); background: var(--surface-2);
+  font-size: 12px; line-height: 20px; white-space: nowrap;
+}
+
+.log {
+  font: 11.5px/1.55 var(--font-mono);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.cmd {
+  display: block;
+  font: 12.5px/18px var(--font-mono);
+  background: var(--surface-2); border: 0;
+  border-radius: var(--radius-xs); padding: 8px 12px;
+  overflow-x: auto; white-space: pre; color: var(--text);
+}
+
+/* -------------------------------------------------- 7. the four states */
+
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton-hi) 50%, var(--skeleton) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  height: 12px;
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.skeleton.row { height: var(--row); }
+.skeleton.block { height: 88px; }
+.skeleton.line-60 { width: 60%; }
+.skeleton.line-40 { width: 40%; }
+.skeleton-stack, .stack { display: grid; gap: 8px; }
+
+.state-note {
+  display: grid; gap: 8px; justify-items: start;
+  padding: 22px 20px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-dim);
+}
+.state-note h3 { color: var(--text); }
+.state-note.error { border-style: solid; border-color: var(--tone-fail); background: var(--tone-fail-bg); }
+.state-note.error h3 { color: var(--tone-fail); }
+.state-note .cmd { width: 100%; }
+
+.banner {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius);
+  background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--text-dim);
+}
+.banner.warn { background: var(--tone-wait-bg); border-color: var(--tone-wait); color: var(--text); }
+.banner.bad { background: var(--tone-fail-bg); border-color: var(--tone-fail); color: var(--text); }
+.update-strip { flex: none; align-items: center; margin-bottom: 12px; }
+body.fixed-page .update-strip { margin-bottom: 0; }
+.update-strip span { flex: 1; }
+
+
+/* --------------------------------------------------------- 8. drawer */
+
+.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 30; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 31;
+  width: min(560px, 100vw); max-width: 100vw;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  display: flex; flex-direction: column;
+  animation: slide-in var(--motion) var(--ease);
+}
+@keyframes slide-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+.drawer-head {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
+}
+/* A lane name is written by an agent, so it can be any length at all. The drawer is fixed,
+   which means the page's own clipping does not reach it: it has to hold its own width. */
+.drawer-head > div { min-width: 0; }
+.drawer-head h2, .drawer-head p { min-width: 0; overflow-wrap: anywhere; }
+.drawer-head h2 { font-size: 14px; }
+.drawer-head .muted { font-size: 12px; }
+.drawer-head button { margin-left: auto; flex: none; }
+.drawer-body .kv dd, .drawer-body p, .drawer-body .mono { overflow-wrap: anywhere; }
+.drawer-body { padding: 16px; overflow-y: auto; display: grid; gap: 16px; align-content: start; }
+
+/* --------------------------------------------------- 9. palette, toasts */
+
+.palette { position: fixed; inset: 0; z-index: 40; background: var(--scrim); display: grid; place-items: start center; padding-top: 12vh; }
+.palette-box {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--radius); box-shadow: var(--shadow-2); overflow: hidden;
+}
+/* The one field in the box, so it takes the whole width (the 200px ceiling every other field
+   carries does not apply), and it shows focus by its own bottom edge: an outline would be cut
+   off by the box's rounded corners. */
+.palette-box input { width: 100%; max-width: none; height: 44px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0 14px; }
+.palette-box input:focus-visible { outline: none; border-bottom-color: var(--accent); }
+.palette-box ul { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow-y: auto; }
+.palette-box li {
+  display: flex; align-items: center; gap: 8px;
+  height: var(--control); padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer;
+}
+.palette-box li .where { margin-left: auto; color: var(--text-faint); font-size: 11px; }
+.palette-box li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+
+.toasts { position: fixed; right: 16px; bottom: 16px; z-index: 50; display: grid; gap: 8px; justify-items: end; }
+.toast {
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--radius); box-shadow: var(--shadow-2);
+  padding: 9px 12px; max-width: 360px;
+  animation: slide-in var(--motion) var(--ease);
+}
+.toast.bad { border-color: var(--tone-fail); color: var(--tone-fail); }
+
+/* ------------------------------------------------------- 10. the views */
+
+/* A card reads top to bottom as: who and in what state, where, what for, how the checks
+   stand, and the numbers on the bottom edge, which sits on the same line across a row. */
+.agent-card { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
+.agent-card .head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.glyph { color: var(--text-dim); }
+.mark-0 { color: var(--mark-0); }
+.mark-1 { color: var(--mark-1); }
+.mark-2 { color: var(--mark-2); }
+.mark-3 { color: var(--mark-3); }
+.mark-4 { color: var(--mark-4); }
+.mark-5 { color: var(--mark-5); }
+.mark-6 { color: var(--mark-6); }
+.mark-7 { color: var(--mark-7); }
+.mark-8 { color: var(--mark-8); }
+.mark-9 { color: var(--mark-9); }
+.mark-10 { color: var(--mark-10); }
+.mark-11 { color: var(--mark-11); }
+
+.agent-card .glyph {
+  width: 24px; height: 24px; flex: none; border-radius: var(--radius-xs);
+  display: grid; place-items: center; font-size: 13px;
+  background: var(--surface-2);
+}
+/* The name is the part that may be cut, and it is cut with an ellipsis. The state is not: it
+   is a mark and a word with no bubble round it, so it asks for little room and keeps it. */
+.agent-card .name {
+  font: 600 14px/20px var(--font-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 auto; min-width: 0;
+}
+.agent-card .head > .pill { flex: none; }
+.agent-card .sub { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-dim); font: 12px/18px var(--font-mono); }
+.agent-card .sub .where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.agent-card .why { font: 550 12.5px/18px var(--font-ui); color: var(--tone-fail); }
+.agent-card .why.wait { color: var(--tone-wait); }
+.agent-card .why::first-letter { text-transform: uppercase; }
+.agent-card .task {
+  color: var(--text);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.foot {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0;
+  margin-top: auto; padding-top: 2px;
+  font-size: 12px; color: var(--text-dim);
+}
+.foot > * { min-width: 0; overflow-wrap: anywhere; }
+/* The engine a lane or an account spends, as its vendor's mark, at the right edge. The words
+   stay on the title. */
+.engine-mark { width: 16px; height: 16px; flex: none; color: var(--text); opacity: 0.8; }
+.foot .engine-at { margin-left: auto; display: inline-flex; }
+.model-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.foot .num { font-size: 12px; }
+button.agent-card {
+  font: inherit; color: inherit; text-align: left; width: 100%;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.agent-card { cursor: pointer; transition: border-color var(--motion) var(--ease); }
+.agent-card:hover { border-color: var(--line-strong); }
+
+/* The checks on a change: each a mark in its state's ink beside its name, like the states. */
+.checks { display: flex; gap: 4px 12px; flex-wrap: wrap; }
+.check { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; font-size: 12px; line-height: 18px; color: var(--text-dim); white-space: nowrap; }
+.check.pass .dot { color: var(--tone-done); -webkit-mask-image: var(--m-done); mask-image: var(--m-done); }
+.check.fail .dot { color: var(--tone-fail); -webkit-mask-image: var(--m-fail); mask-image: var(--m-fail); }
+.check.pend .dot, .check.pending .dot { color: var(--tone-wait); -webkit-mask-image: var(--m-wait); mask-image: var(--m-wait); }
+
+/* -------------------------------------------------------- 10a. the board */
+
+/* The Board is one column: the agents at full width under the two strips. */
+.board-canvas { display: grid; grid-template-columns: minmax(0, 1fr); }
+
+.pane { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pane-head { display: flex; align-items: center; gap: 8px; min-height: 26px; min-width: 0; }
+.pane-head h2 { font: 600 15px/22px var(--font-ui); letter-spacing: -0.005em; }
+.pane-body { min-width: 0; }
+.pane-foot { font-size: 12px; }
+.pane-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.search { min-width: 160px; flex: 0 1 280px; }
+.count-line { font-size: 12px; white-space: nowrap; }
+
+.strip { margin-bottom: 12px; }
+/* A strip is one row of small readings, not a wall of cards: the agents are the reason the
+   reader opened this page, and every tall tile above them is a tile in their way. */
+.grid.strip-tiles { grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 12px; }
+.strip-tiles .tile { min-height: 84px; }
+/* Every subscription in one row: four and an orphan on a line of its own reads as a mistake.
+   The row divides its width by the count, down to a floor, and only past six does it wrap. */
+.grid.accounts-row { grid-template-columns: repeat(auto-fit, minmax(max(150px, calc((100% - 5 * 12px) / 6)), 1fr)); }
+button.account-chip {
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  display: grid; gap: 8px; align-content: start;
+}
+button.account-chip:hover { border-color: var(--line-strong); }
+.account-chip.out { border-color: var(--tone-fail); }
+.account-chip .label { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+/* A subscription card holds three bars with their numbers; half a phone squeezed each bar to a
+   dot, so on a phone every card has the whole width. It sits after the row rule so it wins. */
+@media (max-width: 600px) {
+  .grid.accounts-row { grid-template-columns: minmax(0, 1fr); }
+}
+.account-chip .label b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.account-chip .label .pill { flex: none; }
+.account-chip .foot { margin-top: auto; }
+
+/* One lane's ending, asked about before it happens. The sentence is inside the confirm, so
+   nobody presses a word whose consequence is written somewhere else. */
+.lane-actions { display: grid; gap: 8px; }
+.confirm {
+  display: grid; gap: 8px; padding: 10px 12px;
+  border: 1px solid var(--tone-wait); border-radius: var(--radius-sm);
+  background: var(--tone-wait-bg);
+}
+
+@media (max-width: 1100px) {
+  .board-canvas { gap: var(--gap); }
+}
+
+/* --------------------------------------------------------- 10b. the mail */
+
+/* Three panes that hold themselves to the window, each with its own scroll. The page under
+   them never moves, so the composer and the two headers stay where the reader left them. */
+.mail-root { flex: 1; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.mail-app {
+  position: relative;
+  flex: 1; min-height: 0;
+  display: grid; gap: 12px;
+  grid-template-columns: 280px minmax(0, 1fr) 260px;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "list thread people";
+}
+.conversations-pane { grid-area: list; }
+.thread-pane { grid-area: thread; }
+.people-pane { grid-area: people; }
+.convo-select { grid-area: pick; display: none; }
+.convo-select select { max-width: 100%; width: 100%; }
+
+.mail-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.mail-pane .pane-head { flex: none; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.mail-pane .pane-tools { flex: none; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.mail-pane .pane-tools .search { width: 100%; max-width: 100%; }
+.mail-pane .pane-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; }
+.mail-pane .pane-more { padding-top: 8px; }
+.mail-pane .pane-more .ghost-button { width: 100%; justify-content: center; }
+.thread-head { flex-wrap: wrap; row-gap: 6px; }
+.thread-head .glyph { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 12px; background: var(--surface-2); flex: none; }
+.thread-head h2 { flex: 0 1 auto; min-width: 4ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-head .muted { font-size: 11px; white-space: nowrap; }
+.people-count, .people-close { display: none; }
+
+.conversations { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.conversations li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; min-width: 0;
+}
+.conversations li:hover { background: var(--surface-2); }
+.conversations li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.conversations li .glyph { width: 20px; height: 20px; flex: none; border-radius: 5px; display: grid; place-items: center; font-size: 12px; background: var(--surface-2); }
+.conversations li .who { display: flex; flex-direction: column; min-width: 0; }
+.conversations li .who .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversations li .who .muted { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversations .new {
+  margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; flex: none;
+  display: inline-grid; place-items: center; border-radius: 9px;
+  background: var(--accent); color: var(--accent-text);
+  font-family: var(--font-mono); font-size: 11px;
+}
+
+.thread { display: flex; flex-direction: column; gap: 10px; }
+.thread .day {
+  align-self: center; font-size: 11px; color: var(--text-faint);
+  padding: 2px 8px; border-radius: 999px; background: var(--surface-2);
+}
+.msg { display: grid; gap: 3px; }
+.msg .who { display: flex; align-items: center; gap: 6px; font-size: 12px; flex-wrap: wrap; }
+.msg .who .glyph { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 11px; background: var(--surface-2); }
+.msg .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg .at { color: var(--text-faint); font-size: 11px; }
+.msg.echo .body { color: var(--text-dim); }
+.person { display: grid; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.person:last-child { border-bottom: 0; }
+.person .who { display: flex; align-items: center; gap: 6px; font-size: 12px; flex-wrap: wrap; }
+.person .who .glyph { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 11px; background: var(--surface-2); }
+.person .at { color: var(--text-faint); font-size: 11px; }
+
+.composer { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); flex: none; }
+.composer .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.composer-label { color: var(--text-dim); font-size: 12px; }
+.composer textarea { min-height: 56px; width: 100%; }
+
+.feed { display: grid; gap: 0; }
+.feed .item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.feed .item:last-child { border-bottom: 0; }
+.feed .at { color: var(--text-faint); font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 88px; }
+
+/* Under this width the people pane is a count in the thread header, and the list it stands
+   for slides over the conversation rather than squeezing it into nothing. */
+@media (max-width: 1100px) {
+  .mail-app { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "list thread"; }
+  .people-count, .people-close { display: inline-flex; }
+  .people-pane { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: min(280px, 90%); z-index: 5; box-shadow: var(--shadow-2); }
+  .mail-app.people-open .people-pane { display: flex; }
+}
+
+/* And under this one the conversations are a select above the thread, because a list and a
+   thread side by side on a phone is two columns of three words each. */
+@media (max-width: 800px) {
+  .grid.strip-tiles { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+  .strip-tiles .tile .value { font-size: 14px; }
+  .mail-app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "pick" "thread";
+  }
+  .conversations-pane { display: none; }
+  .convo-select { display: flex; }
+}
+
+/* Three rows, always the same three rows: label, value, note. The middle row absorbs the
+   slack so every tile in a strip is the same height, with the note on the bottom edge. */
+.tile { display: grid; grid-template-rows: auto auto 1fr; gap: 4px; padding: 12px 14px; min-height: 88px; border-radius: var(--radius-sm); }
+.tile .label { color: var(--text-dim); font: 550 12px/16px var(--font-ui); display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tile .label .label-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .value { font: 400 20px/26px var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .note { align-self: end; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 16px; }
+.tile .note .pill { flex: 0 0 auto; }
+.tile .note .note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* One choice out of a short list, with its own line of explanation. A pill cannot hold a
+   sentence, so a choice is a plain rectangle that can. */
+.choice {
+  display: block; width: 100%; text-align: left;
+  padding: 10px 12px; border-radius: var(--radius);
+  border: 1px solid var(--line-strong); background: var(--surface);
+  color: var(--text); cursor: pointer;
+  transition: border-color var(--motion) var(--ease), background var(--motion) var(--ease);
+}
+.choice:hover { background: var(--surface-2); }
+.choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.choice[aria-pressed="true"] b { color: var(--accent); }
+.choice .muted { margin-top: 2px; }
+.choice[disabled] { cursor: not-allowed; opacity: 0.55; }
+
+.limits { display: grid; gap: 8px; }
+/* The window names get one fixed column, so the bars start at the same place in every card of
+   a row and a long name ("long context") is cut, not allowed to shrink its own bar. */
+.limit { display: grid; grid-template-columns: minmax(0, 84px) minmax(32px, 1fr) 36px; gap: 8px; align-items: center; font-size: 12px; line-height: 16px; }
+.limit .lname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.limit .lpct { text-align: right; }
+.limit .lname { color: var(--text-dim); }
+.limit .lpct { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.limit .lpct.warn { color: var(--tone-wait); }
+.limit .lpct.bad { color: var(--tone-fail); }
+
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.checklist li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; }
+.checklist .mark-state { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-strong); margin-top: 2px; }
+.checklist .mark-state.ok { border-color: var(--tone-done); background: var(--tone-done); }
+.checklist .mark-state.missing { border-color: var(--tone-wait); }
+.checklist .mark-state.error { border-color: var(--tone-fail); background: var(--tone-fail-bg); }
+.checklist .mark-state.off { border-style: dashed; }
+.checklist .title { font-weight: 500; }
+.checklist .detail { color: var(--text-dim); }
+
+.readonly-note { color: var(--text-dim); font-size: 12px; }
+body.readonly [data-write] { opacity: 0.55; }

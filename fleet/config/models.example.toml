@@ -1,0 +1,58 @@
+# Fleet model catalog. Declarative: what models exist, what they're for, how to run them.
+# Mutable runtime state (enabled/disabled, last health check, measured limits) lives separately
+# in ~/.fleet/models-state.json and is set by `fleet models enable|disable|test`, so this file
+# stays a clean description and the toggles never rewrite it.
+#
+# This example carries the two engines murmur ships, Claude Code and Codex. An engine is added by
+# a PRESET in lib/model_presets.py (a contribution, see CONTRIBUTING.md): the dashboard's "Add a
+# model" writes a preset's entry into your own ~/.config/fleet/models.toml with source = "added".
+#
+# Fields per [model]:
+#   label        human name for the catalog
+#   engine       launcher path: "codex" | "claude" (native, existing) | "generic" (a CLI template)
+#   role         when an orchestrator should pick it (the routing doctrine, one line)
+#   quality      short quality-vs-Opus note for the catalog
+#   caps         the subscription's real limits (so nobody is surprised)
+#                A note about what a plan is doing TODAY (an exhausted quota, an outage) is
+#                yours to keep in your own models.toml; nothing dated ships in this example.
+#   access       one sentence: how this model is paid for. The models table shows it as is
+#   default_on   whether it starts enabled before anyone toggles it
+#   bin          (generic) the CLI binary
+#   auth_env     (generic) env var the headless CLI reads for its subscription credential
+#   run          (generic) the exact non-interactive invocation; {task}, {bin} and {variant}
+#                are substituted
+#   variant      (optional) the model this row runs when a lane names none, substituted into
+#                {variant} (a lane's `fleet spawn --model` fills it instead)
+#   models_on    the ids of this provider's models agents may use: `fleet models on|off`, or the
+#                provider's sidebar on the dashboard. (It replaces the old `models` string; a
+#                catalog that still carries one is read as the first models_on)
+#   health       a tiny non-interactive prompt used to test the model on enable
+#   tos          headless/automation ToS stance (why it's safe or risky for a farm)
+#   preset       (written by "Add a model") the preset this entry came from
+#   source       "shipped" for an entry that came with fleet, "added" for one you added here.
+#                Only an added entry can be removed from the dashboard
+
+[codex]
+color      = "#10A37F"
+label      = "Codex"
+engine     = "codex"
+role       = "frontier tier: architecture, security, migrations, anything where being wrong is expensive."
+quality    = "frontier, Opus-class on agentic work"
+caps       = "ChatGPT subscription; check the plan's own limits before leaning on it"
+access     = "your ChatGPT subscription"
+default_on = true
+tos        = "first-party CLI on the ChatGPT subscription (auth_mode chatgpt)"
+
+[claude]
+color      = "#D97757"
+label      = "Claude Code"
+# The pool is SHARED with your own interactive sessions. `fleet accounts` shows the live
+# headroom; spawn with --account auto to spread lanes across the accounts you have added.
+models_on  = ["sonnet", "opus", "haiku"]
+engine     = "claude"
+role       = "the workhorse: most lanes, most of the time."
+quality    = "frontier"
+caps       = "Claude subscription; limits visible via `fleet accounts`"
+access     = "your Claude subscription, shared with your own interactive sessions"
+default_on = true
+tos        = "first-party CLI on the Anthropic OAuth subscription"

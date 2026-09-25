@@ -1,0 +1,462 @@
+#!/usr/bin/env python3
+"""A fake ssh that plays the farm: its host key, its control master, and every command
+plugin/scripts/murmur_farm.py runs on it. No network, no real box.
+
+`ssh -G` is answered by the real ssh (it never connects), with -F pointing at this test's own
+~/.ssh/config, because OpenSSH reads the passwd home and not $HOME. Every other call:
+
+  FAKE_LOG=<path>             every call appended as one JSON line {argv, stdin}
+  FAKE_REMOTE=<dir>           the farm's state: flag files, env, accounts.json, lanes.json
+  FAKE_LAPTOP=<dir>           the laptop's side: listeners.json of the tunnels this fake holds
+  A connection that resolves to another port than 22, or another user than farm, is refused
+  as the droplet refuses it.
+  FAKE_SSH_HOSTKEY=<key>      the key the farm presents (default ssh-ed25519 AAAAFAKEHOSTKEYONE)
+  FAKE_SSH_PROBE_NO_RECORD=1  connect without recording the host key anywhere
+  FAKE_SSH_BATCH_FAIL=1       the key is refused (exit 255, as ssh does)
+  FAKE_SSH_FORWARD_FAIL=1     a -L forward cannot bind
+  FAKE_SSH_LISTEN_ADDR=<a>    the tunnel listens on this address instead of the one asked
+  FAKE_SSH_INSTALL=done|failed|running   what the detached install does (default done)
+  FAKE_TS_IP=<ip>             the farm's tailnet address once it joined (default 127.0.0.1)
+  FAKE_TS_JOIN_FAIL=1         the Tailscale helper fails
+  FAKE_DASH_TOKEN=<token>     what `fleet dashboard token` prints
+  FAKE_SSH_G_TRACE=<path>     each `ssh -G` also runs as `ssh -vvv -G`, its debug output
+                              appended here (what files ssh read, while they exist)
+"""
+import json
+import os
+import select
+import shlex
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+WITH_VALUE = set("BbcDEeFIiJLlmOoPpQRSWw")
+FARM = "/home/farm"
+
+
+def stdin_text():
+    try:
+        if sys.stdin is None or sys.stdin.closed or sys.stdin.isatty():
+            return ""
+        ready, _, _ = select.select([sys.stdin], [], [], 0.5)
+        return sys.stdin.read() if ready else ""
+    except Exception:
+        return ""
+
+
+def record(argv):
+    stdin = "" if "-G" in argv or "-O" in argv or "-f" in argv else stdin_text()
+    log = os.environ.get("FAKE_LOG")
+    if log:
+        with open(log, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"argv": argv, "stdin": stdin}, sort_keys=True) + "\n")
+    return stdin
+
+
+def real_ssh():
+    mine = os.path.dirname(os.path.abspath(sys.argv[0]))
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        if folder and os.path.abspath(folder) != mine:
+            candidate = os.path.join(folder, "ssh")
+            if os.access(candidate, os.X_OK) and not os.path.isdir(candidate):
+                return candidate
+    return ""
+
+
+def config_file():
+    path = os.path.join(os.environ.get("HOME", ""), ".ssh", "config")
+    return path if os.path.exists(path) else "/dev/null"
+
+
+def parse(args):
+    options, flags, host, remote = [], set(), "", []
+    i = 0
+    while i < len(args):
+        word = args[i]
+        if host:
+            remote = args[i:]
+            break
+        if word.startswith("-") and len(word) > 1:
+            letter = word[1]
+            if letter in WITH_VALUE:
+                value = word[2:] or (args[i + 1] if i + 1 < len(args) else "")
+                options.append((letter, value))
+                i += 1 if word[2:] else 2
+                continue
+            for char in word[1:]:
+                flags.add(char)
+            i += 1
+            continue
+        host = word
+        i += 1
+    return options, flags, host, " ".join(remote)
+
+
+def resolved(options, host):
+    real = real_ssh()
+    argv = [real, "-G", "-F", config_file()]
+    for letter, value in options:
+        if letter in "opl":
+            argv += [f"-{letter}", value]
+    done = subprocess.run(argv + [host], capture_output=True, text=True, timeout=20)
+    seen = {}
+    for line in done.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        seen.setdefault(key, value)
+    return seen
+
+
+def remote_path(*parts):
+    return os.path.join(os.environ["FAKE_REMOTE"], *parts)
+
+
+def flag(name):
+    return os.path.exists(remote_path(name))
+
+
+def touch(name, text=""):
+    with open(remote_path(name), "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def load(name, fallback):
+    try:
+        with open(remote_path(name), encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return fallback
+
+
+def save(name, value):
+    with open(remote_path(name), "w", encoding="utf-8") as handle:
+        json.dump(value, handle)
+
+
+def remote_env():
+    try:
+        with open(remote_path("env"), encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return {}
+    return dict(line.split("=", 1) for line in lines if "=" in line)
+
+
+def event(text):
+    with open(remote_path("events"), "a", encoding="utf-8") as handle:
+        handle.write(text + "\n")
+
+
+def host_key_check(seen, address):
+    """accept-new as ssh does it: record an unknown key, refuse a changed one."""
+    key = os.environ.get("FAKE_SSH_HOSTKEY", "ssh-ed25519 AAAAFAKEHOSTKEYONE")
+    if os.environ.get("FAKE_SSH_PROBE_NO_RECORD"):
+        return 0
+    files = [f for f in seen.get("userknownhostsfile", "").split() if f]
+    strict = seen.get("stricthostkeychecking", "ask")
+    known = []
+    for path in files:
+        path = os.path.expanduser(path)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                known += [line.split(None, 1) for line in handle.read().splitlines()
+                          if line.strip()]
+        except OSError:
+            pass
+    mine = [rest for first, rest in known if first == address]
+    if mine and key not in mine:
+        sys.stderr.write("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
+                         "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\n"
+                         "Host key verification failed.\n")
+        return 255
+    if mine:
+        return 0
+    if strict in ("accept-new", "no", "false", "off"):
+        if files and files[0] != "/dev/null":
+            with open(os.path.expanduser(files[0]), "a", encoding="utf-8") as handle:
+                handle.write(f"{address} {key}\n")
+        return 0
+    sys.stderr.write("Host key verification failed.\n")
+    return 255
+
+
+def laptop_listeners():
+    path = os.path.join(os.environ["FAKE_LAPTOP"], "listeners.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_laptop_listeners(rows):
+    with open(os.path.join(os.environ["FAKE_LAPTOP"], "listeners.json"), "w",
+              encoding="utf-8") as handle:
+        json.dump(rows, handle)
+
+
+PAGE = r"""
+import http.server, socketserver, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b'{"version": "fake"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+class S(socketserver.TCPServer):
+    allow_reuse_address = False
+S((sys.argv[1], int(sys.argv[2])), H).serve_forever()
+"""
+
+
+def control(options, flags, host):
+    sock = dict(options).get("S", "")
+    command = dict(options).get("O", "")
+    if command == "check":
+        try:
+            with open(sock, encoding="utf-8") as handle:
+                pid = int(handle.read().split()[0])
+            os.kill(pid, 0)
+            sys.stdout.write(f"Master running (pid={pid})\n")
+            return 0
+        except (OSError, ValueError, IndexError):
+            sys.stderr.write(f"Control socket connect({sock}): No such file or directory\n")
+            return 255
+    if command == "exit":
+        try:
+            with open(sock, encoding="utf-8") as handle:
+                pid, port = handle.read().split()[:2]
+            os.kill(int(pid), signal.SIGTERM)
+            rows = laptop_listeners()
+            rows.pop(port, None)
+            save_laptop_listeners(rows)
+        except (OSError, ValueError):
+            pass
+        try:
+            os.unlink(sock)
+        except OSError:
+            pass
+        sys.stderr.write("Exit request sent.\n")
+        return 0
+    return 255
+
+
+def forward(options, host):
+    sock = dict(options).get("S", "")
+    spec = dict(options).get("L", "")
+    bind, port, _to_host, _to_port = spec.split(":")
+    if os.environ.get("FAKE_SSH_FORWARD_FAIL"):
+        sys.stderr.write(f"bind [{bind}]:{port}: Address already in use\n"
+                         "Could not request local forwarding.\n")
+        return 255
+    bind = os.environ.get("FAKE_SSH_LISTEN_ADDR") or bind
+    with socket.socket() as probe:
+        try:
+            probe.bind((bind, int(port)))
+        except OSError:
+            sys.stderr.write(f"bind [{bind}]:{port}: Address already in use\n")
+            return 255
+    page = subprocess.Popen([sys.executable, "-c", PAGE, bind, port], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            start_new_session=True)
+    for _ in range(100):
+        try:
+            with socket.create_connection(("127.0.0.1", int(port)), timeout=0.2):
+                break
+        except OSError:
+            time.sleep(0.05)
+    with open(sock, "w", encoding="utf-8") as handle:
+        handle.write(f"{page.pid} {port}\n")
+    with open(os.path.join(os.environ["FAKE_LAPTOP"], "pids"), "a", encoding="utf-8") as handle:
+        handle.write(f"{page.pid}\n")
+    rows = laptop_listeners()
+    rows[port] = bind
+    save_laptop_listeners(rows)
+    return 0
+
+
+def farm(words, stdin):
+    """The box: every command murmur_farm.py runs on it."""
+    fleet = FARM + "/.local/bin/fleet"
+    codex = FARM + "/.local/bin/codex"
+    out = sys.stdout.write
+    if words == ["true"]:
+        return 0
+    if words == ["cloud-init", "status"]:
+        out("status: done\n")
+        return 0
+    if words == ["bash", "-lc", "fleet capacity"]:
+        return 0 if flag("install.done") else 127
+    if words[:3] == ["gh", "auth", "status"]:
+        return 0 if flag("gh-logged-in") else 1
+    if words[:2] == ["python3", "-c"]:
+        if words[3] != FARM + "/.config/fleet/env":
+            sys.stderr.write("fake farm: the env writer names another file\n")
+            return 2
+        # The script's own writer runs, on the farm folder's env file, so the flow tests keep
+        # its 0600 rule honest and not a copy of it.
+        done = subprocess.run([sys.executable, "-c", words[2], remote_path("env")] + words[4:],
+                              capture_output=True, text=True, timeout=30)
+        if done.returncode != 0:
+            sys.stderr.write(done.stderr)
+            return done.returncode
+        for pair in words[4:]:
+            key, _, value = pair.partition("=")
+            event(f"env {key}={value}")
+        return 0
+    if words[:2] == ["bash", "-c"]:
+        inner = words[2]
+        if "setsid -f flock" in inner:
+            with open(remote_path("install-launches"), "a", encoding="utf-8") as handle:
+                handle.write(inner + "\n")
+            event("install")
+            what = os.environ.get("FAKE_SSH_INSTALL", "done")
+            if what == "done":
+                touch("install.done")
+            elif what == "failed":
+                touch("install.failed")
+                touch("install.log", "step 3: gh repo clone: HTTP 404\n")
+            else:
+                touch("install.running")
+            return 0
+        if "install.done" in inner:
+            if flag("install.done"):
+                out("done\n")
+            elif flag("install.failed"):
+                with open(remote_path("install.log"), encoding="utf-8") as handle:
+                    out("failed\n" + handle.read())
+            elif flag("install.running"):
+                out("running\n")
+            else:
+                out("idle\n")
+            return 0
+        if inner.startswith("ss -ltnH"):
+            bind = load("service-bind", "")
+            port = os.environ.get("MURMUR_FARM_REMOTE_PORT") or "7878"
+            if bind == "127.0.0.1":
+                out(f"LISTEN 0 5 127.0.0.1:{port} 0.0.0.0:*\n")
+            elif bind == "tailscale" and flag("ts-up"):
+                out(f"LISTEN 0 5 {os.environ.get('FAKE_TS_IP', '127.0.0.1')}:{port} 0.0.0.0:*\n")
+            return 0
+    if words == [fleet, "capacity"]:
+        return 0 if flag("install.done") else 127
+    if words[:3] == ["systemctl", "--user", "is-active"]:
+        out("active\n")
+        return 0
+    if words[:3] == ["systemctl", "--user", "restart"]:
+        save("service-bind", remote_env().get("FLEET_DASH_BIND", ""))
+        event("restart")
+        return 0
+    if words == ["tailscale", "ip", "-4"]:
+        if flag("ts-up"):
+            out(os.environ.get("FAKE_TS_IP", "127.0.0.1") + "\n")
+            return 0
+        sys.stderr.write("Tailscale is stopped.\n")
+        return 1
+    if words == ["sudo", "-n", "/usr/local/sbin/murmur-tailscale-up"]:
+        touch("ts-key-received", stdin)
+        if os.environ.get("FAKE_TS_JOIN_FAIL") or not stdin.strip():
+            sys.stderr.write("backend error: invalid key\n")
+            return 1
+        touch("ts-up")
+        event("tailscale-up")
+        return 0
+    if words == [fleet, "dashboard", "token"]:
+        out(os.environ.get("FAKE_DASH_TOKEN", "CANARY-dashboard-token-0001") + "\n")
+        return 0
+    if words == [fleet, "accounts", "list", "--json"]:
+        out(json.dumps(load("accounts.json", [{"name": "default", "logged_in": False,
+                                               "email": ""}])) + "\n")
+        return 0
+    if words[:3] == [fleet, "accounts", "add"] and len(words) == 4:
+        if os.environ.get("FAKE_ACCOUNTS_ADD_NOOP"):
+            return 0
+        rows = load("accounts.json", [{"name": "default", "logged_in": False, "email": ""}])
+        if words[3] not in [row["name"] for row in rows]:
+            rows.append({"name": words[3], "logged_in": False, "email": ""})
+        save("accounts.json", rows)
+        return 0
+    if words == ["test", "-x", codex]:
+        return 0 if flag("codex-installed") else 1
+    if words == ["npm", "install", "--prefix", FARM + "/.local", "-g", "@openai/codex"]:
+        touch("codex-installed")
+        event("npm-codex")
+        return 0
+    if words == [codex, "login", "status"]:
+        if flag("codex-logged-in"):
+            touch("dot-codex")
+            out("Logged in using ChatGPT\n")
+            return 0
+        sys.stderr.write("Not logged in\n")
+        return 1
+    if words == ["bash", FARM + "/work/murmur/fleet/install.sh"]:
+        if flag("dot-codex"):
+            touch("skills-linked")
+        event("fleet-install")
+        return 0
+    if words == ["test", "-L", FARM + "/.codex/skills/fleet"]:
+        return 0 if flag("skills-linked") else 1
+    if words[:2] == [fleet, "spawn"]:
+        lanes = load("lanes.json", [])
+        lane = words[words.index("--lane") + 1]
+        project = words[words.index("--project") + 1]
+        lanes.append({"slug": f"{project}-{lane}", "status": "done",
+                      "engine": words[words.index("--engine") + 1]})
+        save("lanes.json", lanes)
+        return 0
+    if words == [fleet, "status", "--json"]:
+        out(json.dumps({"agents": load("lanes.json", [])}) + "\n")
+        return 0
+    sys.stderr.write(f"fake farm: not a command murmur_farm.py runs: {words}\n")
+    return 127
+
+
+def main():
+    argv = ["ssh"] + sys.argv[1:]
+    stdin = record(argv)
+    args = sys.argv[1:]
+    options, flags, host, remote = parse(args)
+    if "G" in flags:
+        real = real_ssh()
+        if not real:
+            sys.stderr.write("fake ssh: no real ssh to answer -G\n")
+            return 127
+        chosen = [] if "-F" in args else ["-F", config_file()]
+        argv = [real, "-G"] + chosen + [a for a in args if a != "-G"]
+        trace = os.environ.get("FAKE_SSH_G_TRACE")
+        if trace:
+            done = subprocess.run([real, "-vvv"] + argv[1:], capture_output=True, text=True,
+                                  timeout=20)
+            with open(trace, "a", encoding="utf-8") as handle:
+                handle.write(done.stderr)
+        os.execv(real, argv)
+    if dict(options).get("O"):
+        return control(options, flags, host)
+    if os.environ.get("FAKE_SSH_BATCH_FAIL"):
+        sys.stderr.write(f"{host}: Permission denied (publickey).\n")
+        return 255
+    seen = resolved(options, host)
+    address = seen.get("hostname", host)
+    # The droplet's ssh and its firewall answer on port 22 only, and only for farm.
+    if seen.get("port", "22") != "22":
+        sys.stderr.write(f"ssh: connect to host {address} port {seen['port']}: "
+                         "Connection refused\n")
+        return 255
+    if seen.get("user", "farm") != "farm":
+        sys.stderr.write(f"{seen['user']}@{address}: Permission denied (publickey).\n")
+        return 255
+    code = host_key_check(seen, address)
+    if code:
+        return code
+    if "f" in flags and dict(options).get("L"):
+        return forward(options, host)
+    return farm(shlex.split(remote), stdin)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

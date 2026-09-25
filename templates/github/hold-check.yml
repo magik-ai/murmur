@@ -1,0 +1,29 @@
+# Template: a check that fails while a pull request carries the `hold` label.
+#
+# GitHub does not block a merge because of a label. A required check that fails does.
+# 1. Copy this file to .github/workflows/hold-check.yml in your repository.
+# 2. In the branch protection rule (or ruleset) for main, add the status check named
+#    "hold" to the required checks. Until it is required, it stops nothing.
+#
+# The check runs again whenever a label is added or removed, so removing `hold` turns
+# it green. Keep the merge_group trigger if you use GitHub's merge queue: the queue
+# waits for every required check. There the check always passes, because a merge group
+# carries no labels. So take a pull request out of the queue when you add `hold` to it.
+name: hold
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+  merge_group:
+
+permissions: {}
+
+jobs:
+  hold:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail while the hold label is present
+        if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'hold')
+        run: |
+          echo "This pull request has the hold label, so it cannot merge. Only the owner removes it."
+          exit 1

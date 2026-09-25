@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>murmur</title>
+<link rel="icon" id="favicon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..600,0..100,0..1&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400..700&display=swap">
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/models.css">
+<link rel="stylesheet" href="/static/machine.css">
+<link rel="stylesheet" href="/static/projects.css">
+<link rel="stylesheet" href="/static/hosting.css">
+<script>
+  // Apply the stored theme before the first paint, so a dark page never flashes light.
+  try {
+    var stored = localStorage.getItem("murmur.theme");
+    if (stored === "light" || stored === "dark") document.documentElement.setAttribute("data-theme", stored);
+  } catch (error) { /* a browser with storage switched off keeps the system theme */ }
+</script>
+</head>
+<body>
+<a class="skip" href="#view">Skip to content</a>
+<div id="app">
+  <aside id="sidebar" aria-label="Sections">
+    <div class="side-head">
+      <span class="mark" aria-hidden="true"></span>
+      <span class="mark-name" id="sidebarTitle">murmur</span>
+    </div>
+    <nav id="navlinks"></nav>
+    <div class="side-foot"><span id="versionLabel" class="muted"></span></div>
+  </aside>
+
+  <header id="topbar">
+    <h1 class="sr-only"><span id="productTitle">murmur</span>, <span id="viewTitle"></span></h1>
+    <div class="top-status" aria-label="The farm">
+      <span id="farmState" class="pill" title=""><span class="dot"></span><span class="pill-text">Farm</span></span>
+      <span id="capacity" class="pill" title="" hidden><span class="dot"></span><span class="pill-text">capacity</span></span>
+      <span id="sweepNote" class="sweep-note" hidden></span>
+      <span id="freshness" class="freshness" aria-live="polite" hidden></span>
+    </div>
+    <div class="top-controls">
+      <label class="field-label">
+        <span>Project</span>
+        <select id="projectFilter" aria-label="Project filter"><option value="">All</option></select>
+      </label>
+      <label class="field-label" id="powerField" hidden>
+        <span>Power</span>
+        <select id="powerPick" data-write aria-label="What share of this machine the agents may use"></select>
+      </label>
+    </div>
+    <div class="top-tools">
+      <button id="paletteOpen" class="ghost-button" aria-label="Search">Search <kbd>&#8984;K</kbd></button>
+      <button id="themeSwitch" class="icon-button" aria-label="Theme: system"></button>
+    </div>
+  </header>
+
+  <main id="view" tabindex="-1"></main>
+</div>
+
+<div id="drawer" class="drawer" hidden role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+  <div class="drawer-head">
+    <div><h2 id="drawerTitle"></h2><p id="drawerSub" class="muted"></p></div>
+    <button id="drawerClose" class="ghost-button" aria-label="Close">Close</button>
+  </div>
+  <div id="drawerBody" class="drawer-body"></div>
+</div>
+<div id="drawerScrim" class="scrim" hidden></div>
+
+<div id="palette" class="palette" hidden role="dialog" aria-modal="true" aria-label="Jump to">
+  <div class="palette-box">
+    <input id="paletteInput" type="text" autocomplete="off" spellcheck="false" role="combobox"
+      aria-controls="paletteList" aria-expanded="true" aria-autocomplete="list"
+      aria-label="Jump to a tab, an agent, a conversation or a project"
+      placeholder="Jump to a tab, an agent, a conversation, a project">
+    <ul id="paletteList" role="listbox"></ul>
+  </div>
+</div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

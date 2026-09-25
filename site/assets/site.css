@@ -1,0 +1,317 @@
+/* murmur.farm: the landing page. Built on the Starling Almanac tokens (tokens.css) and
+   components (murmur.css); this file only lays the page out. Serif for the accent headings
+   (this page is outside the app), sans for everything read, mono for commands and figures.
+   No shadows, no square corners. */
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 17px/28px var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a { color: inherit; }
+img, svg, canvas { max-width: 100%; }
+
+.wrap { width: min(1120px, 100%); margin-inline: auto; padding-inline: 24px; }
+@media (max-width: 640px) { .wrap { padding-inline: 16px; } body { font-size: 16px; line-height: 26px; } }
+
+/* ---------------------------------------------------------------- header */
+/* The header lies over the first screen, so that screen is exactly the window and its content
+   sits in the window's middle. */
+.top { position: absolute; top: 0; left: 0; right: 0; z-index: 2; }
+.top .wrap { display: flex; align-items: center; gap: 28px; padding-block: 20px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand img { width: 34px; height: 34px; }
+.brand span { font: 460 23px/1 var(--font-display); font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 36; letter-spacing: -0.01em; }
+.top nav { display: flex; gap: 24px; margin-left: auto; font: 500 15px/1 var(--font-sans); }
+.top nav a { text-decoration: none; color: var(--ink-muted); }
+.top nav a:hover { color: var(--ink); }
+@media (max-width: 720px) { .top nav a:not(.keep) { display: none; } }
+
+/* ------------------------------------------------------------------ hero */
+.hero { position: relative; overflow: hidden; min-height: 100svh; display: flex; flex-direction: column; justify-content: center; }
+.hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.hero .wrap { position: relative; z-index: 1; width: min(1120px, 100%); padding-block: 96px 72px; }
+.hero__text { max-width: 760px; }
+/* The headline has a fixed line break where the meaning breaks. From 900px up it does not
+   wrap anywhere else. */
+@media (min-width: 900px) { .hero h1 { white-space: nowrap; } }
+.hero h1 {
+  margin: 0 0 24px;
+  font-family: var(--font-display);
+  font-weight: 360;
+  font-variation-settings: "SOFT" 100, "WONK" 0, "opsz" 144;
+  font-size: clamp(40px, 5.6vw, 76px);
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+}
+.hero .lede { margin: 0 0 32px; font-size: 19px; line-height: 30px; color: var(--ink); }
+/* On a phone the words take the whole width, so the flock gets its own band of sky under them. */
+@media (max-width: 720px) {
+  .hero .wrap { padding-block: 96px 280px; }
+  .hero canvas { top: auto; bottom: 56px; height: 230px; }
+}
+.links { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; font: 550 15px/1 var(--font-sans); }
+.links a { color: var(--accent); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.links a:hover { text-decoration-thickness: 2px; }
+
+/* The install block: two ways in, as tabs, each a command with Copy. */
+.install {
+  max-width: 560px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-raised);
+  overflow: hidden;
+}
+.install [role="tablist"] { display: flex; gap: 4px; padding: 6px; background: var(--paper-sunk); }
+.install [role="tab"] {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-muted);
+  font: 550 13px/1 var(--font-sans);
+  cursor: pointer;
+}
+.install [role="tab"][aria-selected="true"] { background: var(--paper-raised); border-color: var(--line); color: var(--ink); }
+.install [role="tab"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The two panels share one cell, so the box keeps the height of the taller one whichever is
+   chosen, and switching tabs moves nothing around it. */
+.install { display: grid; grid-template-columns: minmax(0, 1fr); }
+.install [role="tabpanel"] { grid-row: 2; grid-column: 1; display: flex; align-items: flex-start; gap: 12px; padding: 14px 14px 14px 16px; }
+.install [role="tabpanel"].is-off { visibility: hidden; }
+.install pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-x: auto;
+  font: 400 13.5px/22px var(--font-mono);
+  color: var(--ink);
+}
+.install pre .p { color: var(--ink-muted); user-select: none; }
+
+/* --------------------------------------------------------------- sections */
+/* One block per screen: every block of the story is at least the window's height with its
+   content in the middle, so a screen never ends halfway through the next heading. The padding
+   only keeps the content off the edges. */
+section { padding-block: clamp(48px, 6vh, 64px); }
+@media (max-width: 720px) { section { padding-block: 56px; } }
+.screen { min-height: 100svh; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; }
+.screen > .wrap { width: min(1120px, 100%); }
+@media (max-width: 720px), (max-height: 560px) { .screen, .hero { min-height: 0; } }
+/* The last three blocks are short and belong together: half the gap a whole screen each gave. */
+.tail { padding-block: clamp(72px, 11vh, 104px); }
+@media (max-width: 720px) { .tail { padding-block: 48px; } }
+.h2 {
+  margin: 0 0 20px;
+  font-family: var(--font-display);
+  font-weight: 380;
+  font-variation-settings: "SOFT" 100, "opsz" 72;
+  font-size: clamp(34px, 4.4vw, 52px);
+  line-height: 1.06;
+  letter-spacing: -0.018em;
+}
+.h3 { margin: 0 0 8px; font: 600 18px/26px var(--font-sans); }
+.prose { margin: 0 0 8px; color: var(--ink-muted); font-size: 19px; line-height: 30px; }
+.prose p { margin: 0 0 16px; }
+.muted { color: var(--ink-muted); }
+
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 48px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; }
+@media (max-width: 900px) { .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .grid-2, .grid-4 { grid-template-columns: 1fr; } }
+
+
+/* The journey: one change going through the five steps, with a bird flying the track above them. */
+.journey-figure { margin: 48px 0 64px; }
+.journey-track { display: block; width: 100%; height: 72px; overflow: visible; }
+.journey-track .track { fill: none; stroke: var(--line-strong); stroke-width: 1.4; stroke-dasharray: 1 7; stroke-linecap: round; }
+.journey-track .tick { stroke: var(--line-strong); stroke-width: 1.4; stroke-linecap: round; transition: stroke 240ms ease-out; }
+.journey-track .tick.is-here { stroke: var(--accent); }
+.journey-track .bird { fill: var(--lamp); }
+.journey-track .end { fill: var(--ink-muted); font: 500 13px var(--font-sans); }
+.journey { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 24px; margin: 8px 0 0; padding: 0; list-style: none; }
+.journey li { padding-top: 16px; border-top: 1px solid var(--line); transition: border-color 240ms ease-out; }
+.journey li.is-here { border-top-color: var(--accent); }
+.journey .step-no { display: block; margin-bottom: 8px; font: 500 13px/1 var(--font-mono); color: var(--ink-muted); }
+.journey li.is-here .step-no { color: var(--accent); }
+.journey p { margin: 0; font-size: 15px; line-height: 24px; color: var(--ink-muted); }
+@media (max-width: 900px) {
+  .journey-track { display: none; }
+  .journey { grid-template-columns: 1fr; gap: 0; }
+  .journey li { display: grid; grid-template-columns: 32px 1fr; column-gap: 12px; padding-block: 16px; }
+  .journey li .step-no { grid-row: span 2; margin: 5px 0 0; }
+}
+
+/* A field of pastel: the sections that are about the people. */
+.field { border-radius: var(--radius-lg); padding: 56px; }
+@media (max-width: 640px) { .field { padding: 28px 20px; } }
+.field--lilac { background: var(--field-lilac); }
+.field--mint { background: var(--field-mint); }
+.field--butter { background: var(--field-butter); }
+.role .h3 { font-family: var(--font-sans); }
+.roles { margin-top: 32px; }
+.role-icon { display: block; width: 28px; height: 28px; margin-bottom: 14px; color: var(--accent); }
+
+/* One bird alone, then ten that fly as one: the picture that closes the first section. */
+.pair { margin: 56px 0 0; }
+.pair svg { display: block; width: 100%; height: auto; overflow: visible; }
+.pair .ink { fill: var(--ink); }
+.pair .lamp { fill: var(--lamp); }
+.pair .trail { fill: none; stroke: var(--line-strong); stroke-width: 1.4; stroke-dasharray: 1 7; stroke-linecap: round; }
+
+/* A band of its own for how it works, set apart from the sections around it. */
+.band { background: var(--paper-sunk); border-radius: var(--radius-lg); margin-inline: 24px; }
+@media (max-width: 640px) { .band { margin-inline: 8px; } }
+
+
+/* Night: a day in the sky, looping. The sun sets, the stars and the moon come out while the
+   lanes work, and the sun comes back with the report. */
+.sky { position: relative; height: 360px; margin-top: 40px; border-radius: var(--radius-lg); overflow: hidden; background: var(--paper-sunk); }
+.sky canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.sky-caption { margin: 14px 0 0; font-size: 15px; line-height: 24px; color: var(--ink-muted); min-height: 24px; }
+@media (max-width: 640px) { .sky { height: 280px; } }
+
+
+/* FAQ. */
+.faq { margin-top: 28px; border-top: 1px solid var(--line); }
+.faq details { border-bottom: 1px solid var(--line); }
+.faq summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 0;
+  font: 600 17px/24px var(--font-sans);
+  cursor: pointer;
+  list-style: none;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after {
+  content: "";
+  margin-left: auto;
+  width: 12px;
+  height: 12px;
+  background: var(--ink-muted);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M3 4.6l3 3 3-3' stroke='black' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M3 4.6l3 3 3-3' stroke='black' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+  transition: transform 160ms ease-out;
+}
+.faq details[open] summary::after { transform: rotate(180deg); }
+.faq summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 6px; }
+.faq p { margin: 0 0 20px; color: var(--ink-muted); }
+
+/* The last ask. */
+.final { text-align: left; }
+.final .install { margin-top: 28px; }
+
+/* ---------------------------------------------------------------- footer */
+/* The footer repeats the header's brand at the header's size, says where the name comes from,
+   and ends with two short columns of links. */
+footer { padding-block: 56px 64px; border-top: 1px solid var(--line); }
+.footer__grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px 64px; align-items: start; }
+.footer__brand { display: grid; gap: 14px; justify-items: start; }
+.footer__line { margin: 0; font-size: 17px; line-height: 28px; color: var(--ink); }
+footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
+.footer__cols { display: grid; grid-template-columns: repeat(2, auto); gap: 0 56px; }
+@media (max-width: 720px) { .footer__cols { gap: 28px 48px; } }
+.footer__cols div { display: grid; gap: 10px; align-content: start; }
+.footer__cols h2 { margin: 0 0 4px; font: 550 13px/16px var(--font-sans); color: var(--ink-muted); }
+.footer__cols a { font-size: 15px; line-height: 22px; color: var(--ink); text-decoration: none; }
+.footer__cols a:hover { text-decoration: underline; text-underline-offset: 4px; }
+@media (max-width: 720px) { .footer__grid { grid-template-columns: 1fr; } }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mark-dark { display: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mark-light { display: none; } :root:not([data-theme="light"]) .mark-dark { display: inline; } }
+:root[data-theme="dark"] .mark-light { display: none; }
+:root[data-theme="dark"] .mark-dark { display: inline; }
+.dusk .mark-light { display: none; }
+.dusk .mark-dark { display: inline; }
+
+/* A product screen in its frame: a hairline and rounded corners, never a shadow. */
+.frame { border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--paper-raised); }
+.frame img { display: block; width: 100%; height: auto; }
+/* The Board screenshot is as wide as it can be while the whole block still fits in one window:
+   the heading and its line take about 330px of the height, the picture the rest, at its own
+   16 by 10. */
+.frame--hero { margin: 40px auto 0; width: min(100%, calc((100svh - 330px) * 1.6)); }
+
+/* The three parts, as a scroll-driven tour: the stage stays pinned while you scroll, and how far
+   you have scrolled decides which part is lit and which screen shows. */
+/* A whole window of scrolling for each of the three parts, plus the window the stage stands in.
+   With less, the parts go by too fast to read. */
+.pieces { position: relative; height: 400vh; padding-block: 0; }
+.pieces__sticky { position: sticky; top: 0; height: 100svh; display: flex; align-items: center; overflow: hidden; }
+.pieces__inner { display: flex; flex-direction: column; gap: clamp(20px, 4vh, 44px); }
+.pieces__inner .h2 { margin: 0; }
+.pieces__stage { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 9fr); gap: clamp(32px, 4vw, 56px); align-items: center; }
+.pieces__steps { display: grid; gap: clamp(16px, 3vh, 30px); margin: 0; padding: 0; list-style: none; }
+.piece { opacity: 0.34; transition: opacity 320ms ease-out; }
+.piece.is-on { opacity: 1; }
+/* The name and its tag share one line, and the text under them is three lines at most, so the
+   column of three stays as tall as the screen beside it. */
+.piece__title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 6px; }
+.piece__title .mm-tag { margin: 0; }
+.piece p { margin: 0; font-size: 16px; line-height: 26px; color: var(--ink-muted); }
+.piece__shot { display: none; }
+.pieces__screen { position: relative; aspect-ratio: 16 / 10; max-width: 100%; }
+.screen-frame { position: absolute; inset: 0; opacity: 0; transition: opacity 420ms ease-out; }
+.screen-frame.is-on { opacity: 1; }
+/* The three bars sit in the middle of the page, above its bottom edge, wherever the text is. */
+.pieces__progress { position: absolute; left: 50%; bottom: clamp(24px, 5vh, 48px); transform: translateX(-50%); display: flex; gap: 10px; }
+.pip { position: relative; width: 44px; height: 4px; padding: 0; border: 0; border-radius: 999px; background: var(--line); overflow: hidden; cursor: pointer; }
+.pip i { position: absolute; inset: 0; background: var(--accent); transform-origin: left; transform: scaleX(0); }
+.pip:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+@media (prefers-reduced-motion: reduce) { .piece, .screen-frame { transition: none; } }
+/* A narrow or short window gets the parts as a plain list, each with its screen under it. */
+@media (max-width: 1024px), (max-height: 560px) {
+  .pieces { height: auto; padding-block: 56px; }
+  .pieces__sticky { position: static; height: auto; overflow: visible; }
+  .pieces__stage { grid-template-columns: 1fr; }
+  .pieces__steps { gap: 48px; }
+  .piece { opacity: 1; }
+  .piece__shot { display: block; margin-top: 18px; }
+  .pieces__screen, .pieces__progress { display: none; }
+}
+
+/* Who does what: the goal leaves you, fans out to the lanes, comes back together at the
+   conductor and lands on main, and a report comes back to you. */
+.roles-map { margin: 48px 0 0; }
+.roles-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.roles-svg .flow { fill: none; stroke: var(--line-strong); stroke-width: 1.6; stroke-dasharray: 1 7; stroke-linecap: round; }
+.roles-svg .flow--main { stroke: var(--ink); stroke-dasharray: none; stroke-width: 2; }
+.roles-svg .flow--back { stroke: var(--lamp); }
+.roles-svg .node { color: var(--accent); }
+.roles-svg .edge { fill: var(--ink-muted); font: 500 14px var(--font-sans); }
+/* Each caption starts under its icon: the columns open where the drawing puts the four nodes. */
+.roles-list { display: grid; grid-template-columns: 7.2% 27% 22.4% 23.6% 1fr; margin: 8px 0 0; padding: 0; list-style: none; }
+.roles-list li { padding-right: 24px; }
+.roles-list li:first-child { grid-column: 2; }
+.roles-list .role-icon { display: none; }
+.roles-list p { margin: 0; font-size: 15px; line-height: 24px; color: var(--ink-muted); }
+@media (max-width: 860px) {
+  .roles-svg { display: none; }
+  .roles-list { grid-template-columns: 1fr; gap: 28px; }
+  .roles-list li, .roles-list li:first-child { grid-column: auto; padding-right: 0; display: grid; grid-template-columns: 40px 1fr; column-gap: 14px; }
+  .roles-list .role-icon { display: block; grid-row: span 2; width: 28px; height: 28px; color: var(--accent); }
+}
+
+/* Brands in a row, just the mark and the name, no plates. */
+.row-title { margin: 36px 0 16px; font: 600 14px/20px var(--font-sans); color: var(--ink-muted); }
+.brands { display: flex; flex-wrap: wrap; align-items: center; gap: 20px 44px; margin: 0; padding: 0; list-style: none; }
+.brands li { display: inline-flex; align-items: center; gap: 12px; font: 600 18px/1 var(--font-sans); color: var(--ink); }
+.brands svg { width: 30px; height: 30px; flex: none; }
+
+/* The flock is its own pause control (see site.js): it shows focus like any control, and the
+   column of words over it lets a click through wherever there are no words. */
+.hero .wrap { pointer-events: none; }
+.hero .hero__text { pointer-events: auto; }
+#heroFlock:focus-visible, .journey-figure:focus-visible, .sky:focus-visible { outline: 2px solid var(--accent); outline-offset: -6px; border-radius: 12px; }
+.journey-figure[role="button"], .sky[role="button"] { cursor: pointer; }

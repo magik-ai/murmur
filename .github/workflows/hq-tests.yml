@@ -1,0 +1,33 @@
+name: hq tests
+
+on:
+  push:
+    branches: [main]
+    paths: ["hq/**", ".github/workflows/hq-tests.yml"]
+  pull_request:
+    paths: ["hq/**", ".github/workflows/hq-tests.yml"]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor (tomllib) and one version above it.
+        python: ["3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: hq
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[test]"
+      - name: Tests
+        run: python -m pytest -q
+      - name: The console script and the clone wrapper both run
+        run: |
+          hq --help > /dev/null
+          python bin/hq --help > /dev/null

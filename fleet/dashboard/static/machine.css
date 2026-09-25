@@ -1,0 +1,158 @@
+/* Machine. Every class here is prefixed m- and every colour is a token from app.css, so this
+   file can be linked after app.css without taking anything of its own with it. */
+
+.m-choice {
+  display: grid; gap: 4px; justify-items: start; text-align: left;
+  padding: 10px 12px; min-height: 64px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); cursor: pointer;
+}
+.m-choice:hover { background: var(--surface-2); }
+.m-choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.m-choice[aria-pressed="true"] b { color: var(--accent); }
+.m-choice[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+.m-actions { display: grid; gap: 10px; }
+.m-power-row { gap: 10px; }
+/* Five settings may be wider than a phone: the track wraps rather than pushing the page. */
+.m-power-row .segmented { flex-wrap: wrap; height: auto; max-width: 100%; }
+.m-power-now { color: var(--text); }
+
+/* An action that cannot be taken back says what it will do, by name, before it does it. */
+.m-confirm {
+  display: grid; gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--tone-wait); border-radius: var(--radius);
+  background: var(--tone-wait-bg); color: var(--text);
+}
+.m-confirm h3 { color: var(--text); }
+.m-lanes { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+.m-lanes li { overflow-wrap: anywhere; }
+
+.m-bad { color: var(--tone-fail); }
+
+.m-form { display: grid; gap: 8px; }
+.m-port { width: 120px; }
+
+/* The add-account dialog: numbered steps down the drawer, one thing to do per step. */
+.m-steps { display: grid; gap: 14px; }
+.m-steps ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--text-dim); }
+.m-dialog-step { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; }
+.m-dialog-step h3 { font-size: 14px; color: var(--text); margin: 0 0 2px; }
+.m-dialog-step p { margin: 0; }
+.m-step-no {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent);
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+}
+.m-engines { display: grid; gap: 8px; }
+.m-engine { display: grid; gap: 4px; }
+.m-engine.chosen { border-color: var(--accent); background: var(--accent-soft); }
+.m-engine-head { display: flex; align-items: center; gap: 8px; }
+.m-engine .muted { font-size: 12px; line-height: 1.4; }
+.m-name { width: 100%; }
+.m-cmd-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.m-cmd-row .cmd { overflow-wrap: anywhere; white-space: pre-wrap; }
+.m-wait { align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-dialog-actions { gap: 8px; margin-top: 4px; }
+
+/* The models table. Six columns, and the widest thing in any of them is a sentence, so the
+   cells wrap rather than pushing the table into a sideways scroll. */
+.m-models td { vertical-align: top; }
+/* The floors keep the wide screen readable: without them a name column squeezes to two letters
+   per line. Below 640px they are dropped and the row becomes a card, so the floors never turn
+   into a sideways drag (see the card list further down). */
+.m-models th:first-child, .m-models td:first-child { min-width: 150px; }
+.m-models .m-runs { min-width: 190px; }
+.m-models th:nth-child(3), .m-models td:nth-child(3) { min-width: 160px; }
+.m-model-name {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 8px; align-items: start;
+  padding: 0; border: 0; background: none; color: var(--text);
+  text-align: left; cursor: pointer; font: inherit;
+}
+.m-model-name:hover b { color: var(--accent); text-decoration: underline; }
+.m-model-words { display: grid; gap: 1px; min-width: 0; }
+.m-id { font-size: 11px; overflow-wrap: anywhere; }
+.m-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex: none; }
+.m-runs .cmd { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-detail { font-size: 11px; line-height: 1.4; margin-top: 3px; overflow-wrap: anywhere; }
+/* One line in the table, whatever buttons a row has (the one-line table rule): three buttons
+   would otherwise wrap and make that one row twice as tall. In the phone card list they may
+   wrap. */
+.m-row-actions { gap: 6px; flex-wrap: nowrap; align-items: center; }
+.m-detail-list dd { overflow-wrap: anywhere; }
+
+/* On a phone the table becomes a card list: one card per model, read in the order a person
+   asks the questions, and no sideways drag at all. The six columns and their floors are 857px
+   wide, which on a 390px screen put Status, Last test and Actions off the edge, and those are
+   two of the columns this section exists for. */
+@media (max-width: 640px) {
+  .m-row-actions { flex-wrap: wrap; }
+  .m-models, .m-models thead, .m-models tbody, .m-models tr, .m-models td { display: block; }
+  .m-models thead { display: none; }
+  .m-models tr {
+    display: grid; gap: 6px;
+    margin: 0 0 10px; padding: 10px 12px;
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    background: var(--surface);
+  }
+  /* The floors are what made the table wide, and a card has no columns to hold apart. */
+  .m-models td, .m-models td:first-child, .m-models .m-runs, .m-models td:nth-child(3) {
+    min-width: 0; border: 0; padding: 0;
+  }
+  .m-models td[data-col]::before {
+    content: attr(data-col);
+    display: block; color: var(--text-dim); font-size: 11px;
+  }
+  .m-models td.num { text-align: left; }
+  /* The name, then the state, then how it is paid for, then the rest, whatever order the
+     columns are written in. */
+  .m-models td:nth-child(1) { order: 1; }
+  .m-models td:nth-child(4) { order: 2; }
+  .m-models td:nth-child(3) { order: 3; }
+  .m-models td:nth-child(2) { order: 4; }
+  .m-models td:nth-child(5) { order: 5; }
+  .m-models td:nth-child(6) { order: 6; }
+}
+
+/* The add-model dialog: the same numbered steps as the account one, with a card per service. */
+.m-presets { display: grid; gap: 8px; }
+.m-preset { display: grid; gap: 4px; }
+.m-preset.chosen { border-color: var(--accent); background: var(--accent-soft); }
+.m-preset-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-preset .muted { font-size: 12px; line-height: 1.4; }
+.m-preset-sum { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.m-preset-facts { display: grid; gap: 4px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.m-field { display: grid; gap: 4px; }
+.m-label { color: var(--text-dim); font-size: 12px; }
+.m-keyline { color: var(--tone-wait); }
+
+/* Table cells are one line each: a pill and its sentence sit side by
+   side, the sentence cut with an ellipsis and carried in full by the cell's title. */
+/* The sentence yields to the windows: three bars with their numbers need the room more than
+   the tail of "Lanes can be spawned on this account", which the title carries in full. */
+.m-login { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 300px; }
+.m-login .pill { flex: 0 0 auto; }
+.m-login .cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* The bars clip as a whole at the cell's edge, never a label mid-word; the full list is the
+   cell's title. */
+.m-limits { display: flex; gap: 10px; align-items: center; min-width: 0; white-space: nowrap; overflow: hidden; }
+.m-limit { flex: 0 0 auto; }
+/* Three windows with their numbers need about 460 px: this one cell is exempt from the table's
+   320 px cap, so the last percentage is never the thing that gets cut. */
+tbody td.m-windows { max-width: none; }
+.m-limit { display: grid; grid-template-columns: auto 48px 36px; gap: 5px; align-items: center; }
+.m-lname { color: var(--text-dim); font-size: 11px; }
+
+.m-settings dd { display: grid; gap: 2px; }
+
+@media (max-width: 700px) {
+  .m-limits { flex-wrap: wrap; white-space: normal; }
+  .m-port { width: 100%; }
+}
+.m-account { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.m-account-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.m-account-row > .m-account { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.m-account-row > .engine-mark, .m-account-row > .tag { margin-left: auto; }

@@ -1,0 +1,23 @@
+[Unit]
+Description=fleet dashboard (the web page, on FLEET_DASH_BIND port 7878)
+# Installed and enabled by `fleet dashboard enable` (farm/install.sh runs it), which substitutes
+# __FLEET__ and __PY__. `fleet dashboard start|stop|restart` drive this unit once it exists.
+After=default.target
+# Never give up. After a reboot the user manager can start this before Tailscale has an address;
+# with FLEET_DASH_BIND=tailscale the server then refuses and exits, and systemd tries again every
+# five seconds until the address is there.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin
+# Operator overrides (FLEET_DASH_BIND, FLEET_DASH_PORT, FLEET_DASH_TOKEN, FLEET_HOME) live in one
+# file rather than in each unit. The leading '-' makes it optional.
+EnvironmentFile=-%h/.config/fleet/env
+WorkingDirectory=__FLEET__/dashboard
+ExecStart=__PY__ __FLEET__/dashboard/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

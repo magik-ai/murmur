@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""A fake Homebrew: `install doctl` links the fake doctl into $FAKE_BREW_BIN (a PATH folder)."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fakelib import die, flag, record  # noqa: E402
+
+
+def main():
+    argv = record()
+    if argv[1:] == ["install", "doctl"]:
+        target = os.path.join(flag("FAKE_BREW_BIN"), "doctl")
+        here = os.path.dirname(os.path.realpath(__file__))
+        os.symlink(os.path.realpath(os.path.join(here, "doctl")), target)
+        for name in ("_fakelib.py",):
+            if not os.path.exists(os.path.join(flag("FAKE_BREW_BIN"), name)):
+                os.symlink(os.path.realpath(os.path.join(here, name)),
+                           os.path.join(flag("FAKE_BREW_BIN"), name))
+        return 0
+    die("fake brew: only `brew install doctl` is expected")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
