@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -46,6 +47,24 @@ KEYS = [
     "farm",
 ]
 STALE_DAYS = 7
+# The agents run in Claude Code or in Codex, and one of the two is enough.
+ENGINES = ("claude", "codex")
+
+# What init writes. The pointer is the block it puts in CLAUDE.md and AGENTS.md, which Claude
+# Code and Codex read, and which send an agent to the contract.
+MARKER = "<!-- murmur:contract -->"
+PR_TEMPLATE = Path(".github/PULL_REQUEST_TEMPLATE.md")
+INIT_FILES = [PR_TEMPLATE, Path("docs/GOTCHAS.md")]
+GENERATED = Path(".claude/generated-files.txt")
+SETUP_FILES = [CONFIG, CONTRACT, Path(".claude/tracker.md"), *INIT_FILES, GENERATED,
+               Path("CLAUDE.md"), Path("AGENTS.md")]
+AGAIN = "run murmur_init.py apply again, or /murmur:init"
+# The blanks murmur_init.py lists when it writes CLAUDE.md from the template: upper-case words
+# in angle brackets, never a single letter such as the T of Result<T>, outside HTML comments.
+# The role words are no blanks: the session hook says what they mean here.
+PLACEHOLDER = re.compile(r"<[A-Z][A-Z0-9_]+(?: [A-Z0-9_]+)*>")
+COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+ROLE_WORDS = {"<OWNER>", "<TRACKER>", "<FARM>"}
 
 OK, WARN, MISSING, OPTIONAL, FIXED = "ok", "warning", "missing", "optional", "fixed"
 
@@ -187,6 +206,111 @@ def check_contract(root: Path, report: Report) -> None:
         report.add("contract", MISSING, f"{CONTRACT} is not there, run the init skill")
 
 
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def has_pr_template(root: Path) -> bool:
+    """GitHub takes a pull request template from .github, docs or the root, in any case and
+    with any extension, or from a PULL_REQUEST_TEMPLATE folder in one of them."""
+    return any(folder.is_dir() and any(entry.name.lower().startswith("pull_request_template")
+                                       for entry in folder.iterdir())
+               for folder in (root / ".github", root / "docs", root))
+
+
+def check_init_files(root: Path, report: Report) -> None:
+    missing = [rel for rel in INIT_FILES if not (root / rel).is_file()]
+    if PR_TEMPLATE in missing and has_pr_template(root):
+        missing.remove(PR_TEMPLATE)                       # the repository keeps its own
+    if missing:
+        names = ", ".join(str(rel) for rel in missing)
+        report.add("init files", WARN, f"missing: {names}; {AGAIN}")
+    else:
+        report.add("init files", OK, "the pull request template and docs/GOTCHAS.md")
+    # The list is the person's to keep or delete: without it, nothing is guarded.
+    if (root / GENERATED).is_file():
+        report.add("generated files", OK, f"{GENERATED} names the files never edited by hand")
+    else:
+        report.add("generated files", OPTIONAL, f"{GENERATED} is not there, so the guard is off")
+
+
+def check_pointers(root: Path, report: Report) -> None:
+    claude, agents = root / "CLAUDE.md", root / "AGENTS.md"
+    if not claude.is_file():
+        report.add("CLAUDE.md", WARN, f"not there, so nothing points to {CONTRACT}; {AGAIN}")
+    elif MARKER not in read_text(claude):
+        report.add("CLAUDE.md", WARN, f"no pointer to {CONTRACT}; {AGAIN}")
+    else:
+        report.add("CLAUDE.md", OK, f"points to {CONTRACT}")
+    if not agents.is_file() and shutil.which("codex"):
+        report.add("AGENTS.md", WARN, "not there, and codex is on the path: Codex reads "
+                   "AGENTS.md, never CLAUDE.md; run murmur_init.py apply --agents-md")
+    elif not agents.is_file():
+        report.add("AGENTS.md", OPTIONAL, "not there; for Codex, murmur_init.py apply "
+                   "--agents-md writes one that points to the contract")
+    elif MARKER not in read_text(agents):
+        report.add("AGENTS.md", WARN, f"no pointer to {CONTRACT}, so Codex never reads it; "
+                   f"{AGAIN}")
+    else:
+        report.add("AGENTS.md", OK, f"points to {CONTRACT}")
+
+
+def check_placeholders(root: Path, report: Report) -> None:
+    path = root / "CLAUDE.md"
+    if not path.is_file():
+        return
+    found = PLACEHOLDER.findall(COMMENT.sub("", read_text(path)))
+    blanks = [blank for blank in dict.fromkeys(found) if blank not in ROLE_WORDS]
+    if not blanks:
+        report.add("placeholders", OK, "none left in CLAUDE.md")
+        return
+    shown = ", ".join(blanks[:4]) + (f" and {len(blanks) - 4} more" if len(blanks) > 4 else "")
+    report.add("placeholders", WARN, f"{len(blanks)} still to fill in CLAUDE.md: {shown}; "
+               "replace each one, or delete its line")
+
+
+def check_pending(root: Path, report: Report) -> None:
+    """The <name>.murmur-new files init wrote beside files that differ, wherever they are. The
+    ones beside its own files are looked for by name too, in case git ignores them."""
+    found = {f"{rel}.murmur-new" for rel in SETUP_FILES if (root / f"{rel}.murmur-new").is_file()}
+    listing = run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
+                   "*.murmur-new"], cwd=root)
+    if listing is not None and listing.returncode == 0:
+        found.update(p for p in listing.stdout.split("\0") if p and (root / p).is_file())
+    if found:
+        report.add("murmur-new files", WARN, f"{len(found)} waiting: {', '.join(sorted(found))}; "
+                   "compare each with the file beside it and keep one")
+    else:
+        report.add("murmur-new files", OK, "none waiting")
+
+
+def check_published(root: Path, report: Report, base: str) -> None:
+    """A lane starts from origin/<base>, so the setup reaches a lane only once it is there."""
+    if not (root / CONTRACT).is_file():
+        return                                            # nothing to push yet
+    here = [str(rel) for rel in SETUP_FILES if (root / rel).is_file()]
+    status = run(["git", "status", "--porcelain", "--untracked-files=all", "--", *here], cwd=root)
+    lines = status.stdout.splitlines() if status is not None and status.returncode == 0 else []
+    # Each line is "XY <path>", or "XY <old> -> <new>" for a rename.
+    loose = sorted({line[3:].split(" -> ")[-1] for line in lines if line})
+    faults = [f"not committed: {', '.join(loose)}"] if loose else []
+    # The base branch as this clone last fetched it. The doctor never fetches.
+    shown = run(["git", "cat-file", "-e", f"refs/remotes/origin/{base}:{CONTRACT}"], cwd=root)
+    if shown is None or shown.returncode != 0:
+        faults.append(f"origin/{base} has no {CONTRACT} as of the last fetch")
+    if faults:
+        # Committed but not on the base branch yet usually means a pull request waits.
+        advice = ("commit the setup, push it and merge its pull request" if loose else
+                  "merge the pull request that carries it (or push it), then git fetch")
+        report.add("setup pushed", WARN, "; ".join(faults) + f"; lanes start from origin/{base},"
+                   f" so {advice}")
+    else:
+        report.add("setup pushed", OK, f"committed, and origin/{base} has {CONTRACT}")
+
+
 def plugin_hooks() -> list[Path]:
     hooks = Path(__file__).resolve().parent.parent / "hooks"
     return sorted(hooks.glob("*.sh")) if hooks.is_dir() else []
@@ -217,6 +341,17 @@ def check_tool(report: Report, name: str, why: str, required: bool) -> str | Non
         return found
     report.add(name, MISSING if required else WARN, f"not on the path, {why}")
     return None
+
+
+def check_engines(report: Report) -> None:
+    found = {name: shutil.which(name) for name in ENGINES}
+    if not any(found.values()):
+        report.add("engines", MISSING,
+                   "neither claude nor codex is on the path, the agents run in one of them")
+        return
+    report.add("engines", OK, "; ".join(f"{name} at {path}" if path else
+                                        f"{name} is not on the path"
+                                        for name, path in found.items()))
 
 
 def check_gh(report: Report) -> None:
@@ -312,11 +447,16 @@ def main() -> int:
     base = config.get("base_branch") or "main"
     check_remote(root, report, base)
     check_contract(root, report)
+    check_init_files(root, report)
+    check_pointers(root, report)
+    check_placeholders(root, report)
+    check_pending(root, report)
+    check_published(root, report, base)
     check_hooks(report, args.fix)
     check_tool(report, "uv", "the scripts here run with uv run", True)
     check_gh(report)
     check_tracker(root, report, config)
-    check_tool(report, "claude", "the agents run in it", True)
+    check_engines(report)
     check_stale_branches(root, report)
     check_optional(report, config)
     status = final_status(report)

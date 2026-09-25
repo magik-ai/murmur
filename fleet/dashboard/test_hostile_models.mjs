@@ -2019,6 +2019,60 @@ for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }])
   await context.close();
 }
 
+/* Claude Code and Codex installed, and no login on the farm: the server says needs_login. A CLI
+   that was merely found used to be drawn as Connected while the Accounts section waited for the
+   first login. The row says it needs a login, carries the command on its pill, offers Test and
+   no switch, and its sidebar gives the same command. */
+{
+  const unlogged = { status: "needs_login", health: "unchecked", health_detail: "", last_test: null };
+  const { page, context, thrown } = await open({
+    overrides: { "/api/engines": engines({ claude: unlogged, codex: unlogged }) },
+  });
+  const seen = await page.evaluate(() => {
+    const out = {};
+    for (const row of document.querySelectorAll("#view .mo-providers tbody tr")) {
+      const name = row.querySelector("[data-model-open]");
+      const pill = row.querySelector("td:nth-child(3) .pill");
+      if (!name || !pill) continue;
+      out[name.getAttribute("data-model-open")] = {
+        status: pill.querySelector(".pill-text").textContent,
+        meaning: pill.className.replace("pill ", ""),
+        why: pill.getAttribute("title") || "",
+        switch: Boolean(row.querySelector("[data-model-switch]")),
+        test: Boolean(row.querySelector("[data-model-test]")),
+        text: row.innerText,
+      };
+    }
+    return out;
+  });
+  for (const id of ["claude", "codex"]) {
+    const row = seen[id] || {};
+    check(`machine: ${id} installed with no login is drawn as Needs a login, not Connected`,
+      row.status === "Needs a login" && row.meaning === "wait" && !/Connected/.test(row.text || ""),
+      JSON.stringify(row).slice(0, 200));
+    check(`machine: ${id} with no login offers Test and no switch`,
+      row.test === true && row.switch === false, JSON.stringify(row).slice(0, 200));
+  }
+  check("machine: the Claude Code pill says how to log in",
+    /ssh -t farm claude, then type \/login/.test((seen.claude || {}).why || ""),
+    (seen.claude || {}).why);
+  check("machine: the Codex pill gives the codex login with the forwarded port",
+    /ssh -L 1455:localhost:1455 -t farm codex login/.test((seen.codex || {}).why || ""),
+    (seen.codex || {}).why);
+  await openSidebar(page, "claude");
+  const drawer = await page.evaluate(() => {
+    const host = document.getElementById("drawerBody");
+    const words = host.querySelector("[data-model-status-words]");
+    const login = host.querySelector("[data-model-login]");
+    return { words: words ? words.textContent : "", login: login ? login.textContent : "" };
+  });
+  check("machine: the Claude Code sidebar says it needs a login, and gives the command",
+    /Nobody has logged it in on this farm/.test(drawer.words) && drawer.login === "ssh -t farm claude",
+    JSON.stringify(drawer));
+  check("machine: nothing threw drawing rows that need a login", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
 /* A subscription is logged in, not keyed, so its third step is a login command and the steps
    that go with it. Every preset is choosable on a farm with an empty catalog, which is the one
    place this branch can be reached. */

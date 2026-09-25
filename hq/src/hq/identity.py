@@ -11,10 +11,11 @@ from .util import MissingTool, run, slug
 # The session key contract, in priority order.
 #
 # HQ_SESSION_ID is the one a spawner is asked to set: it is hq's own variable, so
-# hq can promise what it means. The other three are best-effort fallbacks and each
-# is somebody else's variable. CLAUDE_CODE_SESSION_ID is set by Claude Code, and
-# hq cannot promise it stays. TERM_SESSION_ID and TMUX_PANE identify a terminal,
-# not a session, so two agents in one pane look like one agent.
+# hq can promise what it means. The other four are best-effort fallbacks and each
+# is somebody else's variable. CLAUDE_CODE_SESSION_ID is set by Claude Code and
+# CODEX_THREAD_ID by Codex for the commands it runs; hq cannot promise either
+# stays. TERM_SESSION_ID and TMUX_PANE identify a terminal, not a session, so two
+# agents in one pane look like one agent.
 #
 # The order stays as it is, because changing it would rename every live session on
 # a machine mid-flight. `hq whoami` prints which variable answered, so a spawner
@@ -22,6 +23,7 @@ from .util import MissingTool, run, slug
 SESSION_VARIABLES = (
     "HQ_SESSION_ID",
     "CLAUDE_CODE_SESSION_ID",
+    "CODEX_THREAD_ID",
     "TERM_SESSION_ID",
     "TMUX_PANE",
 )

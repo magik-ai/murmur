@@ -217,8 +217,8 @@ runtime lives in the clone. State, logs and worktrees go to `~/.fleet/`, and set
 
 `skills/fleet/SKILL.md` is the orchestrator's playbook: how to split work into lanes, spawn
 them, watch them, and merge only after your yes. `install.sh` links it into
-`~/.claude/skills/fleet`, and into `~/.codex/skills/fleet` when `~/.codex` exists. It belongs to
-your own setup. Do not copy it into a shared project repository.
+`~/.claude/skills/fleet`, and into `~/.agents/skills/fleet`, where Codex reads skills, when Codex
+is on the machine. It belongs to your own setup. Do not copy it into a shared project repository.
 
 ## More documentation
 

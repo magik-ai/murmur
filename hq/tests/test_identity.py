@@ -118,6 +118,17 @@ def test_the_session_key_reports_which_variable_answered(monkeypatch):
     assert ident.session_key_source() == ("from-the-spawner", "HQ_SESSION_ID")
 
 
+def test_codex_gives_a_key_after_claude_code_and_before_the_terminal(monkeypatch):
+    """Codex sets CODEX_THREAD_ID for the commands it runs, so a Codex session
+    gets a key of its own, not the terminal's."""
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    monkeypatch.setenv("CODEX_THREAD_ID", "codex-thread")
+    assert ident.session_key_source() == ("codex-thread", "CODEX_THREAD_ID")
+
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "from-the-runtime")
+    assert ident.session_key_source() == ("from-the-runtime", "CLAUDE_CODE_SESSION_ID")
+
+
 def test_no_session_variable_means_no_key():
     assert ident.session_key_source() == (None, None)
 

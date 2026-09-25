@@ -2,22 +2,116 @@
 """The tools fleet/dashboard/run.sh and the dashboard server reach for, faked.
 
 One script, linked under each name (systemctl, tmux, ss, tailscale). Every call is recorded in
-$FAKE_LOG like every other fake here. Nothing starts, stops or listens:
+$FAKE_LOG like every other fake here. Nothing real starts, stops or listens, with one exception:
+a started unit is a stand-in dashboard on 127.0.0.1, because `fleet dashboard` calls a dashboard
+running only once it answers.
 
-  FAKE_STATE_DIR=<dir>          where `systemctl --user start|enable --now` leaves a marker
-  FAKE_DASH_PORT=<port>         the port `ss` reports as listening once the marker is there
+  FAKE_STATE_DIR=<dir>          where `systemctl --user start|enable --now` leaves a marker, and
+                                the stand-in's pid; `stop` removes both and ends the stand-in
+  FAKE_DASH_PORT=<port>         the port `ss` reports as listening once the marker is there, and
+                                the one the stand-in answers GET /api/version on
   FAKE_TAILSCALE_ANSWERS=a|b|c  what `tailscale ip -4` prints, one answer per call, the last one
                                 repeated; an empty answer prints nothing (no address yet)
+  FAKE_DASH_SILENT=1            a start leaves the marker and starts no stand-in: a unit whose
+                                server never comes to listen
+
+The stand-in stores a token in $FLEET_CONFIG/dash-token when there is none, as the real server
+does before it listens, and ends by itself after two minutes, so a test that never stops it
+leaves nothing behind for long.
 """
 import os
+import signal
+import socket
+import subprocess
 import sys
+import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# realpath: a suite may link one of these names from a folder of its own, and _fakelib is found
+# next to the file itself, not next to the link.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from _fakelib import flag, out, record  # noqa: E402
+
+STAND_IN = r"""
+import http.server, json, os, secrets, sys, threading
+port, token_file = int(sys.argv[1]), sys.argv[2]
+if not os.path.exists(token_file):
+    os.makedirs(os.path.dirname(token_file), exist_ok=True)
+    with open(token_file, "w") as handle:
+        handle.write(secrets.token_urlsafe(16) + "\n")
+
+
+class Answer(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        known = self.path == "/api/version"
+        body = json.dumps({"v": "stand-in"} if known else {"error": "not here"}).encode()
+        self.send_response(200 if known else 404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.HTTPServer(("127.0.0.1", port), Answer)
+threading.Timer(120, server.shutdown).start()
+server.serve_forever()
+"""
 
 
 def marker():
     return os.path.join(flag("FAKE_STATE_DIR", "/nonexistent"), "dashboard-started")
+
+
+def pid_file():
+    return os.path.join(flag("FAKE_STATE_DIR", "/nonexistent"), "dashboard.pid")
+
+
+def stand_in_pid():
+    """The stand-in's pid while it runs, else None."""
+    try:
+        with open(pid_file(), encoding="utf-8") as handle:
+            pid = int(handle.read().strip())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+def start_stand_in():
+    """What starting the unit does: a dashboard that answers, unless one already runs."""
+    with open(marker(), "w", encoding="utf-8") as handle:
+        handle.write("started\n")
+    if stand_in_pid() or flag("FAKE_DASH_SILENT"):
+        return
+    config = flag("FLEET_CONFIG") or os.path.expanduser("~/.config/fleet")
+    process = subprocess.Popen([sys.executable, "-c", STAND_IN, flag("FAKE_DASH_PORT", "7878"),
+                                os.path.join(config, "dash-token")],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, start_new_session=True)
+    with open(pid_file(), "w", encoding="utf-8") as handle:
+        handle.write(str(process.pid))
+
+
+def stop_stand_in():
+    """End the stand-in, and return once its port no longer answers, as a stopped unit's would
+    not: a start straight after must not find the old one still holding the socket."""
+    pid = stand_in_pid()
+    if pid:
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", int(flag("FAKE_DASH_PORT", "7878"))),
+                                              timeout=0.2):
+                    pass
+            except OSError:
+                break
+            time.sleep(0.05)
+    for path in (marker(), pid_file()):
+        if os.path.exists(path):
+            os.unlink(path)
 
 
 def systemctl(args):
@@ -28,12 +122,10 @@ def systemctl(args):
         out("HOME=/fake")
         return 0
     if rest[:1] == ["start"] or rest[:2] == ["enable", "--now"]:
-        with open(marker(), "w", encoding="utf-8") as handle:
-            handle.write("started\n")
+        start_stand_in()
         return 0
     if rest[:1] == ["stop"]:
-        if os.path.exists(marker()):
-            os.unlink(marker())
+        stop_stand_in()
         return 0
     if rest[:1] == ["is-active"]:
         out("active" if os.path.exists(marker()) else "inactive")

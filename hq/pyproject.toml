@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hq-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Coordination for a fleet of coding agents pushing under one GitHub login"
 readme = "README.md"
 # 3.11 is the oldest supported python: the config file is read with the

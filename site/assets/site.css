@@ -57,11 +57,14 @@ img, svg, canvas { max-width: 100%; }
   .hero .wrap { padding-block: 96px 280px; }
   .hero canvas { top: auto; bottom: 56px; height: 230px; }
 }
-.links { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; font: 550 15px/1 var(--font-sans); }
+/* Each link is a whole 24px line tall, a target a finger can find (WCAG 2.5.8); the gaps are
+   smaller by as much, so the text sits where it did. */
+.links { display: flex; flex-wrap: wrap; gap: 11px 20px; margin-top: 16px; font: 550 15px/24px var(--font-sans); }
 .links a { color: var(--accent); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
 .links a:hover { text-decoration-thickness: 2px; }
 
-/* The install block: two ways in, as tabs, each a command with Copy. */
+/* The install block: three ways in, as tabs. Every command has its own Copy, because Claude Code
+   takes one slash command per message. */
 .install {
   max-width: 560px;
   border: 1px solid var(--line);
@@ -69,7 +72,7 @@ img, svg, canvas { max-width: 100%; }
   background: var(--paper-raised);
   overflow: hidden;
 }
-.install [role="tablist"] { display: flex; gap: 4px; padding: 6px; background: var(--paper-sunk); }
+.install [role="tablist"] { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; background: var(--paper-sunk); }
 .install [role="tab"] {
   height: 30px;
   padding: 0 12px;
@@ -78,24 +81,45 @@ img, svg, canvas { max-width: 100%; }
   background: none;
   color: var(--ink-muted);
   font: 550 13px/1 var(--font-sans);
+  white-space: nowrap;
   cursor: pointer;
 }
 .install [role="tab"][aria-selected="true"] { background: var(--paper-raised); border-color: var(--line); color: var(--ink); }
 .install [role="tab"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-/* The two panels share one cell, so the box keeps the height of the taller one whichever is
+/* The panels share one cell, so the box keeps the height of the tallest one whichever is
    chosen, and switching tabs moves nothing around it. */
 .install { display: grid; grid-template-columns: minmax(0, 1fr); }
-.install [role="tabpanel"] { grid-row: 2; grid-column: 1; display: flex; align-items: flex-start; gap: 12px; padding: 14px 14px 14px 16px; }
+.install [role="tabpanel"] { grid-row: 2; grid-column: 1; padding: 14px 14px 14px 16px; }
 .install [role="tabpanel"].is-off { visibility: hidden; }
+.install .cmds { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.install .cmd { display: flex; align-items: flex-start; gap: 10px; }
+/* A command wraps inside the box at every width, and never under its prompt: the prompt hangs
+   in a gutter two characters wide. A long address breaks after a slash (the <wbr>s), never at
+   the hyphen in magik-ai. Copy copies the command as written, wherever it wraps. */
 .install pre {
   flex: 1;
   min-width: 0;
   margin: 0;
-  overflow-x: auto;
+  padding-left: 2ch;
+  text-indent: -2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
   font: 400 13.5px/22px var(--font-mono);
   color: var(--ink);
 }
 .install pre .p { color: var(--ink-muted); user-select: none; }
+.install pre .nowrap { white-space: nowrap; }
+/* Copy sits on the first line of its command, and is as wide as Copied, so the word changing
+   never moves the command beside it. */
+.install .cmd .mm-button { flex: none; justify-content: center; min-width: 64px; height: 24px; margin-top: -1px; }
+
+/* One line under the box says what the chosen way needs. It may run wider than the box, so on
+   a wide screen each note stays one line. The lines share one cell like the panels, so the
+   space they take stays the same whichever tab is chosen. */
+.install-notes { display: grid; margin-top: 10px; }
+.install-note { grid-area: 1 / 1; margin: 0; font-size: 14px; line-height: 22px; color: var(--ink-muted); }
+.install-note.is-off { visibility: hidden; }
 
 /* --------------------------------------------------------------- sections */
 /* One block per screen: every block of the story is at least the window's height with its
@@ -254,14 +278,22 @@ footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
 .pieces__inner .h2 { margin: 0; }
 .pieces__stage { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 9fr); gap: clamp(32px, 4vw, 56px); align-items: center; }
 .pieces__steps { display: grid; gap: clamp(16px, 3vh, 30px); margin: 0; padding: 0; list-style: none; }
-.piece { opacity: 0.34; transition: opacity 320ms ease-out; }
-.piece.is-on { opacity: 1; }
 /* The name and its tag share one line, and the text under them is three lines at most, so the
    column of three stays as tall as the screen beside it. */
 .piece__title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 6px; }
 .piece__title .mm-tag { margin: 0; }
 .piece p { margin: 0; font-size: 16px; line-height: 26px; color: var(--ink-muted); }
 .piece__shot { display: none; }
+/* While the stage is pinned, the lit part is in full ink and the two waiting their turn step
+   back to the muted ink. That still reads at 5.5:1 or more on the paper, so every part stays
+   legible (WCAG 1.4.3), where fading them made them 2:1. */
+@media (min-width: 1025px) and (min-height: 561px) {
+  .piece__title, .piece p { transition: color 320ms ease-out; }
+  .piece .mm-tag { transition: border-color 320ms ease-out; }
+  .piece:not(.is-on) .piece__title { color: var(--ink-muted); }
+  .piece:not(.is-on) .mm-tag { border-color: var(--line); }
+  .piece.is-on p { color: var(--ink); }
+}
 .pieces__screen { position: relative; aspect-ratio: 16 / 10; max-width: 100%; }
 .screen-frame { position: absolute; inset: 0; opacity: 0; transition: opacity 420ms ease-out; }
 .screen-frame.is-on { opacity: 1; }
@@ -270,14 +302,13 @@ footer .fine { margin: 0; font-size: 14px; color: var(--ink-muted); }
 .pip { position: relative; width: 44px; height: 4px; padding: 0; border: 0; border-radius: 999px; background: var(--line); overflow: hidden; cursor: pointer; }
 .pip i { position: absolute; inset: 0; background: var(--accent); transform-origin: left; transform: scaleX(0); }
 .pip:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-@media (prefers-reduced-motion: reduce) { .piece, .screen-frame { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .piece__title, .piece p, .piece .mm-tag, .screen-frame { transition: none; } }
 /* A narrow or short window gets the parts as a plain list, each with its screen under it. */
 @media (max-width: 1024px), (max-height: 560px) {
   .pieces { height: auto; padding-block: 56px; }
   .pieces__sticky { position: static; height: auto; overflow: visible; }
   .pieces__stage { grid-template-columns: 1fr; }
   .pieces__steps { gap: 48px; }
-  .piece { opacity: 1; }
   .piece__shot { display: block; margin-top: 18px; }
   .pieces__screen, .pieces__progress { display: none; }
 }

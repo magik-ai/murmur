@@ -156,7 +156,7 @@ for (const state of STATES) {
         ? "Provider|Access|Status|Models|Last test|Actions" : "Provider|Status|Models";
       check(`${label} draws the providers table with its columns`,
         seen.columns.join("|") === columns, seen.columns.join("|"));
-      check(`${label} shows the server's five status words, on drawn as Connected`,
+      check(`${label} shows the five status words the stub's rows carry, on drawn as Connected`,
         ["Connected", "Failing", "Off", "Needs a key", "Not installed"]
           .every((word) => seen.pills.includes(word)), seen.pills.join(", "));
       check(`${label} counts the models that are on`,

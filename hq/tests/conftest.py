@@ -18,7 +18,8 @@ if str(SRC) not in sys.path:
 # Everything hq reads from the environment. Cleared before each test.
 HQ_VARIABLES = (
     "HQ_AGENT", "HQ_REPO", "HQ_OWNER", "HQ_BOT_NAME", "HQ_BOT_EMAIL", "HQ_HOME",
-    "HQ_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "TERM_SESSION_ID", "TMUX_PANE",
+    "HQ_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "TERM_SESSION_ID",
+    "TMUX_PANE",
 )
 
 
@@ -62,7 +63,7 @@ def sandbox(tmp_path, monkeypatch):
 def as_session(monkeypatch):
     """Become a given session: the key hq uses to tell two agents apart."""
     def become(key):
-        for variable in ("HQ_SESSION_ID", "CLAUDE_CODE_SESSION_ID",
+        for variable in ("HQ_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID",
                          "TERM_SESSION_ID", "TMUX_PANE"):
             monkeypatch.delenv(variable, raising=False)
         if key:

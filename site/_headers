@@ -1,0 +1,6 @@
+# Response headers for every page and file on murmur.farm. Wrangler reads this file when it
+# publishes site/ and does not publish the file itself.
+/*
+  Strict-Transport-Security: max-age=31536000
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

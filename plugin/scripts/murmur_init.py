@@ -14,6 +14,11 @@ Rerunning is safe. An answered question does not come back. Apart from
 overwritten: the contract and the tracker rules get a <name>.murmur-new beside
 them when they differ, the other files are left as they are, and an existing
 CLAUDE.md or AGENTS.md gets a four-line pointer to the contract, once.
+
+Codex reads AGENTS.md and never CLAUDE.md. `apply --agents-md` writes an
+AGENTS.md that holds only a title and the pointer when the repository has none.
+Claude Code reads AGENTS.md only while there is no CLAUDE.md, so a CLAUDE.md
+written beside an AGENTS.md begins with the line @AGENTS.md, which imports it.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from pathlib import Path
 
 CONFIG = Path(".murmur/config.toml")
 CONTRACT = Path(".murmur/contract.md")
+GENERATED = Path(".claude/generated-files.txt")
 MARKER = "<!-- murmur:contract -->"
 TRACKERS = ["github-issues", "linear", "jira", "notion", "none"]
 NEVER = ["merge", "force-push", "production-writes", "paid-provisioning"]
@@ -255,7 +261,9 @@ def without_contract_sections(template: str) -> str:
     return "\n".join(keep) + "\n"
 
 
-def build_contract(config: dict, template: str) -> str:
+def build_contract(config: dict, template: str, guarded: bool = False) -> str:
+    """The contract. `guarded`: the repository has a list of generated files, and the rule
+    that keeps them from hand edits is written here too, since Codex has no hook to stop one."""
     base = config["base_branch"]
     tracker = config["tracker"]
     never = ", ".join(config["never_without_owner"]) or "nothing is reserved"
@@ -269,6 +277,11 @@ def build_contract(config: dict, template: str) -> str:
             f"Work is tracked in {tracker}. Taking a task, linking the pull request"
             " and posting evidence: `.claude/tracker.md`."
         )
+    generated = (
+        "## Generated files\n\n"
+        f"Never edit a file that `{GENERATED}` lists by hand: regenerate it with the command"
+        " written beside its entry.\n\n"
+    ) if guarded else ""
     head = f"""{MARKER}
 # The contract for agent work in this repository
 
@@ -290,7 +303,7 @@ Never touch a branch another agent has claimed: no push, no rebase, no merge.
 {tracked}
 {FARM_LINES[config['farm']]}
 
-"""
+{generated}"""
     parts = [section(template, heading) for heading in SECTIONS]
     tail = (
         "\n\n## The rest\n\n"
@@ -308,6 +321,22 @@ def fill_template(text: str, config: dict) -> str:
     out = text.replace("<ORG>/<REPO>", repo).replace("<PRODUCT>", product)
     out = out.replace("<TRACKER>", "no tracker" if tracker == "none" else tracker)
     return rebase_text(out, config["base_branch"])
+
+
+# A blank the person fills in: upper-case words in angle brackets, such as <NAME> or
+# <KIND OF WORK>. A single letter is not one, so a type such as Result<T> is not taken for a
+# blank, and neither is anything inside an HTML comment, where the template's own <PLACEHOLDER>
+# names the blanks instead of being one. The role words are no blanks either: they may stay,
+# and the session hook tells every agent what they mean in this repository.
+PLACEHOLDER = re.compile(r"<[A-Z][A-Z0-9_]+(?: [A-Z0-9_]+)*>")
+COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+ROLE_WORDS = {"<OWNER>", "<TRACKER>", "<FARM>"}
+
+
+def placeholders(text: str) -> list[str]:
+    """The blanks still in the text, each once, in the order they first appear."""
+    found = PLACEHOLDER.findall(COMMENT.sub("", text))
+    return [blank for blank in dict.fromkeys(found) if blank not in ROLE_WORDS]
 
 
 def place(root: Path, rel: Path, content: str, mode: str, report: list[dict]) -> None:
@@ -357,7 +386,7 @@ def add_pointer(root: Path, rel: Path, base: str, report: list[dict]) -> None:
     report.append({"path": str(rel), "action": "appended", "note": "pointer added"})
 
 
-def cmd_apply(root: Path, use_defaults: bool = False) -> int:
+def cmd_apply(root: Path, use_defaults: bool = False, agents_md: bool = False) -> int:
     config = load_config(root)
     questions = questions_for(root)
     missing = [q["id"] for q in questions if not config.get(q["id"])]
@@ -380,21 +409,39 @@ def cmd_apply(root: Path, use_defaults: bool = False) -> int:
         (".claude/tracker.md", templates / "trackers" / f"{config['tracker']}.md", "managed"),
         (".github/PULL_REQUEST_TEMPLATE.md", templates / "PULL_REQUEST_TEMPLATE.md", "once"),
         ("docs/GOTCHAS.md", templates / "GOTCHAS.md", "once"),
-        (".claude/generated-files.txt", generated_example(), "once"),
+        (str(GENERATED), generated_example(), "once"),
     ]
-    place(root, CONTRACT, build_contract(config, law), "managed", report)
+    placed: list[dict] = []
     for rel, source, mode in sources:
-        place(root, Path(rel), source.read_text(encoding="utf-8"), mode, report)
+        place(root, Path(rel), source.read_text(encoding="utf-8"), mode, placed)
+    # The contract is built once the files above are in place, so that it names the list of
+    # generated files on the first run too. It still comes first in the report.
+    guarded = (root / GENERATED).is_file()
+    place(root, CONTRACT, build_contract(config, law, guarded), "managed", report)
+    report.extend(placed)
     base = config["base_branch"]
     if (root / "CLAUDE.md").is_file():
         add_pointer(root, Path("CLAUDE.md"), base, report)
     else:
-        fresh = (fill_template(without_contract_sections(law), config) + "\n"
+        # Claude Code reads AGENTS.md only while there is no CLAUDE.md, so a new CLAUDE.md
+        # imports the AGENTS.md the repository already has.
+        imports = (root / "AGENTS.md").is_file()
+        fresh = (("@AGENTS.md\n\n" if imports else "")
+                 + fill_template(without_contract_sections(law), config) + "\n"
                  + pointer_block(base) + "\n")
         place(root, Path("CLAUDE.md"), fresh, "managed", report)
-        report[-1]["note"] = "from the template, some placeholders still to fill"
+        if imports:
+            report[-1]["note"] = ("from the template, importing AGENTS.md so Claude Code still "
+                                  "reads it; some placeholders still to fill")
+        else:
+            report[-1]["note"] = "from the template, some placeholders still to fill"
+        report[-1]["placeholders"] = placeholders(fresh)
     if (root / "AGENTS.md").is_file():
         add_pointer(root, Path("AGENTS.md"), base, report)
+    elif agents_md:
+        place(root, Path("AGENTS.md"), "# AGENTS.md\n\n" + pointer_block(base) + "\n", "once",
+              report)
+        report[-1]["note"] = "a title and the pointer to the contract, for Codex"
     summary = {
         "status": "applied",
         "repo": config["repo"],
@@ -416,13 +463,15 @@ def main() -> int:
     apply = subs.add_parser("apply", help="write the files and print a report")
     apply.add_argument("--defaults", action="store_true",
                        help="fill every unanswered question with its default first")
+    apply.add_argument("--agents-md", action="store_true",
+                       help="also write AGENTS.md, with the pointer, when there is none")
     args = parser.parse_args()
     root = repo_root()
     if args.command == "questions":
         return cmd_questions(root)
     if args.command == "answer":
         return cmd_answer(root, args.id, args.value)
-    return cmd_apply(root, use_defaults=args.defaults)
+    return cmd_apply(root, use_defaults=args.defaults, agents_md=args.agents_md)
 
 
 if __name__ == "__main__":

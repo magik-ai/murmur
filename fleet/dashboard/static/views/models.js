@@ -50,13 +50,16 @@ function setConfirm(context, next) {
 
 /* ----------------------------------------------------------------- providers */
 
-/* The server's five status words, and the meaning and the word each is drawn in. One pill per
+/* The server's six status words, and the meaning and the word each is drawn in. One pill per
    row, never two: a row that carried both "installed" and "enabled" made a reader work out the
-   state the page already knew. What the server calls on is drawn as Connected. */
+   state the page already knew. What the server calls on is drawn as Connected. A Claude Code or
+   Codex row with no login on the farm needs a login: a CLI that is merely installed was drawn
+   as Connected while the Accounts section waited for the first login. */
 const STATUS = {
   on: ["done", "Connected"],
   off: ["pause", "Off"],
   needs_key: ["wait", "Needs a key"],
+  needs_login: ["wait", "Needs a login"],
   not_installed: ["pause", "Not installed"],
   failing: ["fail", "Failing"],
 };
@@ -128,8 +131,8 @@ function dotStyle(colour) {
 }
 
 /* A model that is failing every call is exactly the one an operator wants to stop, so the
-   switch is offered there too. The two statuses left without one are the two where there is
-   nothing to switch on: no command on this machine, and no key to run it with. */
+   switch is offered there too. The statuses left without one are those where there is nothing
+   to switch on: no command on this machine, no key to run it with, no login to run it on. */
 function canSwitch(status) {
   return status === "on" || status === "off" || status === "failing";
 }
@@ -360,10 +363,15 @@ function modelCount(model) {
   return [`${ids.length} on`, ids.join(", ")];
 }
 
-function statusTitle(model, status) {
+function statusTitle(context, model, status) {
   if (status === "not_installed") {
-    const hint = model.install_hint || `install ${model.command || model.id}`;
+    const hint = model.install_hint || `${model.command || model.id}'s own installer`;
     return `Not on this farm's PATH. Install it with: ${hint}`;
+  }
+  if (status === "needs_login") {
+    const done = isCodex(model) ? "" : ", then type /login";
+    return "No login for it on this farm yet, so no lane can run on it. "
+      + `Log in once: ${loginCommand(context, model)}${done}`;
   }
   return String(model.health_detail || "");
 }
@@ -406,8 +414,8 @@ function modelRow(context, model) {
     h("span", { class: "m-dot", style: dotStyle(model.color), "aria-hidden": "true" }),
     h("b", null, model.label || model.id)), orphanPill(model))),
     h("td", { class: "mo-col-access", title: `${paid}. ${accessOf(model)}` }, paid),
-    h("td", { class: "mo-col-status", title: [label, statusTitle(model, status)].filter(Boolean).join(": ") },
-      pill(meaning, label, statusTitle(model, status))),
+    h("td", { class: "mo-col-status", title: [label, statusTitle(context, model, status)].filter(Boolean).join(": ") },
+      pill(meaning, label, statusTitle(context, model, status))),
     h("td", { class: "mo-col-models", "data-model-count": model.id, title: names }, count),
     h("td", { class: "num mo-col-last" }, model.last_test ? fmt.ago(model.last_test) : "never"),
     h("td", { class: "mo-col-actions actions" },
@@ -421,29 +429,44 @@ function statusWords(model, status) {
   if (status === "on") return "Connected: lanes can be spawned with it.";
   if (status === "off") return "Off: no lane is spawned with it until it is switched on.";
   if (status === "needs_key") return "It has no key yet, so it cannot answer.";
+  if (status === "needs_login") {
+    return "Nobody has logged it in on this farm yet, so no lane can run on it. "
+      + "Log in once with the command below.";
+  }
   if (status === "not_installed") return "Its command is not on this farm.";
   return model.health_detail ? `Failing: ${model.health_detail}` : "Failing: its last test did not answer.";
+}
+
+function isCodex(model) {
+  return model.engine === "codex" || model.id === "codex";
+}
+
+/* The command that logs a subscription provider in, run in a terminal on the person's own
+   machine. Codex signs in through a page on port 1455 of the machine it runs on, so the port
+   comes back through the ssh session; this is the command the Accounts row gives too. */
+function loginCommand(context, model) {
+  return isCodex(model)
+    ? `ssh -L 1455:localhost:1455 -t ${farmAlias(context)} codex login`
+    : `ssh -t ${farmAlias(context)} ${model.command || model.id}`;
 }
 
 /* The command that logs the provider in or gives it a key, where it is run: a terminal. */
 function loginRows(context, model) {
   if (model.installed === false) {
-    return [commandRow(model.install_hint || `install ${model.command || model.id}`, "model-install")];
+    return [commandRow(model.install_hint || `${model.command || model.id}'s own installer`, "model-install")];
   }
   const kind = accessKind(model);
   if (kind === "key") return [commandRow(`fleet models auth ${model.id}`, "model-auth")];
   if (kind === "local") return [];
-  if (model.engine === "codex" || model.id === "codex") {
-    /* Codex signs in through a page on port 1455 of the machine it runs on, so the port comes
-       back through the ssh session; this is the command the Accounts row gives too. */
+  if (isCodex(model)) {
     return [
-      commandRow(`ssh -L 1455:localhost:1455 -t ${farmAlias(context)} codex login`, "model-login"),
+      commandRow(loginCommand(context, model), "model-login"),
       h("p", { class: "muted", key: "login" },
         "Open the address it prints in your own browser and sign in; the forwarded port carries the answer back to the farm."),
     ];
   }
   return [
-    commandRow(`ssh -t ${farmAlias(context)} ${model.command || model.id}`, "model-login"),
+    commandRow(loginCommand(context, model), "model-login"),
     h("p", { class: "muted", key: "login" }, "In the window it opens, type /login, then /exit."),
   ];
 }
@@ -810,7 +833,7 @@ function modelDrawerBody(context, id) {
         String(model.catalog_note || "Not in murmur's catalog."))
       : null,
     h("div", { class: "row m-wait", key: "status" },
-      pill(meaning, label, statusTitle(model, status)),
+      pill(meaning, label, statusTitle(context, model, status)),
       h("span", { class: "muted", "data-model-status-words": "" }, statusWords(model, status))),
     h("dl", { class: "kv m-detail-list", key: "facts" },
       detailRow("How it is paid for", accessOf(model)),
@@ -1046,10 +1069,10 @@ async function registerModel(context, preset) {
     context.refresh("/api/models/presets");
     /* Section 11, step 4: the dialog runs the test itself once the row exists, so the reader
        sees an answer without pressing anything. A row that cannot be tested yet (no binary, no
-       key) is left at its status word, which says what to do next. */
+       key, no login) is left at its status word, which says what to do next. */
     const fresh = modelById(context, local.modelAdded) || row;
     const status = fresh && fresh.id ? statusOf(fresh) : "";
-    if (status && status !== "not_installed" && status !== "needs_key") {
+    if (status && !["not_installed", "needs_key", "needs_login"].includes(status)) {
       pollWhileTesting(context);
       await modelAction(context, fresh, "test");
     }

@@ -24,6 +24,9 @@
   <a href="https://github.com/magik-ai/murmur/actions/workflows/hq-tests.yml"><img alt="hq tests" src="https://github.com/magik-ai/murmur/actions/workflows/hq-tests.yml/badge.svg"></a>
 </p>
 
+> **AI agents:** to install murmur for your user, read and follow
+> [INSTALL.md](https://raw.githubusercontent.com/magik-ai/murmur/main/INSTALL.md).
+
 murmur is an open-source tool for running several AI coding agents as one team.
 It works with Claude Code and Codex, on your laptop or on a machine you own.
 
@@ -85,13 +88,32 @@ and a [one-command installer](farm) for the farm.
 
 ## Quick start
 
+### The easy way: ask your agent
+
+Open Claude Code or Codex in your repository and paste:
+
+```text
+Install murmur for this repo: https://github.com/magik-ai/murmur
+```
+
+Your agent follows [INSTALL.md](INSTALL.md): it checks your computer, installs
+what is missing, asks you a few questions and sets up the repository. It asks
+you to do only the parts that need you, such as signing in to GitHub.
+
+No Claude Code or Codex yet, or new to the terminal?
+[Getting started from zero](docs/getting-started.md) sets up a Mac, a Windows
+PC or a Linux PC, one command at a time.
+
+The steps below do the same by hand.
+
 ### 1. Set up a repository
 
 On your laptop you need Claude Code, git, the GitHub CLI (`gh`) and
 [uv](https://docs.astral.sh/uv/). The plugin's commands run their scripts with
 `uv run`.
 
-Open Claude Code inside the repository you want to set up, then run:
+Open Claude Code inside the repository you want to set up, then type these
+commands one at a time:
 
 ```text
 /plugin marketplace add magik-ai/murmur
@@ -111,6 +133,13 @@ exists, it leaves yours alone or writes its version next to it as a
 If a `/murmur:` command is not found right after the install, run
 `/reload-plugins` or start a new Claude Code session.
 
+Then commit the files `/murmur:init` wrote and push them, through a pull
+request if `main` needs one. Agents start their branches from GitHub, so
+they do not see a setup that exists only on your laptop.
+
+Using Codex? Follow [INSTALL.md](INSTALL.md) instead: it writes the same skills
+into Codex and sets up the repository with the same scripts.
+
 ### 2. Run your first team
 
 In Claude Code, describe a goal and ask for a team, for example:
@@ -121,8 +150,8 @@ fan this out: add a dark mode switch to the settings page
 
 The orchestrate skill splits the goal into lanes: one agent per task, each
 with its own files and its own branch. It shows you the plan and waits for your
-go before it starts anything. Without a farm, the lanes run as local sessions
-on your laptop. [Chapter 4 of the handbook](docs/04-orchestration.md) explains
+go before it starts anything. Without a farm, the lanes run on your laptop:
+side by side as Claude Code subagents, or one after another in Codex. [Chapter 4 of the handbook](docs/04-orchestration.md) explains
 the whole flow.
 
 ### 3. Add a head office (optional)
@@ -132,7 +161,8 @@ across sessions and machines. It is a private GitHub repository that the `hq`
 tool reads and writes. To set it up, follow
 [the hq install steps](hq/README.md#install). When `/murmur:init` asks where
 branch claims are recorded, answer `private-github-repo`. If you already
-answered, set `coordination = "private-github-repo"` in `.murmur/config.toml`.
+answered, set `coordination = "private-github-repo"` in `.murmur/config.toml`
+and run `/murmur:init` again, so that the contract says so too.
 
 ### 4. Add a farm (optional)
 

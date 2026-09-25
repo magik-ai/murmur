@@ -19,6 +19,12 @@ Three rules hold for the whole run.
 - **Stop on an error.** If a command exits with an error, show the person its
   message and stop. Never edit `.murmur/config.toml` to get past it.
 
+**Where the scripts are.** The commands below run murmur's scripts from
+`${CLAUDE_PLUGIN_ROOT}`, the plugin's folder. Claude Code fills it in, and
+murmur's skill installer for Codex writes it in. If it is ever empty, use
+`~/work/murmur/plugin`, and clone murmur there first if that folder is missing:
+`git clone https://github.com/magik-ai/murmur ~/work/murmur`.
+
 ## 1. Find what is still unanswered
 
 ```bash
@@ -69,6 +75,10 @@ If the person said "just use the defaults" or "set it up, I will adjust later",
 skip the questions and run `apply --defaults`: every unanswered question takes
 its default.
 
+If the person works with Codex, add `--agents-md`. Codex reads `AGENTS.md`, not
+`CLAUDE.md`, so murmur then also writes its pointer to the contract into
+`AGENTS.md`, and creates that file when the repository has none.
+
 It prints a JSON report with one entry per file. These are the files:
 
 - `.murmur/config.toml`: the answers.
@@ -80,7 +90,11 @@ It prints a JSON report with one entry per file. These are the files:
   not edit by hand): written only when they do not exist yet.
 - `CLAUDE.md`: written from a template when the repository has none. The four
   sections the contract holds are each replaced by one line that points to it.
-  It still has placeholders to fill in.
+  It still has placeholders to fill in, such as `<NAME>` and `<DOC>`: its entry
+  lists them under `placeholders`. Offer to fill them in with the person now,
+  one at a time, or leave them for later.
+- `AGENTS.md`: with `--agents-md`, created with the pointer when the repository
+  has none.
 - An existing `CLAUDE.md` or `AGENTS.md` gets four lines appended that point to
   the contract.
 

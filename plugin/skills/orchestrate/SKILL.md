@@ -47,7 +47,9 @@ It fails when the name is not this session's own. A code name belongs to one
 session: after you sign off you have none. Spawning under someone else's name
 files your lanes under their name and sends messages about them to the wrong
 agent. If the check fails, register again in this session (`hq hello <name>`)
-before you spawn.
+before you spawn. If `hq whoami` says this session has no key (a plain
+terminal or ssh shell), put the same `HQ_SESSION_ID=<name>` in front of every
+`hq` command you run, for example `HQ_SESSION_ID=<name> hq hello <name>`.
 
 ## 2. Accounts and capacity, before anything is spawned
 
@@ -60,9 +62,26 @@ before you spawn.
   spawn (`fleet capacity` prints `OK` or `BLOCK`, with the level `ok`, `warn`
   or `block`). On `warn` or `block`, spawn fewer, or wait. Never force past a
   block (`fleet spawn --force`) unless <OWNER> asks for exactly that.
-- **If you have no farm.** Run each lane as a local headless session instead.
-  Check your own subscription usage before you start, and run no more lanes at
-  once than this machine can hold.
+- **If you have no farm.** Run the lanes on this machine instead. Check your
+  own subscription usage before you start, and run no more lanes at once than
+  this machine can hold.
+  - In Claude Code, start each lane as a background subagent in its own git
+    worktree: the Agent tool with `isolation: "worktree"`,
+    `run_in_background: true`, and the lane's name and model. The worktree
+    starts from your current checkout, not from `<base>`, so the brief begins
+    with `git fetch origin <base> && git switch -c lane/<lane> origin/<base>`.
+    The lane works only in that worktree, pushes with
+    `git push -u origin lane/<lane>`, opens `gh pr create --base <base>`, and
+    never merges.
+  - In Codex, run the lanes one at a time, yourself, in this repository. Codex
+    subagents share your sandbox and cannot commit in a separate worktree
+    unless your user allows it. With a clean checkout:
+    `git fetch origin <base> && git switch -c lane/<lane> origin/<base>`, do
+    the lane's work, commit, `git push -u origin lane/<lane>`,
+    `gh pr create --base <base>`, switch back, and only then start the next
+    lane. This is the one case where you write the code yourself; a subagent
+    that only reads reviews each pull request. Your user approves the network
+    prompts.
 
 ## 3. Split by lane, with a list of paths
 
@@ -98,7 +117,7 @@ yes.
 
 - **Strongest model** for hard, unclear, architectural or risky slices, and
   for reviewing another agent's pull request. Judgement is where it pays.
-- **Middle model** for ordinary, well-scoped work. This is the default.
+- **Middle model** for ordinary, well-scoped work: most lanes.
 - **Cheapest model** for mechanical work: renames, docs, repetitive fixes.
 
 With `fleet`, Claude lanes choose by model (`--model opus`, `sonnet` or
@@ -115,8 +134,10 @@ fleet spawn --project <name> --lane <lane> --model <model> \
     --by <codename> --icon <emoji> --color <hex> --task "<brief>"
 ```
 
-**If you have no farm**, start the lane as a local headless session with the
-same brief, model and lane name. Everything below still applies.
+**If you have no farm**, start the lane on this machine as section 2 says: a
+background subagent in its own worktree in Claude Code, or one lane at a time
+in Codex, with the same brief, model and lane name. Everything below still
+applies.
 
 - A good brief states the concrete task and the acceptance criteria. If the
   harness already adds workflow, isolation and port rules, do not repeat them.

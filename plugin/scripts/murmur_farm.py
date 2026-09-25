@@ -15,8 +15,9 @@
     ssh-config      the `Host <name>` block in ~/.ssh/config, and the first, pinning probe
     finish          GitHub on the box (your terminal), then clone and install, non-interactive
     tailscale       join the box to your tailnet, or fall back to the tunnel and say why
-    open            the dashboard in your browser (a tunnel, or the tailnet address)
     logins          Claude subscriptions and Codex: the commands for your terminal, verified
+    shim            ~/.local/bin/fleet on this laptop, a wrapper that runs `fleet` on the farm
+    open            the dashboard in your browser (a tunnel, or the tailnet address)
     forget-attempt  drop a create whose answer was lost and whose droplet never appeared
     status          where the flow stands and the next step
 
@@ -95,6 +96,10 @@ UNIT = "fleet-dashboard.service"
 
 MARK_BEGIN = "# >>> murmur farm: written by /murmur:farm, rewritten on every run >>>"
 MARK_END = "# <<< murmur farm <<<"
+# The laptop's `fleet`: the wrapper fleet/README.md describes, which runs fleet on the farm.
+# The mark line says the file is this script's to rewrite; any other `fleet` is left alone.
+SHIM = os.path.join(HOME, ".local", "bin", "fleet")
+SHIM_MARK = "# murmur farm: written by /murmur:farm, rewritten on every run"
 # The port a new droplet's ssh and its firewall answer on.
 SSH_PORT = "22"
 # The address the plan's rehearsal writes into the block: TEST-NET-1 (RFC 5737), which no
@@ -1314,10 +1319,11 @@ def cmd_finish(args, state):
     _code, active, _err = on_farm(name, ["systemctl", "--user", "is-active", UNIT], timeout=30)
     state.setdefault("farm", {})["finished"] = True
     save_state(state)
+    step = next_for(state)
     said = f"the fleet is installed on {name}; the dashboard service is {active.strip() or '?'}"
-    if access == "tailscale":
+    if step == "tailscale":
         said += "; next, `tailscale` joins the farm to your tailnet"
-    return DONE, {"said": said, "next": "tailscale" if access == "tailscale" else "open"}
+    return DONE, {"said": said, "next": step}
 
 
 # ------------------------------------------------------------------------------- tailscale
@@ -1367,14 +1373,14 @@ def fall_back_to_tunnel(name, state, reason):
     state.setdefault("farm", {})["fallback"] = reason
     save_state(state)
     return DONE, {"said": f"the page is reached through the ssh tunnel instead: {reason}",
-                  "access": "tunnel", "next": "open"}
+                  "access": "tunnel", "next": next_for(state)}
 
 
 def cmd_tailscale(args, state):
     name, _address = remote_ready(state)
     if need(state, "access")[0] != "tailscale":
         return DONE, {"said": "this farm is reached through the tunnel; nothing to do",
-                      "next": "open"}
+                      "next": next_for(state)}
     usable, reason = tailscale_on_laptop()
     if not usable:
         return fall_back_to_tunnel(name, state, reason)
@@ -1414,7 +1420,7 @@ def cmd_tailscale(args, state):
     state.setdefault("farm", {})["tailnet"] = tailnet
     save_state(state)
     return DONE, {"said": f"the farm is on your tailnet at {tailnet}; the page answers at {url}",
-                  "url": url, "next": "open"}
+                  "url": url, "next": next_for(state)}
 
 
 # ------------------------------------------------------------------------------------ open
@@ -1671,7 +1677,7 @@ def cmd_logins(args, state):
             "each as its own email")
     if codex:
         said += "; Codex is installed and logged in"
-    return DONE, {"said": said, "accounts": [rows[a] for a in expected]}
+    return DONE, {"said": said, "accounts": [rows[a] for a in expected], "next": next_for(state)}
 
 
 def codex_step(name, args):
@@ -1688,14 +1694,14 @@ def codex_step(name, args):
     if code != 0:
         return ([printed(name, [CODEX_BIN, "login"], extra=["-L", "1455:localhost:1455"])],
                 ["codex"])
-    # The fleet's installer links its skill into ~/.codex/skills only once ~/.codex exists,
-    # which the login has just made.
+    # The fleet's installer links its skill into ~/.agents/skills, where Codex reads a user's
+    # skills, once Codex is on the box (the login has just made ~/.codex).
     on_farm(name, ["bash", f"{REMOTE_REPO}/fleet/install.sh"], timeout=300)
-    code, _out, _err = on_farm(name, ["test", "-L", FARM_HOME + "/.codex/skills/fleet"],
+    code, _out, _err = on_farm(name, ["test", "-L", FARM_HOME + "/.agents/skills/fleet"],
                                timeout=30)
     if code != 0:
         raise Stop("Codex is logged in but the fleet skill is not linked into "
-                   f"{FARM_HOME}/.codex/skills; run `bash {REMOTE_REPO}/fleet/install.sh` on "
+                   f"{FARM_HOME}/.agents/skills; run `bash {REMOTE_REPO}/fleet/install.sh` on "
                    "the farm and look at what it says")
     if args.codex_lane:
         return codex_lane(name, args)
@@ -1729,6 +1735,69 @@ def codex_lane(name, args):
             raise Stop("the Codex lane is still running; run `logins` again to keep waiting",
                        code=WAITING)
         time.sleep(POLL)
+
+
+# ------------------------------------------------------------------------------------ shim
+
+def shim_text(name):
+    """The wrapper for this farm: every argument quoted for the farm's shell, fleet by its full
+    path, and on the ssh line the options every other ssh this script runs for the farm has."""
+    ssh = shlex.join(ssh_words(name, batch=False))
+    return ("#!/usr/bin/env bash\n"
+            f"{SHIM_MARK}\n"
+            f"# Run fleet on the farm {name} over ssh, with every argument quoted for the "
+            "remote shell.\n"
+            'args=(); for a in "$@"; do args+=("$(printf %q "$a")"); done\n'
+            f'exec {ssh} "{FLEET_BIN} ${{args[*]}}"\n')
+
+
+def shim_state(name):
+    """absent; current (this farm's wrapper, as this script writes it now); outdated (murmur's
+    wrapper, for another farm or from an older version); foreign (anything else)."""
+    if not os.path.lexists(SHIM):
+        return "absent"
+    if os.path.islink(SHIM) or not os.path.isfile(SHIM):
+        return "foreign"
+    try:
+        with open(SHIM, encoding="utf-8") as handle:
+            text = handle.read()
+    except (OSError, UnicodeDecodeError):
+        return "foreign"
+    if text == shim_text(name):
+        return "current"
+    return "outdated" if SHIM_MARK in text.splitlines() else "foreign"
+
+
+def cmd_shim(args, state):
+    name, _address = remote_ready(state)
+    found = shim_state(name)
+    if found == "foreign":
+        raise Stop(f"{SHIM} is there already and is not murmur's wrapper, so it was left as it "
+                   f"is. To have `fleet` on this laptop run on {name}, move that file away and "
+                   "run `shim` again; the farm works without it", next="open")
+    if found != "current":
+        os.makedirs(os.path.dirname(SHIM), exist_ok=True)
+        tmp = SHIM + ".murmur.tmp"
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o755)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(shim_text(name))
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, SHIM)
+    state.setdefault("farm", {})["shim"] = name
+    save_state(state)
+    first = shutil.which("fleet")
+    on_path = bool(first) and os.path.realpath(first) == os.path.realpath(SHIM)
+    said = f"`fleet` on this laptop runs on {name}: {SHIM}"
+    if first and not on_path:
+        said += f"; but your PATH finds {first} first, so put {os.path.dirname(SHIM)} before it"
+    elif not on_path:
+        said += f"; {os.path.dirname(SHIM)} is not on your PATH, so add it there"
+    return DONE, {"said": said, "path": SHIM, "changed": found != "current",
+                  "on_path": on_path, "next": next_for(state)}
 
 
 # ---------------------------------------------------------------------- forget-attempt, status
@@ -1772,7 +1841,17 @@ def next_step(state, row):
         return "tailscale"
     if not farm.get("logins"):
         return "logins"
+    # The wrapper once for each farm; a `fleet` that is not murmur's is never replaced.
+    name = answers(state).get("name")
+    if farm.get("shim") != name and shim_state(name) != "foreign":
+        return "shim"
     return "open"
+
+
+def next_for(state):
+    """The step `status` would name next, for a step that has just done its part."""
+    name = answers(state).get("name")
+    return next_step(state, machines.read_registry().get(name) if name else None)
 
 
 def cmd_status(args, state):
@@ -1826,6 +1905,7 @@ def parser():
     logins.add_argument("--by", help="your code name, for the Codex lane")
     logins.add_argument("--wait", type=float, default=480)
     logins.set_defaults(run=cmd_logins)
+    subs.add_parser("shim").set_defaults(run=cmd_shim)
     subs.add_parser("forget-attempt").set_defaults(run=cmd_forget_attempt)
     subs.add_parser("status").set_defaults(run=cmd_status)
     return ap

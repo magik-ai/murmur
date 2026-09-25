@@ -931,6 +931,13 @@ class StoredSecrets(HostsFarm):
         self.assertIn("[redacted]", done.stdout)
 
 
+# farm/install.sh stops at its first check where systemd is not running (a plain container), so
+# a case that follows it any further needs a machine that booted systemd.
+SYSTEMD = os.path.isdir("/run/systemd/system")
+NO_SYSTEMD = ("systemd is not running here, and farm/install.sh stops at its systemd check, "
+              "before what this case checks")
+
+
 class Installer(unittest.TestCase):
     """farm/install.sh: the preflight that stops before anything changes, and --remote.
 
@@ -976,6 +983,7 @@ class Installer(unittest.TestCase):
         self.assertIn("--remote", done.stdout)
         self.assertNotIn("unknown flag", done.stdout + done.stderr)
 
+    @unittest.skipUnless(SYSTEMD, NO_SYSTEMD)
     @unittest.skipIf(os.geteuid() == 0, "root can install packages, so the preflight lets it by")
     def test_a_user_who_cannot_install_is_told_before_anything_changes(self):
         done = self.install("--remote", FAKE_DPKG_MISSING="tmux curl")
@@ -999,6 +1007,7 @@ class Installer(unittest.TestCase):
         with open(path, encoding="utf-8") as handle:
             return handle.read()
 
+    @unittest.skipUnless(SYSTEMD, NO_SYSTEMD)
     @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
     def test_a_user_who_can_install_is_let_through_the_preflight(self):
         done = self.install("--remote", FAKE_DPKG_MISSING="tmux", FAKE_SUDO_OK="1")
@@ -1012,6 +1021,7 @@ class Installer(unittest.TestCase):
 
     # The dashboard runs `gh auth status --active`, which gh 2.40 added. Ubuntu 22.04's own gh
     # is 2.4.0, and one already installed used to be kept.
+    @unittest.skipUnless(SYSTEMD, NO_SYSTEMD)
     @unittest.skipIf(os.geteuid() == 0, "root can install packages, so the preflight lets it by")
     def test_a_gh_older_than_2_40_counts_as_missing_for_a_user_who_cannot_install(self):
         done = self.install("--remote", FAKE_GH_VERSION="2.4.0")
@@ -1020,6 +1030,7 @@ class Installer(unittest.TestCase):
         self.assertIn("this box is missing gh", said)
         self.assertIn("gh 2.40 or newer", said)
 
+    @unittest.skipUnless(SYSTEMD, NO_SYSTEMD)
     @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
     def test_a_gh_older_than_2_40_is_replaced_from_githubs_repository(self):
         done = self.install("--remote", FAKE_GH_VERSION="2.4.0", FAKE_SUDO_OK="1")
@@ -1030,12 +1041,14 @@ class Installer(unittest.TestCase):
                       self.sudo_calls())
         self.assertIn(["sudo", "apt-get", "install", "-y", "-qq", "gh"], self.sudo_calls())
 
+    @unittest.skipUnless(SYSTEMD, NO_SYSTEMD)
     @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
     def test_a_gh_that_is_new_enough_is_left_alone(self):
         done = self.install("--remote", FAKE_GH_VERSION="2.45.0")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(self.sudo_calls(), [])
 
+    @unittest.skipUnless(SYSTEMD, NO_SYSTEMD)
     @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
     def test_remote_runs_to_the_end_on_loopback_and_prints_the_tunnel(self):
         # The droplet's cloud-init wrote the loopback line before the installer ever ran.
@@ -1059,6 +1072,7 @@ class Installer(unittest.TestCase):
         self.assertEqual([argv for argv in (c["argv"] for c in self.calls())
                           if argv[0] in ("curl", "apt-get")], [])
 
+    @unittest.skipUnless(SYSTEMD, NO_SYSTEMD)
     @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
     def test_remote_on_a_box_without_a_bind_line_never_writes_one(self):
         done = self.install("--remote")
@@ -1085,6 +1099,7 @@ class Installer(unittest.TestCase):
         finally:
             os.close(leader)
 
+    @unittest.skipUnless(SYSTEMD, NO_SYSTEMD)
     @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
     def test_an_administrator_at_a_terminal_is_asked_for_the_password_not_stopped(self):
         done = self.install_on_a_terminal("--remote", FAKE_DPKG_MISSING="tmux",
@@ -1096,6 +1111,7 @@ class Installer(unittest.TestCase):
         self.assertIn(["sudo", "apt-get", "update", "-qq"],
                       [call["argv"] for call in self.calls() if call["argv"][0] == "sudo"])
 
+    @unittest.skipUnless(SYSTEMD, NO_SYSTEMD)
     @unittest.skipIf(os.geteuid() == 0, "root can install packages, so the preflight lets it by")
     def test_a_terminal_alone_is_not_permission_to_install(self):
         done = self.install_on_a_terminal("--remote", FAKE_DPKG_MISSING="tmux",

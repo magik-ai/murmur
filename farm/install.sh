@@ -31,6 +31,7 @@
 #
 # Windows: install WSL2 with Ubuntu first (wsl --install), then run this inside it.
 # macOS: not supported as a farm yet; run the agents on a Linux box and drive it over ssh.
+# A container is not a farm: with no systemd running, this stops before it changes anything.
 set -euo pipefail
 
 # The same words as the comment above, printed from here: under `curl ... | bash -s -- --help`
@@ -69,6 +70,7 @@ Flags:
 
 Windows: install WSL2 with Ubuntu first (wsl --install), then run this inside it.
 macOS: not supported as a farm yet; run the agents on a Linux box and drive it over ssh.
+A container is not a farm: with no systemd running, this stops before it changes anything.
 USAGE
 }
 
@@ -106,9 +108,9 @@ gh_new_enough() {
 }
 # The long output of apt, the fleet install and the dashboard goes to logs in this user's own
 # folder. A fixed name in /tmp would belong to the first user who ran the installer, and a second
-# user on the same machine could not write it.
+# user on the same machine could not write it. Step 1 makes the folder, after its checks: until
+# they pass, nothing on this box is written.
 LOGS="${XDG_CACHE_HOME:-$HOME/.cache}/murmur"
-mkdir -p "$LOGS"
 
 # Questions read from the terminal even when the script itself arrives on stdin (curl | bash).
 ask() { # ask VAR "prompt" "default"
@@ -148,17 +150,29 @@ preflight() {
   [ ${#apt_now[@]} -gt 0 ] || apt_line="the command for gh below"
   die "this box is missing ${missing_now[*]} and this user cannot install anything (not root, no passwordless sudo, and not a member of sudo, admin or wheel at a terminal that can type the password), so nothing was changed: an administrator runs: $apt_line$gh_note"
 }
+
+# The agents, the sweep and the dashboard run as systemd user services, which outlive an ssh
+# session, so a box without a running systemd can never be a farm. A systemctl command is no
+# proof of one: a container can carry the command with no systemd behind it, and
+# /run/systemd/system exists only on a box that systemd booted. This is the first check, ahead
+# of the preflight and of anything written, whoever runs the script, root included.
+if ! have systemctl || [ ! -d /run/systemd/system ]; then
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    die "no systemd here, so nothing was changed. WSL starts systemd only when /etc/wsl.conf says so: add the two lines [boot] and systemd=true to it, run wsl --shutdown in PowerShell, open Ubuntu again and rerun this"
+  fi
+  die "no systemd here, so nothing was changed. The farm needs it for services that outlive your ssh session, and a plain container runs none: run this on a machine or a virtual machine that boots systemd"
+fi
 preflight
 
 # ---------------------------------------------------------------------------------------------
 say "1/5  System"
-[ "$(id -u)" != 0 ] || die "run this as an ordinary user, not root: the agents run as you"
+[ "$(id -u)" != 0 ] || die "run this as an ordinary user, not root: the agents run as you. As root, make one that may use sudo: adduser alice && usermod -aG sudo alice (your own name for alice). Give it your ssh key, log in over ssh as that user and run this again; docs/12-the-machine.md, \"Set it up with one command\", has every command"
 if ! have apt-get; then die "this installer knows Ubuntu and Debian (apt). On another Linux, follow docs/12-the-machine.md by hand"; fi
-if ! have systemctl; then die "no systemd here. The farm needs it for services that outlive your ssh session"; fi
 if grep -qi microsoft /proc/version 2>/dev/null; then
   note "WSL2 detected: fine, a farm can run under WSL2"
   note 'WSL stops this distribution soon after its last terminal closes, unless %UserProfile%\.wslconfig on Windows sets instanceIdleTimeout=-1 (docs/12-the-machine.md shows how)'
 fi
+mkdir -p "$LOGS"
 
 missing=()
 for pkg in git tmux python3 curl ca-certificates; do dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg"); done
@@ -414,15 +428,14 @@ cat <<EOF
   2. Register the repository the agents will work on:
        fleet add-project --name myproj --repo owner/name
 
-  3. Say hello to the head office and spawn the first lane:
-       hq hello $USER-1 --task "first spawn"
+  3. Spawn the first lane. It signs its head office claims and mail with the name after --by:
        fleet capacity
        fleet spawn --project myproj --lane hello --model sonnet --by $USER-1 \\
              --task "Add a line to README.md saying this repository is run by agents as a team. Open a pull request."
        fleet status
 
   Dashboard:  fleet dashboard start     then   fleet dashboard token
-  Check:      fleet capacity   hq whoami   gh auth status
+  Check:      fleet capacity   hq who   gh auth status
   Upgrade:    git -C ~/work/murmur pull    (both tools run from that clone)
   Read next:  ~/work/murmur/docs/12-the-machine.md
 EOF

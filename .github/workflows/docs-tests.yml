@@ -1,0 +1,26 @@
+name: docs tests
+
+on:
+  push:
+    branches: [main]
+    paths: ["**/*.md", "site/**", "plugin/skills/**", "plugin/commands/**",
+            "plugin/.claude-plugin/**", ".claude-plugin/**", "tests/test_docs_agree.py",
+            ".github/workflows/docs-tests.yml"]
+  pull_request:
+    paths: ["**/*.md", "site/**", "plugin/skills/**", "plugin/commands/**",
+            "plugin/.claude-plugin/**", ".claude-plugin/**", "tests/test_docs_agree.py",
+            ".github/workflows/docs-tests.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  docs-agree:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: The newcomer docs, the skills and the landing page tell one story
+        run: python tests/test_docs_agree.py -v

@@ -46,24 +46,28 @@
         other.setAttribute("aria-selected", String(on));
         other.tabIndex = on ? 0 : -1;
         var panel = document.getElementById(other.getAttribute("aria-controls"));
-        /* Both panels keep their place, the one not chosen is only invisible: the box is as tall
-           as its tallest panel either way, so switching moves nothing on the page. */
+        var note = document.getElementById(other.getAttribute("aria-describedby"));
+        /* Every panel, and every line under the box, keeps its place: the ones not chosen are
+           only invisible. The box is as tall as its tallest panel either way, so switching
+           moves nothing on the page. */
         if (panel) {
           panel.classList.toggle("is-off", !on);
           panel.setAttribute("aria-hidden", String(!on));
           panel.inert = !on;
         }
-      });
-      var which = /farm/.test(tab.id) ? "farm" : "plugin";
-      Array.prototype.forEach.call(box.querySelectorAll("[data-foot]"), function (foot) {
-        foot.hidden = foot.getAttribute("data-foot") !== which;
+        if (note) note.classList.toggle("is-off", !on);
       });
     }
     Array.prototype.forEach.call(tabs, function (tab, index) {
       tab.addEventListener("click", function () { choose(tab); });
       tab.addEventListener("keydown", function (event) {
-        if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
-        var next = tabs[(index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+        var next;
+        if (event.key === "ArrowRight") next = tabs[(index + 1) % tabs.length];
+        else if (event.key === "ArrowLeft") next = tabs[(index + tabs.length - 1) % tabs.length];
+        else if (event.key === "Home") next = tabs[0];
+        else if (event.key === "End") next = tabs[tabs.length - 1];
+        else return;
+        event.preventDefault();
         choose(next);
         next.focus();
       });
@@ -72,13 +76,21 @@
 
   /* -------------------------------------------------------------------- copy */
   var said = document.getElementById("copied");
+  function announce(words) {
+    if (!said) return;
+    /* Emptied first, so a second copy in a row is read out too, not taken for old news. */
+    said.textContent = "";
+    setTimeout(function () { said.textContent = words; }, 50);
+  }
   Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (button) {
+    var back = 0;
     button.addEventListener("click", function () {
       var text = button.getAttribute("data-copy");
       function done() {
         button.textContent = "Copied";
-        if (said) said.textContent = "Copied to the clipboard";
-        setTimeout(function () { button.textContent = "Copy"; }, 1600);
+        announce("Copied to the clipboard");
+        clearTimeout(back);
+        back = setTimeout(function () { button.textContent = "Copy"; }, 1600);
       }
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done, function () { select(button); });
@@ -134,8 +146,11 @@
       if (!bird || !stops.length) return;
       var n = stops.length;
       var cycle = LEG * (n + 1);
-      var t = now % cycle;
-      var leg = Math.floor(t / LEG), into = t - leg * LEG;
+      /* A frame can be stamped a little before the moment the flight was started from, so the
+         time can come in just below zero: it counts as the start, never as a leg before the
+         first one. */
+      var t = Math.max(0, now) % cycle;
+      var leg = Math.min(n, Math.floor(t / LEG)), into = t - leg * LEG;
       var from, to, here = -1, x, lift = 0;
       if (leg < n) {
         from = leg === 0 ? -24 : stops[leg - 1];
@@ -146,6 +161,7 @@
         from = stops[n - 1]; to = width + 24;
         var k2 = ease(Math.min(1, into / TRAVEL)); x = from + (to - from) * k2; lift = Math.sin(k2 * Math.PI) * 10;
       }
+      if (!isFinite(x)) return;
       var flap = here >= 0 ? 1 : 0.85 + 0.25 * Math.sin(now / 90);
       bird.setAttribute("transform", "translate(" + x.toFixed(1) + " " + (y - 12 - lift).toFixed(1) + ") scale(1 " + flap.toFixed(2) + ")");
       for (var i = 0; i < n; i += 1) {
@@ -155,7 +171,7 @@
       }
     }
     var running = false, raf = 0, origin = 0, seen = false, kept = 0;
-    function frame(now) { if (!running) return; kept = now - origin; place(kept); raf = requestAnimationFrame(frame); }
+    function frame(now) { if (!running) return; kept = Math.max(0, now - origin); place(kept); raf = requestAnimationFrame(frame); }
     function go() { if (running || motion.paused || !seen) return; running = true; origin = performance.now() - kept; raf = requestAnimationFrame(frame); }
     function halt() { running = false; cancelAnimationFrame(raf); }
     layout();

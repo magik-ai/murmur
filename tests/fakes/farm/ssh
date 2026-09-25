@@ -399,7 +399,7 @@ def farm(words, stdin):
             touch("skills-linked")
         event("fleet-install")
         return 0
-    if words == ["test", "-L", FARM + "/.codex/skills/fleet"]:
+    if words == ["test", "-L", FARM + "/.agents/skills/fleet"]:
         return 0 if flag("skills-linked") else 1
     if words[:2] == [fleet, "spawn"]:
         lanes = load("lanes.json", [])

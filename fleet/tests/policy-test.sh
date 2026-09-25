@@ -130,10 +130,29 @@ echo "=== the head office mail a lane starts with ==="
 
 # hq answers an empty inbox with "inbox empty (nothing after <time>; ...)". Only the bare words
 # were matched, so that line was folded into every lane's prompt as if it were mail.
+#
+# The fake prints its inbox from a file, byte for byte, and notes who asked. It used to carry the
+# text in an unquoted heredoc, where the backticks in hq's own sentence ran `hq inbox --recent 6`:
+# the fake itself, again and again, hundreds of processes deep.
 mkdir -p "$ROOT/mailbin"
-inbox_says() { printf '#!/bin/sh\ncat <<EOF\n%s\nEOF\n' "$1" > "$ROOT/mailbin/hq"; chmod +x "$ROOT/mailbin/hq"; }
-inbox_says 'inbox empty (nothing after 2026-09-24T08:00:00Z; `hq inbox --recent 6` re-shows the last six hours without moving the cursor)'
+cat > "$ROOT/mailbin/hq" <<'FAKE'
+#!/bin/sh
+here=$(dirname "$0")
+printf '%s %s\n' "${HQ_AGENT:-(unset)}" "$*" >> "$here/calls"
+cat "$here/inbox"
+FAKE
+chmod +x "$ROOT/mailbin/hq"
+inbox_says() { printf '%s\n' "$1" > "$ROOT/mailbin/inbox"; : > "$ROOT/mailbin/calls"; }
+empty_inbox='inbox empty (nothing after 2026-09-24T08:00:00Z; `hq inbox --recent 6` re-shows the last six hours without moving the cursor)'
+inbox_says "$empty_inbox"
+# Without these two, an empty answer below would pass for any reason at all: no hq on PATH, a
+# fake that failed, or a filter that drops everything.
+is "the fake hq answers with hq's own empty-inbox sentence, backticks and all" \
+  "$(PATH="$ROOT/mailbin:$PATH" hq inbox)" "$empty_inbox"
+inbox_says "$empty_inbox"
 is "an empty inbox puts no mail in the prompt" "$(PATH="$ROOT/mailbin:$PATH" _hq_mail vivaldi)" ""
+is "and it was the lane's own inbox that said so, asked once" \
+  "$(cat "$ROOT/mailbin/calls")" "vivaldi inbox"
 inbox_says $'--- 2026-09-24T08:01:00Z\nThe schema lane merged; rebase before you touch migrations.'
 is "real mail is kept, word for word" "$(PATH="$ROOT/mailbin:$PATH" _hq_mail vivaldi)" \
   $'--- 2026-09-24T08:01:00Z\nThe schema lane merged; rebase before you touch migrations.'

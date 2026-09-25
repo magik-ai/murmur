@@ -49,9 +49,12 @@ hq has no other dependencies.
 hq is not on PyPI. Install it from a clone of murmur:
 
 ```bash
-git clone https://github.com/magik-ai/murmur.git
-cd murmur/hq
+git clone https://github.com/magik-ai/murmur.git ~/work/murmur
+cd ~/work/murmur/hq
 ```
+
+`~/work/murmur` is the folder murmur's installers and skills use on every
+machine, so a farm and a laptop find the clone in the same place.
 
 Then pick one of these three ways.
 
@@ -449,14 +452,16 @@ these environment variables that is set:
    each agent it starts, to a value unique to that session, such as its own
    run ID.
 2. `CLAUDE_CODE_SESSION_ID`, set by Claude Code.
-3. `TERM_SESSION_ID`, set by some terminal programs.
-4. `TMUX_PANE`, set by tmux.
+3. `CODEX_THREAD_ID`, set by Codex for the commands it runs.
+4. `TERM_SESSION_ID`, set by some terminal programs.
+5. `TMUX_PANE`, set by tmux.
 
-The last three belong to other programs. The last two identify a terminal,
+The last four belong to other programs. The last two identify a terminal,
 not an agent: two agents in one terminal pane get one key. `hq whoami` shows
-which variable gave the key.
+which variable gave the key. In a plain ssh shell none of them is set: put
+`HQ_SESSION_ID=<name>` in front of each `hq` command there.
 
-When none of the four is set, the session has no key. `hq hello` then can only
+When none of the five is set, the session has no key. `hq hello` then can only
 write the machine-wide name file, and hq will not act under a name from that
 file. Set `HQ_SESSION_ID`, or put `HQ_AGENT=<name>` in front of each command.
 

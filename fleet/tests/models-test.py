@@ -590,7 +590,7 @@ check("a model switched on whose test passed is on",
       _rows["live"]["status"] == "on", _rows["live"]["status"])
 check("a model nobody switched on is off",
       _rows["resting"]["status"] == "off", _rows["resting"]["status"])
-check("every status is one of the five the pill can say",
+check("every status is one of the six the pill can say",
       all(row["status"] in SERVER.MODEL_STATUSES for row in _rows.values()))
 
 _rows = statuses([])
@@ -2127,6 +2127,15 @@ with world(orphan_catalog(), ORPHAN_STATE) as (room, calls):
     check("and points at CONTRIBUTING.md to add a preset, not at `fleet models enable`",
           "CONTRIBUTING.md" in _gone.stdout and "models enable" not in _gone.stdout,
           _gone.stdout)
+    # The section it names must be one a reader can find: it once named "An engine preset",
+    # which CONTRIBUTING.md never had.
+    _named = [line.split('CONTRIBUTING.md, "', 1)[1].split('"', 1)[0]
+              for line in _gone.stdout.splitlines() if 'CONTRIBUTING.md, "' in line]
+    _headings = [line[3:].strip() for line in
+                 (LIB.parent.parent / "CONTRIBUTING.md").read_text().splitlines()
+                 if line.startswith("## ")]
+    check("and the CONTRIBUTING.md section it names is one of that file's headings",
+          len(_named) == 1 and _named[0] in _headings, f"{_named} not in {_headings}")
 
     # What the note tells an operator to do has to work.
     _removed, _err = M.remove_model("grok")

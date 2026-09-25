@@ -152,8 +152,9 @@ cd ~/work/murmur/fleet
 The installer prints what it did:
 
 - it links `~/.local/bin/fleet` to the clone;
-- it links the orchestrator skill into `~/.claude/skills/fleet`, and into `~/.codex/skills/fleet`
-  when `~/.codex` exists;
+- it links the orchestrator skill into `~/.claude/skills/fleet`, and into
+  `~/.agents/skills/fleet`, where Codex reads skills, when Codex is on the machine. A link an
+  earlier install left in `~/.codex/skills` is removed;
 - it copies `config/policy.example.toml` and `config/projects.example.toml` to
   `~/.config/fleet/policy.toml` and `projects.toml`, unless those files exist already;
 - it writes `FLEET_HOME` into `~/.config/fleet/env`;
@@ -163,7 +164,7 @@ The installer prints what it did:
 |---|---|
 | `--prefix DIR` | link the `fleet` command into `DIR/bin` instead of `~/.local/bin` |
 | `--no-autosweep` | leave the sweep timer off |
-| `--no-skills` | do not link the orchestrator skill into `~/.claude/skills` or `~/.codex/skills` |
+| `--no-skills` | do not link the orchestrator skill into `~/.claude/skills` or `~/.agents/skills` |
 | `--local` | single machine: record `FLEET_DASH_BIND=127.0.0.1` in `~/.config/fleet/env`, and skip the laptop advice |
 
 The supervisor daemon respawns lanes through the `bin/fleet` of its own clone, so `--prefix` needs
@@ -353,8 +354,8 @@ the conductor (or the orchestrator, if you run no conductor) merges it.
 ### Start it and keep it running
 
 ```bash
-fleet dashboard start      # start it; a spawn starts it too
-fleet dashboard status     # running or not, and the address it really listens on
+fleet dashboard start      # start it, and wait until it answers; a spawn starts it too
+fleet dashboard status     # running (it answers) or not, and the address it really listens on
 fleet dashboard token      # print the token
 fleet dashboard restart    # pick up a new address, port, title or token
 fleet dashboard stop
@@ -366,6 +367,11 @@ Until you run `fleet dashboard enable`, the dashboard runs in a detached tmux se
 `fleet-dashboard.service` as a systemd user unit and starts it. From then on, `start`, `stop` and
 `restart` drive the unit, and with linger on it starts at boot. `farm/install.sh` runs `enable`
 for you.
+
+`start` returns once the page answers and its token exists, so `fleet dashboard token` works
+on the next line. It waits up to 20 seconds. When the server stops first, or has not answered
+by then, `start` says why and what to do, and exits 1. `status` calls the dashboard running
+only when it answers on its port: an active unit or a tmux session is not enough on its own.
 
 Stop the dashboard with `fleet dashboard stop`, never with `pkill -f server.py`. Its process is a
 plain `python3 server.py`, and `pkill -f` takes the board down while every lane keeps working.
@@ -938,8 +944,14 @@ inspect the worktree. `fleet sweep --force` removes it after saving an autopsy.
 `fleet dashboard start`. If the status says something else is listening on the port, another
 process holds it.
 
-**`dashboard did NOT come up on <address>:<port>`.** `FLEET_DASH_BIND` is not an address this
-machine has, or the port is taken.
+**`dashboard did NOT come up on <address>:<port>`.** The server stopped before it answered. The
+message quotes the last line it wrote (all of it is in `~/.fleet/dashboard.log`) and says what
+to do. Usually `FLEET_DASH_BIND` is not an address this machine has, or another program holds
+the port.
+
+**`status` says `not answering`.** A tmux session named `fleet-dashboard` is there, but no
+dashboard answers on the port: the server in it is stuck, or something else runs in it. Run
+`fleet dashboard restart`.
 
 **With `FLEET_DASH_BIND=tailscale`, nothing listens.** Tailscale has no IPv4 address on the farm
 yet. Run `sudo tailscale up`, and check with `tailscale ip -4`. As a user unit, the dashboard
@@ -1038,7 +1050,7 @@ true.
 | `/api/agent/log?slug=<slug>&tail=200` | the end of the lane's log as text; `tail` is 1 to 2000 lines |
 | `/api/accounts` | each subscription's usage windows, with the last good numbers when a read failed |
 | `/api/accounts/login-state` | per account: `logged_in`, `waiting_for_login`, `expired`, `rate_limited` or `unknown`, with a sentence |
-| `/api/engines` | the model catalog with this machine's facts: one status per provider (`on`, `off`, `needs_key`, `not_installed` or `failing`), the models switched on, the default model, and whether the command is installed |
+| `/api/engines` | the model catalog with this machine's facts: one status per provider (`on`, `off`, `needs_key`, `needs_login`, `not_installed` or `failing`), the models switched on, the default model, and whether the command is installed |
 | `/api/models` | the model catalog without the machine's facts |
 | `/api/models/presets` | the providers that "Add a model" offers (Claude Code and Codex) |
 | `/api/projects` | the registered projects, with open lanes, last activity and GitHub access |

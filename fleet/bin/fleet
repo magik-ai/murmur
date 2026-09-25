@@ -427,7 +427,7 @@ cmd_spawn() {
          # with no preset in this catalog lands here.
          if [ "$("$PY" "$FLEET_HOME/lib/models.py" field "$engine" id 2>/dev/null)" != "$engine" ]; then
            echo "engine '$engine' is not in murmur's catalog: murmur ships Claude Code and Codex."
-           echo "  adding a preset for it is a contribution: see CONTRIBUTING.md, \"An engine preset\""
+           echo "  adding a preset for it is a contribution: see CONTRIBUTING.md, \"Adding an agent engine\""
            echo "  (the engines this farm has: fleet models)"; return 1
          fi
          echo "engine '$engine' is not a routable model."
@@ -502,8 +502,9 @@ PY
     return 0
   fi
 
-  # ensure the dashboard is up whenever we spawn — no boot task / sudo needed
-  "$FLEET_HOME/dashboard/run.sh" start >/dev/null 2>&1 || true
+  # Ensure the dashboard is up whenever we spawn, with no boot task and no sudo. Started, not
+  # waited for (FLEET_DASH_WAIT=0): a dashboard that cannot come up must not hold every spawn.
+  FLEET_DASH_WAIT=0 "$FLEET_HOME/dashboard/run.sh" start >/dev/null 2>&1 || true
 
   local cap; cap=$(_capacity_json)
   local can; can=$(echo "$cap" | "$PY" -c 'import sys,json;print(json.load(sys.stdin)["can_spawn"])')

@@ -189,7 +189,8 @@ that follows, redeploying something that was never broken, does more harm than t
 **The guard.** `fleet dashboard start|stop|restart|status` is the interface. `start` changes
 nothing when the dashboard is already up, and every `fleet spawn` starts it if it is down. Nothing
 in `fleet` stops it by a pattern match. `fleet dashboard status` reports the address the server
-is really listening on, not the one your shell would have used.
+is really listening on, not the one your shell would have used, and calls it running only when
+it answers there.
 
 **Where the guard stops.** Nothing stops your shell. Never stop the dashboard with `pkill -f`,
 and never start a second copy by hand on the same port. When the page does not load, run
