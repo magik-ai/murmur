@@ -983,6 +983,32 @@ class Installer(unittest.TestCase):
                                              ["sudo", "apt-get", "update", "-qq"],
                                              ["sudo", "apt-get", "install", "-y", "-qq", "tmux"]])
 
+    # The dashboard runs `gh auth status --active`, which gh 2.40 added. Ubuntu 22.04's own gh
+    # is 2.4.0, and one already installed used to be kept.
+    @unittest.skipIf(os.geteuid() == 0, "root can install packages, so the preflight lets it by")
+    def test_a_gh_older_than_2_40_counts_as_missing_for_a_user_who_cannot_install(self):
+        done = self.install("--remote", FAKE_GH_VERSION="2.4.0")
+        said = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 1, said)
+        self.assertIn("this box is missing gh", said)
+        self.assertIn("gh 2.40 or newer", said)
+
+    @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
+    def test_a_gh_older_than_2_40_is_replaced_from_githubs_repository(self):
+        done = self.install("--remote", FAKE_GH_VERSION="2.4.0", FAKE_SUDO_OK="1")
+        said = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 0, said)
+        self.assertIn("gh 2.4.0 is too old (murmur needs 2.40 or newer)", said)
+        self.assertIn(["sudo", "tee", "/etc/apt/sources.list.d/github-cli.list"],
+                      self.sudo_calls())
+        self.assertIn(["sudo", "apt-get", "install", "-y", "-qq", "gh"], self.sudo_calls())
+
+    @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
+    def test_a_gh_that_is_new_enough_is_left_alone(self):
+        done = self.install("--remote", FAKE_GH_VERSION="2.45.0")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(self.sudo_calls(), [])
+
     @unittest.skipIf(os.geteuid() == 0, "root takes a different path through step 1")
     def test_remote_runs_to_the_end_on_loopback_and_prints_the_tunnel(self):
         # The droplet's cloud-init wrote the loopback line before the installer ever ran.

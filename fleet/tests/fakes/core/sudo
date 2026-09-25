@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """A fake sudo. It never runs the command it was given, whatever the answer.
 
-The installer's preflight asks `sudo -n true`, and step 1 asks for apt. Everything else fails, because a test that reached a real `sudo apt-get install` would be
-changing the machine it runs on.
+The installer's preflight asks `sudo -n true`, and step 1 asks for apt and for the four calls
+that put GitHub's apt key and source in place. Everything else fails, because a test that reached
+a real `sudo apt-get install` would be changing the machine it runs on.
 
   FAKE_LOG=<path>   every call appended as one JSON line {argv, stdin}
-  FAKE_SUDO_OK=1    `sudo -n true` succeeds (this user may install packages), and so does
-                    `sudo apt-get ...`, which is recorded and never run
+  FAKE_SUDO_OK=1    `sudo -n true` succeeds (this user may install packages), and so do
+                    `sudo apt-get`, `mkdir`, `tee` and `chmod`, which are recorded and never run
 """
 import os
 import sys
@@ -24,9 +25,9 @@ def main():
             return 0
         die("sudo: a password is required", 1)
 
-    # An installer that was let through asks sudo for apt. The call is recorded and answered as
-    # a success, and apt is never run: nothing on this machine changes.
-    if args[:1] == ["apt-get"] and flag("FAKE_SUDO_OK"):
+    # An installer that was let through asks sudo for apt, and for GitHub's apt key and source.
+    # Each call is recorded and answered as a success, and none is run: nothing here changes.
+    if args[:1] in (["apt-get"], ["mkdir"], ["tee"], ["chmod"]) and flag("FAKE_SUDO_OK"):
         return 0
 
     die("fake sudo: this test must never run a command as root: " + " ".join(args), 1)
