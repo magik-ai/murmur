@@ -860,7 +860,7 @@ cmd_group() {
 
 cmd_models() {
   # The model catalog: what's available, its routing role, and per-model on/off + health.
-  # Flipping a model on fires a real test request (auth + limits) before any lane routes to it.
+  # Flipping a model on runs its health check before any lane routes to it (lib/models.py).
   local sub="${1:-list}"; shift 2>/dev/null || true
   case "$sub" in
     list|"")

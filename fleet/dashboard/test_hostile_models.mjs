@@ -700,8 +700,9 @@ for (const width of [1024, 1280]) {
   await second.context.close();
 }
 
-/* One press of a model switch is one real request to a provider. The stub is held open here so
-   the second press lands while the first is still in flight, which is what a double click is. */
+/* One press of a model switch is one write, and switching a model on runs its Test. The stub is
+   held open here so the second press lands while the first is still in flight, which is what a
+   double click is. */
 {
   const { page, context, posted, thrown } = await open({
     view: "machine",
@@ -726,6 +727,36 @@ for (const width of [1024, 1280]) {
     during.disabled === true, JSON.stringify(during));
   check("machine: so a double click sends one request, not two", count === 1, `${count} sent`);
   check("machine: nothing threw around the model switch", thrown.length === 0, thrown[0]);
+  await context.close();
+}
+
+/* Test and the switch say what they do. For Claude Code and Codex, Test sends no request: it
+   checks the CLI (and Codex's login). Only an engine someone added is sent a prompt. */
+{
+  const { page, context, thrown } = await open({ view: "machine" });
+  const titles = await page.evaluate(() => {
+    const title = (selector) => (document.querySelector(selector) || {}).title || "";
+    return {
+      claudeTest: title("[data-model-test='claude']"),
+      codexTest: title("[data-model-test='codex']"),
+      addedTest: title("[data-model-test='demo-plain']"),
+      claudeOff: title("[data-model-switch='claude']"),
+      addedOn: title("[data-model-switch='demo-plain']"),
+    };
+  });
+  check("machine: Test on Claude Code says it checks the CLI and sends no request",
+    titles.claudeTest === "Checks that the Claude Code CLI is installed. It sends no request.",
+    titles.claudeTest);
+  check("machine: Test on Codex says it checks the CLI and its login",
+    titles.codexTest === "Checks that the Codex CLI is installed and logged in. It sends no request.",
+    titles.codexTest);
+  check("machine: Test on an added engine says it sends a prompt",
+    titles.addedTest === "Sends the model one short prompt and checks its answer.", titles.addedTest);
+  check("machine: switching off promises no request, switching on runs the Test",
+    titles.claudeOff === "Press to switch Claude Code off."
+    && titles.addedOn === "Press to switch Demo Plain on. It runs the Test first.",
+    JSON.stringify(titles));
+  check("machine: nothing threw around the Test titles", thrown.length === 0, thrown[0]);
   await context.close();
 }
 

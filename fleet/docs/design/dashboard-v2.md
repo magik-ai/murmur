@@ -244,11 +244,13 @@ so the numbers do not change.
     many. It edits only the registry, and keeps a copy of the old file next to it. The checkout
     and the worktrees stay. The answer names the port block that becomes free. Adding a project
     defaults its port base to the next free block above the highest one registered.
-15. **Models.** Switching a model on, and Test, each send one real request to the provider, and
-    the buttons say so. A provider key is given on the command line (`fleet models auth <id>`,
-    which reads the key from stdin), never in a web form. Spawning stays out of the browser:
-    money and identity belong to a session that has a name. These also stay in the terminal:
-    `fleet dashboard stop` and `restart`, `fleet clean --force` and `fleet sweep --force`.
+15. **Models.** Switching a model on runs its Test, and the buttons say what Test does: for Claude
+    Code and Codex it checks the CLI (and Codex's login) and sends no request, and for an added
+    engine it sends one short prompt. A provider key is given on the command line
+    (`fleet models auth <id>`, which reads the key from stdin), never in a web form. Spawning stays
+    out of the browser: money and identity belong to a session that has a name. These also stay in
+    the terminal: `fleet dashboard stop` and `restart`, `fleet clean --force` and
+    `fleet sweep --force`.
 16. **A read-only page.** When the page holds no write token, every control is drawn switched off,
     and one line on every tab gives the reason from `/api/access`. A read-only dashboard is a
     legitimate way to run it, and it must not look broken.
