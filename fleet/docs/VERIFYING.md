@@ -26,9 +26,11 @@ repositories and fake command-line tools. No suite changes a live farm, and none
 a cloud provider. There is one small exception: `stale-status-test.sh` starts a short-lived
 systemd user unit.
 
-Run the tests as an ordinary user. The farm installer refuses to run as root, so its tests skip
-under root. A few other cases skip, and say why, on a machine without IPv6 or without a systemd
-user manager.
+Run the tests as an ordinary user, on a machine that booted systemd. The farm installer refuses
+to run as root, and stops before it changes anything where systemd is not running (a plain
+container), so the cases that follow it further skip under root and in such a container; one case
+that checks the stop itself runs only there. A few other cases skip, and say why, on a machine
+without IPv6 or without a systemd user manager.
 
 ## The farm runner
 
