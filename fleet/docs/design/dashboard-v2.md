@@ -116,7 +116,7 @@ Stop and Restart where `fleet` has the verb:
 |---|---|---|
 | Agent runner | `fleet-daemon.service` | `fleet daemon start`, `fleet daemon stop` |
 | Sweep timer | `fleet-sweep.timer` | `fleet autosweep on`, `fleet autosweep off` |
-| This dashboard | its tmux session and its listening socket | none: the row is read-only and shows `fleet dashboard restart` |
+| This dashboard | `fleet-dashboard.service`, else its tmux session, and its listening socket | none: the row is read-only and shows `fleet dashboard restart` |
 
 Restart is Stop and then Start.
 
@@ -211,8 +211,8 @@ so the numbers do not change.
    `fleet dashboard token` prints it, and `fleet dashboard restart` restarts the server.
 5. **Services come from the snapshot.** `GET /api/services` is served from the 45 second
    refresher: `systemctl --user is-active` for `fleet-daemon.service` and `fleet-sweep.timer`,
-   and the dashboard's own row from its tmux session and its listening socket, the way
-   `run.sh status` reads them. No GET runs a tool.
+   and the dashboard's own row from its user unit, its tmux session and its listening socket,
+   the way `run.sh status` reads them. No GET runs a tool.
 6. **Routes.** Section 7 lists every route these tabs use and what runs behind each.
 7. **Long actions are jobs.** Each write names its own timeout. An action that can take more than
    thirty seconds (drain, resume, registering a project) answers at once with a job id. The
