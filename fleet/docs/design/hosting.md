@@ -268,8 +268,9 @@ ssh -N -L 7878:127.0.0.1:7878 farm@<address>
 **Your own machine.** `fleet machines add --name <name> --target user@host [--port <port>]`
 registers the machine and checks it over SSH. Nothing is bought, and nothing is copied to the
 machine, so it must already accept this farm's machines key. If SSH works and the fleet is not
-installed yet, the row is `needs-login` and shows the finish command. Forget drops the row.
-Destroy is refused, because this farm did not buy the machine.
+installed yet, the row is `needs-login` and shows the finish command. With `--port`, the finish
+and tunnel commands carry `-p <port>`. Forget drops the row. Destroy is refused, because this farm
+did not buy the machine.
 
 **Commands.** The page, the skill and the terminal run the same code:
 

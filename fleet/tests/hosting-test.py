@@ -776,6 +776,18 @@ class OwnMachine(Farm):
         self.assertIn("-p", self.argvs("ssh")[0])
         self.assertIn("2222", self.argvs("ssh")[0])
 
+    def test_a_port_reaches_the_commands_a_person_runs(self):
+        self.ok("add", "--name", "laptop", "--target", "me@192.0.2.20", "--port", "2222",
+                FAKE_SSH_CAPACITY="1")
+        self.assertEqual(self.row("laptop")["tunnel_command"],
+                         "ssh -N -L 7878:127.0.0.1:7878 -p 2222 me@192.0.2.20")
+        self.ok("add", "--name", "desk", "--target", "me@192.0.2.21", "--port", "2200")
+        self.assertTrue(self.row("desk")["finish_command"].startswith(
+            "ssh -t -p 2200 me@192.0.2.21 'gh auth login"), self.row("desk")["finish_command"])
+        self.ok("add", "--name", "plain", "--target", "me@192.0.2.22", FAKE_SSH_CAPACITY="1")
+        self.assertEqual(self.row("plain")["tunnel_command"],
+                         "ssh -N -L 7878:127.0.0.1:7878 me@192.0.2.22")
+
 
 class OneWriterAtATime(Farm):
     """The registry under contention: the refresher, a job and a person, all at once."""

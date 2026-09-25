@@ -1130,16 +1130,22 @@ def ensure_key_imported():
 
 # ---------------------------------------------------------------------------- rows for a reader
 
+def _ssh_target(row):
+    """`[-p PORT ]user@address` for a command a person runs: the row's own port when it names
+    one, so a machine on another port is reached where it listens."""
+    port = str(row.get("port") or "").strip()
+    return (f"-p {port} " if port else "") + f"{row.get('user') or FARM_USER}@{row['address']}"
+
+
 def finish_command(row):
     """The one command a person runs from their laptop, from the design record, section 4."""
-    return (f"ssh -t {row.get('user') or FARM_USER}@{row['address']} "
+    return (f"ssh -t {_ssh_target(row)} "
             "'gh auth login && gh repo clone magik-ai/murmur ~/work/murmur -- -q && "
             "bash ~/work/murmur/farm/install.sh --remote'")
 
 
 def tunnel_command(row):
-    return (f"ssh -N -L {DASH_PORT}:127.0.0.1:{DASH_PORT} "
-            f"{row.get('user') or FARM_USER}@{row['address']}")
+    return f"ssh -N -L {DASH_PORT}:127.0.0.1:{DASH_PORT} {_ssh_target(row)}"
 
 
 def billed(row):
