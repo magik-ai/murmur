@@ -6,6 +6,10 @@ follow [Semantic Versioning](https://semver.org/) from the first tagged release.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.1.0 - 2026-09-25
+
 The first public release. It contains:
 
 ### Plugin (`plugin/`)
@@ -25,7 +29,9 @@ The first public release. It contains:
 ### Farm (`fleet/`)
 
 - `fleet` starts Claude Code and Codex agents on a Linux machine. Each agent
-  works on its own branch in its own git worktree.
+  works on its own branch in its own git worktree. Claude Code agents run Opus
+  and Codex agents run GPT-6 Sol unless you pick another model;
+  `FLEET_CLAUDE_MODEL` and `FLEET_CODEX_MODEL` change the defaults.
 - Capacity limits and power settings keep the machine responsive. A supervisor
   restarts agents that have a restart policy, and a sweep timer cleans up
   finished work.
