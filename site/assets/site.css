@@ -90,17 +90,24 @@ img, svg, canvas { max-width: 100%; }
 .install [role="tabpanel"] { grid-row: 2; grid-column: 1; padding: 14px 14px 14px 16px; }
 .install [role="tabpanel"].is-off { visibility: hidden; }
 .install .cmds { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.install .cmd { display: flex; align-items: flex-start; gap: 12px; }
+.install .cmd { display: flex; align-items: flex-start; gap: 10px; }
+/* A command wraps inside the box at every width, and never under its prompt: the prompt hangs
+   in a gutter two characters wide. A long address breaks after a slash (the <wbr>s), never at
+   the hyphen in magik-ai. Copy copies the command as written, wherever it wraps. */
 .install pre {
   flex: 1;
   min-width: 0;
   margin: 0;
-  overflow-x: auto;
+  padding-left: 2ch;
+  text-indent: -2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
   font: 400 13.5px/22px var(--font-mono);
   color: var(--ink);
 }
 .install pre .p { color: var(--ink-muted); user-select: none; }
-@media (max-width: 640px) { .install pre { white-space: pre-wrap; overflow-wrap: anywhere; } }
+.install pre .nowrap { white-space: nowrap; }
 /* Copy sits on the first line of its command, and is as wide as Copied, so the word changing
    never moves the command beside it. */
 .install .cmd .mm-button { flex: none; justify-content: center; min-width: 64px; height: 24px; margin-top: -1px; }
