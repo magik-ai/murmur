@@ -715,6 +715,11 @@ fleet machines add --name <NAME> --target <USER>@<ADDRESS> [--port <PORT>]
 fleet machines check <NAME>
 ```
 
+`add` copies nothing to your machine. The farm logs in with its own key,
+`~/.fleet/machines/id_ed25519`, so first add the public half,
+`~/.fleet/machines/id_ed25519.pub`, to `~/.ssh/authorized_keys` on that machine. The dashboard's
+Add a machine dialog shows the line to run there.
+
 For a new Droplet:
 
 ```bash

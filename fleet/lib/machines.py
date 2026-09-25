@@ -1339,6 +1339,12 @@ def cmd_list(args):
               "error": provider_error or ""}
 
     if args.json:
+        # The public half of the key this farm logs in to its machines with. A machine of your
+        # own must accept it before `add` can check it, so the page shows it to copy.
+        try:
+            answer["machines_key"] = machines_key_public()
+        except (Refused, OSError):
+            answer["machines_key"] = ""
         print(json.dumps(answer, indent=2))
         return 0
 
