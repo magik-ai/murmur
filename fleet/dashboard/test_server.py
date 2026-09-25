@@ -554,6 +554,21 @@ exit 1
         self.assertIn(session, row["detail"])
         self.assertNotIn("fleet-dashboard", row["detail"])
 
+    def test_the_dashboard_row_knows_it_runs_as_the_user_unit(self):
+        # `fleet dashboard enable` makes it a unit, and `fleet dashboard restart` then restarts
+        # that unit, so the row must not say the restart will not find it.
+        as_unit = SYSTEMCTL_FAKE.replace(
+            "      fleet-sweep.timer) echo failed; exit 3;;",
+            "      fleet-sweep.timer) echo failed; exit 3;;\n"
+            "      fleet-dashboard.service) echo active; exit 0;;")
+        with self.farm({"systemctl": as_unit, "tmux": "exit 1\n"}), \
+                mock.patch.object(dashboard, "listening_socket", lambda port: "127.0.0.1:7878"):
+            dashboard.services_refresh()
+            row = dashboard.service_row("dashboard")
+        self.assertEqual(row["detail"],
+                         "listening on 127.0.0.1:7878, as the user unit fleet-dashboard.service")
+        self.assertNotIn("will not find it", row["detail"])
+
     def test_a_machine_with_no_user_manager_says_so_instead_of_failing(self):
         with self.farm({"tmux": TMUX_FAKE}):
             dashboard.services_refresh()
