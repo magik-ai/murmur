@@ -97,6 +97,36 @@ PY
 
 _metrics() { "$PY" "$FLEET_HOME/lib/metrics.py" "$@"; }
 
+# A lane takes base + slot for each of its three ports: dev server, API and e2e harness. The slot
+# is the lowest one whose three ports no running lane holds, in any project, so a lane that ends
+# frees its ports for the next one and two running lanes never share a port.
+_port_slot() { # $1 dev server base, $2 API base, $3 e2e base -> prints the slot
+  "$PY" - "$@" <<'PY'
+import glob, json, os, sys
+try:
+    bases = [int(base) for base in sys.argv[1:4]]
+except ValueError:
+    print(f"invalid port base in projects.toml: {' '.join(sys.argv[1:4])}", file=sys.stderr)
+    raise SystemExit(2)
+taken = set()
+for path in glob.glob(os.path.join(os.environ["FLEET_STATE"], "state", "*.json")):
+    try:
+        with open(path) as handle:
+            record = json.load(handle)
+    except Exception:
+        continue
+    if not isinstance(record, dict) or record.get("status") not in ("starting", "running"):
+        continue
+    ports = record.get("ports")
+    if isinstance(ports, dict):
+        taken.update(port for port in ports.values() if isinstance(port, int))
+slot = 0
+while any(base + slot in taken for base in bases):
+    slot += 1
+print(slot)
+PY
+}
+
 # Read one value out of $FLEET_CONFIG/policy.toml by dotted key (e.g. `identity.author_format`).
 # Prints nothing when the file, the table or the key is absent, so every caller can fall back to
 # its own default. Booleans print as `true` / `false`.
@@ -474,9 +504,8 @@ PY
   branch_base="${FLEET_SPAWN_BASE:-}"; [ -n "$branch_base" ] || branch_base="$(_proj "$project" branch)"
   branch_base="${branch_base:-main}"
   # Dev-server ports are the project's, not the harness's: a repo whose API lives on 8000 or whose
-  # e2e harness wants 4000 should not have to patch fleet. Each lane gets base+slot so two lanes
-  # of the same project never collide. [ports] in projects.toml overrides; the fallbacks are the
-  # numbers fleet used when they were hardcoded, so a registry without the table is unchanged.
+  # e2e harness wants 4000 should not have to patch fleet. Each lane gets base+slot (_port_slot).
+  # [ports] in projects.toml sets the bases; without it they are port_base (5200), 8100 and 6100.
   portbase="$(_proj "$project" ports.vite_base)"
   [ -n "$portbase" ] || portbase="$(_proj "$project" port_base)"
   portbase="${portbase:-5200}"
@@ -491,8 +520,7 @@ PY
   if [ -z "$tasktext" ] && [ -n "$issue" ]; then tasktext="Implement GitHub issue #$issue for $project. Read it first: run 'gh issue view $issue'."; fi
   [ -n "$tasktext" ] || { echo "need --task, --brief-file or --issue"; return 1; }
 
-  # slot number = active agents, for deterministic non-clashing ports
-  local slot; slot=$(_metrics | "$PY" -c 'import sys,json;print(json.load(sys.stdin)["agents"])')
+  local slot; slot=$(_port_slot "$portbase" "$apibase" "$e2ebase") || return 1
   local vite=$((portbase + slot)) uvicorn=$((apibase + slot)) e2e=$((e2ebase + slot))
   local stamp slug branch wt
   stamp=$(date +%H%M%S); slug="${lane}-${stamp}-$$"
