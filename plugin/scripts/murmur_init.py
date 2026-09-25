@@ -14,6 +14,9 @@ Rerunning is safe. An answered question does not come back. Apart from
 overwritten: the contract and the tracker rules get a <name>.murmur-new beside
 them when they differ, the other files are left as they are, and an existing
 CLAUDE.md or AGENTS.md gets a four-line pointer to the contract, once.
+
+Codex reads AGENTS.md and never CLAUDE.md. `apply --agents-md` writes an
+AGENTS.md that holds only a title and the pointer when the repository has none.
 """
 
 from __future__ import annotations
@@ -370,7 +373,7 @@ def add_pointer(root: Path, rel: Path, base: str, report: list[dict]) -> None:
     report.append({"path": str(rel), "action": "appended", "note": "pointer added"})
 
 
-def cmd_apply(root: Path, use_defaults: bool = False) -> int:
+def cmd_apply(root: Path, use_defaults: bool = False, agents_md: bool = False) -> int:
     config = load_config(root)
     questions = questions_for(root)
     missing = [q["id"] for q in questions if not config.get(q["id"])]
@@ -409,6 +412,10 @@ def cmd_apply(root: Path, use_defaults: bool = False) -> int:
         report[-1]["placeholders"] = placeholders(fresh)
     if (root / "AGENTS.md").is_file():
         add_pointer(root, Path("AGENTS.md"), base, report)
+    elif agents_md:
+        place(root, Path("AGENTS.md"), "# AGENTS.md\n\n" + pointer_block(base) + "\n", "once",
+              report)
+        report[-1]["note"] = "a title and the pointer to the contract, for Codex"
     summary = {
         "status": "applied",
         "repo": config["repo"],
@@ -430,13 +437,15 @@ def main() -> int:
     apply = subs.add_parser("apply", help="write the files and print a report")
     apply.add_argument("--defaults", action="store_true",
                        help="fill every unanswered question with its default first")
+    apply.add_argument("--agents-md", action="store_true",
+                       help="also write AGENTS.md, with the pointer, when there is none")
     args = parser.parse_args()
     root = repo_root()
     if args.command == "questions":
         return cmd_questions(root)
     if args.command == "answer":
         return cmd_answer(root, args.id, args.value)
-    return cmd_apply(root, use_defaults=args.defaults)
+    return cmd_apply(root, use_defaults=args.defaults, agents_md=args.agents_md)
 
 
 if __name__ == "__main__":

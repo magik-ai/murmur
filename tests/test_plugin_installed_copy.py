@@ -88,6 +88,31 @@ class InstalledCopy(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return {entry["path"]: entry for entry in json.loads(result.stdout)["files"]}
 
+    def test_agents_md_is_written_only_when_asked(self):
+        # Codex reads AGENTS.md and never CLAUDE.md, so --agents-md gives a repository without one
+        # an AGENTS.md that points to the contract. Without the flag there is still none.
+        self.assertNotIn("AGENTS.md", self.apply_report())
+        self.assertFalse((self.project / "AGENTS.md").exists())
+        self.run_script("murmur_init.py", "answer", "--id", "base_branch", "--value", "develop")
+        entry = self.apply_report("--agents-md")["AGENTS.md"]
+        self.assertEqual(entry["action"], "wrote")
+        text = (self.project / "AGENTS.md").read_text()
+        self.assertTrue(text.startswith("# AGENTS.md\n\n<!-- murmur:contract -->\n"), text)
+        self.assertIn("Agent work in this repository follows `.murmur/contract.md`.", text)
+        self.assertIn("branch from `develop`", text)
+        again = self.apply_report("--agents-md")["AGENTS.md"]
+        self.assertEqual((again["action"], again["note"]), ("skipped", "pointer there"))
+        self.assertEqual((self.project / "AGENTS.md").read_text(), text)
+
+    def test_an_agents_md_the_person_wrote_keeps_its_text_and_gets_the_pointer_once(self):
+        (self.project / "AGENTS.md").write_text("# Our product\n\nWhat it is.\n")
+        self.assertEqual(self.apply_report("--agents-md")["AGENTS.md"]["action"], "appended")
+        self.assertEqual(self.apply_report("--agents-md")["AGENTS.md"]["action"], "skipped")
+        text = (self.project / "AGENTS.md").read_text()
+        self.assertTrue(text.startswith("# Our product\n\nWhat it is.\n\n<!-- murmur:contract -->\n"),
+                        text)
+        self.assertEqual(text.count("<!-- murmur:contract -->"), 1)
+
     def test_a_fresh_claude_md_lists_the_placeholders_still_to_fill(self):
         entry = self.apply_report()["CLAUDE.md"]
         self.assertEqual(entry["action"], "wrote")
