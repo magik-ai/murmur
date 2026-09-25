@@ -146,8 +146,11 @@
       if (!bird || !stops.length) return;
       var n = stops.length;
       var cycle = LEG * (n + 1);
-      var t = now % cycle;
-      var leg = Math.floor(t / LEG), into = t - leg * LEG;
+      /* A frame can be stamped a little before the moment the flight was started from, so the
+         time can come in just below zero: it counts as the start, never as a leg before the
+         first one. */
+      var t = Math.max(0, now) % cycle;
+      var leg = Math.min(n, Math.floor(t / LEG)), into = t - leg * LEG;
       var from, to, here = -1, x, lift = 0;
       if (leg < n) {
         from = leg === 0 ? -24 : stops[leg - 1];
@@ -158,6 +161,7 @@
         from = stops[n - 1]; to = width + 24;
         var k2 = ease(Math.min(1, into / TRAVEL)); x = from + (to - from) * k2; lift = Math.sin(k2 * Math.PI) * 10;
       }
+      if (!isFinite(x)) return;
       var flap = here >= 0 ? 1 : 0.85 + 0.25 * Math.sin(now / 90);
       bird.setAttribute("transform", "translate(" + x.toFixed(1) + " " + (y - 12 - lift).toFixed(1) + ") scale(1 " + flap.toFixed(2) + ")");
       for (var i = 0; i < n; i += 1) {
@@ -167,7 +171,7 @@
       }
     }
     var running = false, raf = 0, origin = 0, seen = false, kept = 0;
-    function frame(now) { if (!running) return; kept = now - origin; place(kept); raf = requestAnimationFrame(frame); }
+    function frame(now) { if (!running) return; kept = Math.max(0, now - origin); place(kept); raf = requestAnimationFrame(frame); }
     function go() { if (running || motion.paused || !seen) return; running = true; origin = performance.now() - kept; raf = requestAnimationFrame(frame); }
     function halt() { running = false; cancelAnimationFrame(raf); }
     layout();
