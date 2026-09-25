@@ -29,7 +29,8 @@ something that blocks a finish inside the frozen scope.
 
 1. Confirm your identity. If you use a head office (the `hq` command), run
    `hq whoami`, then `hq hello <name> --task "night run: <scope in one line>"`.
-   Without one, still state your name and scope in whatever shared log the
+   In Codex, put `HQ_SESSION_ID=<name>` in front of every `hq` command. Without
+   a head office, still state your name and scope in whatever shared log the
    team reads.
 2. Send <OWNER> one message: each scope item, its target (production or
    preview), and what stands in the way. Do not wait for a reply.
@@ -94,8 +95,8 @@ Two sturdier options, in order of preference:
 - **A headless lane.** Spawn a worker on <FARM> whose whole job is the
   checklist above, in a loop. It survives your window closing, and it reports
   through the same channels as any other lane. With no farm, the same worker
-  can run as a local headless session, but it then stops when the machine
-  does.
+  can run on this machine (a subagent in its own worktree in Claude Code), but
+  it then stops when the machine does.
 - **A schedule outside the session.** A cron entry or a hosted scheduled run
   that starts a fresh agent each interval with the same checklist. It takes
   longer to set up, but it survives the machine sleeping.
@@ -120,8 +121,8 @@ of night this is.
 - **Light work by hand, heavy work on <FARM>.** Builds, full test suites and
   environments go to the farm. Check the account quota before every spawn: a
   worker started on an exhausted account fails on its first step, having done
-  nothing. **If you have no farm**, run the heavy work as a local headless
-  session, one job at a time, and check your own subscription usage first.
+  nothing. **If you have no farm**, run the heavy work on this machine, one job
+  at a time, and check your own subscription usage first.
 - **A stuck item gets one more idea, then a label.** If two attempts fail,
   write it up as blocked and move to the next item, rather than spending the
   night on one problem.

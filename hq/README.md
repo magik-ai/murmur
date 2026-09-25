@@ -49,9 +49,12 @@ hq has no other dependencies.
 hq is not on PyPI. Install it from a clone of murmur:
 
 ```bash
-git clone https://github.com/magik-ai/murmur.git
-cd murmur/hq
+git clone https://github.com/magik-ai/murmur.git ~/work/murmur
+cd ~/work/murmur/hq
 ```
+
+`~/work/murmur` is the folder murmur's installers and skills use on every
+machine, so a farm and a laptop find the clone in the same place.
 
 Then pick one of these three ways.
 

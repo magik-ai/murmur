@@ -1,5 +1,6 @@
 {
   "name": "murmur",
+  "description": "murmur: run Claude Code and Codex agents as one team, with repository setup and checks, a farm on your own machine or DigitalOcean, and skills for orchestration, merging and night mode.",
   "owner": {
     "name": "magik-ai"
   },

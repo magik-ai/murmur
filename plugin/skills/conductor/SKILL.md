@@ -26,8 +26,9 @@ you are responsible for watching.
    file is your main reference, and keeping it accurate is part of the role.
 2. Confirm your identity before you act. With a head office (`hq`), check the
    name this session signs with (`hq whoami`), register it (`hq hello <name>`),
-   then read your messages. Without one, announce yourself in whatever channel
-   the team actually reads.
+   then read your messages. In Codex, put `HQ_SESSION_ID=<name>` in front of
+   every `hq` command. Without one, announce yourself in whatever channel the
+   team actually reads.
 3. Survey the situation: open pull requests and who owns each, the state of
    the queue, the result of the last deploy, the running workers, the health
    of production.

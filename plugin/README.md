@@ -26,12 +26,20 @@ plugin:
 ```
 
 Start a new session, so that the session-start hook runs. Then, in the
-repository you want to set up:
+repository you want to set up, type these one at a time:
 
 ```text
 /murmur:init
 /murmur:doctor
 ```
+
+Commit the files `/murmur:init` wrote and push them: agents start their
+branches from GitHub.
+
+An agent can do all of this for you, in Claude Code or in Codex: give it the
+line `Install murmur for this repo: https://github.com/magik-ai/murmur` and it
+follows [INSTALL.md](../INSTALL.md). For Codex, which has no plugins, the same
+skills are linked into `~/.codex/skills` by `plugin/scripts/murmur_skills.py`.
 
 ## Updating
 

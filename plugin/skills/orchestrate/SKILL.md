@@ -47,7 +47,9 @@ It fails when the name is not this session's own. A code name belongs to one
 session: after you sign off you have none. Spawning under someone else's name
 files your lanes under their name and sends messages about them to the wrong
 agent. If the check fails, register again in this session (`hq hello <name>`)
-before you spawn.
+before you spawn. In Codex, or in a plain terminal, `hq` has no session to read its key from:
+put the same `HQ_SESSION_ID=<name>` in front of every `hq` command you run, for
+example `HQ_SESSION_ID=<name> hq hello <name>`.
 
 ## 2. Accounts and capacity, before anything is spawned
 
@@ -60,9 +62,17 @@ before you spawn.
   spawn (`fleet capacity` prints `OK` or `BLOCK`, with the level `ok`, `warn`
   or `block`). On `warn` or `block`, spawn fewer, or wait. Never force past a
   block (`fleet spawn --force`) unless <OWNER> asks for exactly that.
-- **If you have no farm.** Run each lane as a local headless session instead.
-  Check your own subscription usage before you start, and run no more lanes at
-  once than this machine can hold.
+- **If you have no farm.** Run the lanes on this machine instead. Check your
+  own subscription usage before you start, and run no more lanes at once than
+  this machine can hold.
+  - In Claude Code, start each lane as a subagent that works in its own git
+    worktree (the Agent tool, with worktree isolation), with the lane's brief,
+    model and name. It commits, pushes its branch and opens its pull request
+    like any other lane.
+  - In Codex, which has no subagents, run the lanes one at a time yourself:
+    `git worktree add ../<repo>-<lane> -b <branch> origin/<base>`, do the
+    lane's work in that folder, push the branch, open the pull request, and
+    only then start the next lane.
 
 ## 3. Split by lane, with a list of paths
 
@@ -98,7 +108,7 @@ yes.
 
 - **Strongest model** for hard, unclear, architectural or risky slices, and
   for reviewing another agent's pull request. Judgement is where it pays.
-- **Middle model** for ordinary, well-scoped work. This is the default.
+- **Middle model** for ordinary, well-scoped work: most lanes.
 - **Cheapest model** for mechanical work: renames, docs, repetitive fixes.
 
 With `fleet`, Claude lanes choose by model (`--model opus`, `sonnet` or
@@ -115,8 +125,9 @@ fleet spawn --project <name> --lane <lane> --model <model> \
     --by <codename> --icon <emoji> --color <hex> --task "<brief>"
 ```
 
-**If you have no farm**, start the lane as a local headless session with the
-same brief, model and lane name. Everything below still applies.
+**If you have no farm**, start the lane on this machine as section 2 says: a
+subagent in its own worktree in Claude Code, or one lane at a time in Codex,
+with the same brief, model and lane name. Everything below still applies.
 
 - A good brief states the concrete task and the acceptance criteria. If the
   harness already adds workflow, isolation and port rules, do not repeat them.

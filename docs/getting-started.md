@@ -127,9 +127,10 @@ It offers two ways:
   type that price back. Then it installs murmur on the server and opens its
   dashboard. It asks you for one API token from DigitalOcean: paste it in your
   terminal when Claude says so, never in the chat.
-- **Use a Linux computer you own:** Ubuntu 22.04 or newer, Debian 12 or newer,
-  or a Windows PC with WSL. You run one command on that computer, and it
-  installs everything. On Windows, first switch on the two settings in
+- **Use a Linux computer or server you own:** Ubuntu 22.04 or newer, or
+  Debian 12 or newer, with systemd, or a Windows PC with WSL. You run one
+  command on that machine (over ssh for a server), and it installs everything.
+  On Windows, first switch on the two settings in
   [chapter 12](12-the-machine.md#what-the-machine-must-be) that keep WSL
   running when its window is closed.
 
@@ -142,11 +143,17 @@ anything your user can do on that machine. Keep only what they need on it.
 
 ## Prefer Codex?
 
-Install it instead of Claude Code in step 1 with
-`curl -fsSL https://chatgpt.com/codex/install.sh | sh`, sign in with
-`codex login`, then paste the same message from step 3 into Codex. The team
-commands in step 4 are Claude Code's; with Codex, murmur's farm runs your
-agents.
+Everything above works in Codex too. In step 1, install Codex instead of
+Claude Code, or next to it:
+
+```bash
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+```
+
+In step 2, sign in with `codex login` and choose your ChatGPT plan. In step 3,
+start `codex` in your project's folder and paste the same message. murmur gives
+Codex the same skills as Claude Code. The one difference is in step 4: without
+a farm, Codex runs the lanes one after another instead of side by side.
 
 ## Doing it by hand
 

@@ -13,6 +13,8 @@ Keep your user in the loop:
   password, token or key in the chat.
 - If a command fails, show its message to your user and stop. Do not work
   around it.
+- Every step is safe to run again. If murmur is already installed, the steps
+  check it, update what is old and skip the rest.
 
 ## 1. Check the computer
 
@@ -66,6 +68,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
+The gh in some distributions' package lists is old. That is fine on this
+computer. A farm needs gh 2.40 or newer, and the farm's installer brings its
+own.
+
 ## 3. Make sure GitHub is signed in
 
 ```bash
@@ -81,7 +87,40 @@ gh auth login
 
 When they say it is done, run `gh auth status` again.
 
-## 4. Find the repository to set up
+## 4. Get murmur and its skills
+
+murmur lives in one folder, `~/work/murmur`, on every computer:
+
+```bash
+if [ -d ~/work/murmur/.git ]; then git -C ~/work/murmur pull --ff-only; else git clone https://github.com/magik-ai/murmur ~/work/murmur; fi
+```
+
+Then give your agent murmur's skills, so that it can do the rest of the work
+later without this file:
+
+- **Claude Code.** Install the plugin. It adds `/murmur:init`,
+  `/murmur:doctor`, `/murmur:farm` and the skills that run a team:
+
+  ```bash
+  claude plugin marketplace add magik-ai/murmur
+  claude plugin install murmur@murmur
+  ```
+
+  If either says murmur is already there, update it instead:
+  `claude plugin marketplace update murmur`, then
+  `claude plugin update murmur@murmur`.
+- **Codex.** Link the skills into `~/.codex/skills`:
+
+  ```bash
+  uv run ~/work/murmur/plugin/scripts/murmur_skills.py install
+  ```
+
+A running session loads new skills only when it starts again. You do not need
+to restart now: keep following this file. When a step below names a skill, read
+it from `~/work/murmur/plugin/skills/<name>/SKILL.md`, and wherever it says
+`${CLAUDE_PLUGIN_ROOT}`, use `~/work/murmur/plugin`.
+
+## 5. Find the repository to set up
 
 ```bash
 git rev-parse --show-toplevel
@@ -91,23 +130,6 @@ If you are not inside a git repository, ask your user which repository to set
 up, clone it with `gh repo clone OWNER/NAME`, and go into it. If they have
 none, offer `gh repo create NAME --private --clone`.
 
-## 5. Get murmur
-
-In Claude Code, install the plugin. It adds `/murmur:init`, `/murmur:doctor`,
-`/murmur:farm` and the skills that run a team:
-
-```bash
-claude plugin marketplace add magik-ai/murmur
-claude plugin install murmur@murmur
-```
-
-In every agent, Claude Code included, keep a copy of murmur to run the setup
-from:
-
-```bash
-if [ -d ~/.murmur/.git ]; then git -C ~/.murmur pull --ff-only; else git clone --depth 1 https://github.com/magik-ai/murmur ~/.murmur; fi
-```
-
 ## 6. Set up the repository
 
 Run these from the root of your user's repository.
@@ -115,7 +137,7 @@ Run these from the root of your user's repository.
 1. See which questions are open:
 
    ```bash
-   uv run ~/.murmur/plugin/scripts/murmur_init.py questions
+   uv run ~/work/murmur/plugin/scripts/murmur_init.py questions
    ```
 
    It prints a JSON list. Each item has an `id`, a `prompt`, `choices` and a
@@ -124,25 +146,26 @@ Run these from the root of your user's repository.
    Store each answer before you ask the next question:
 
    ```bash
-   uv run ~/.murmur/plugin/scripts/murmur_init.py answer --id ID --value VALUE
+   uv run ~/work/murmur/plugin/scripts/murmur_init.py answer --id ID --value VALUE
    ```
 
-   If your user says to use the defaults, skip the questions.
-2. If your user works with Codex and the repository has no `AGENTS.md`, create
-   it with the single line `# AGENTS.md`, so that murmur adds its pointer there
-   too.
-3. Write the files. murmur never overwrites a file that exists:
+   If your user says to use the defaults, skip the questions. An empty list
+   means everything is answered already.
+2. Write the files. murmur never overwrites a file that exists:
 
    ```bash
-   uv run ~/.murmur/plugin/scripts/murmur_init.py apply
+   uv run ~/work/murmur/plugin/scripts/murmur_init.py apply
    ```
 
-   Use `apply --defaults` if your user chose the defaults. Tell your user in
-   plain words what it wrote. If it wrote a `.murmur-new` file, say that two
-   versions now sit side by side and that they should keep one. If it created
-   `CLAUDE.md`, that file still has blanks such as `<NAME>` and `<DOC>`: offer
-   to fill them in with your user now, or leave them for later.
-4. Save the setup on GitHub. Agents start their branches from GitHub, so they
+   Add `--defaults` if your user chose the defaults, and `--agents-md` if they
+   use Codex: Codex reads `AGENTS.md`, so murmur then points it at the contract
+   too. Tell your user in plain words what the report says it wrote:
+   - A `.murmur-new` file means two versions now sit side by side, and your
+     user should keep one.
+   - If it created `CLAUDE.md`, its entry lists `placeholders` such as `<NAME>`
+     and `<DOC>`. Offer to fill them in with your user now, one at a time, or
+     leave them for later.
+3. Save the setup on GitHub. Agents start their branches from GitHub, so they
    do not see files that exist only on this computer. Show your user what
    murmur wrote (`git status`), and with their yes, commit exactly those files:
 
@@ -166,20 +189,24 @@ Run these from the root of your user's repository.
      gh pr create --fill
      ```
 
-5. Check the setup, and show your user what it says:
+4. Check the setup, and tell your user what it says:
 
    ```bash
-   uv run ~/.murmur/plugin/scripts/murmur_doctor.py
+   uv run ~/work/murmur/plugin/scripts/murmur_doctor.py
    ```
+
+   Until the setup is merged, it warns that the base branch on GitHub does not
+   have it yet. That warning goes away after the merge.
 
 ## 7. Tell your user what comes next
 
 In a few lines:
 
-- In Claude Code, they can now ask for a team, for example
-  `fan this out: add a dark mode switch to the settings page`. Claude shows a
-  plan and starts nothing until they say go. Agents open pull requests; your
-  user decides what merges.
+- They can now ask for a team, in Claude Code or Codex:
+  `fan this out: add a dark mode switch to the settings page`. The agent shows
+  a plan and starts nothing until they say go. Each lane opens a pull request;
+  your user decides what merges. Without a farm, lanes run on this computer:
+  side by side in Claude Code, one after another in Codex.
 - A farm is optional: an always-on Linux machine that runs agents while their
   computer is off. Offer it. If they want one, go on to step 8.
 - The handbook explains the method:
@@ -189,21 +216,40 @@ In a few lines:
 
 Ask which way they prefer.
 
-- **Rent a DigitalOcean server.** Follow
-  `~/.murmur/plugin/skills/farm/SKILL.md` yourself, and read
-  `${CLAUDE_PLUGIN_ROOT}` in it as `~/.murmur/plugin`. In Claude Code, your
-  user can also type `/murmur:farm`. It needs a DigitalOcean account. It shows
-  the monthly price and buys nothing until your user types that price back.
-- **Use a Linux computer they own:** Ubuntu 22.04 or newer, Debian 12 or newer,
-  or Windows with WSL. Ask your user to run this on that computer, in their own
-  terminal. It asks for their password and a few questions:
+- **Rent a DigitalOcean server.** Follow the `farm` skill
+  (`~/work/murmur/plugin/skills/farm/SKILL.md`). In Claude Code, your user can
+  also type `/murmur:farm`. It needs a DigitalOcean account. It shows the
+  monthly price and buys nothing until your user types that price back.
+- **A Linux computer or server they already have**: Ubuntu 24.04 or newer, or
+  Debian 12 or newer, with systemd. Ubuntu 22.04 works too, after one extra
+  command for Python 3.11 that the installer prints. On that machine, logged in
+  as their usual user and not root (over ssh for a server), your user runs:
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/magik-ai/murmur/main/farm/install.sh | bash
   ```
 
-A Mac cannot be a farm yet ([#8](https://github.com/magik-ai/murmur/issues/8)).
+  It asks for their password and a few questions, and ends with the commands
+  for the first agent. If you yourself run on that machine, gh is signed in and
+  `sudo -n true` succeeds, you may run it for them with `--yes`, which takes
+  every default.
+- **A Windows PC with WSL** works like a Linux computer, after two settings
+  that keep WSL running when its window closes:
+  <https://github.com/magik-ai/murmur/blob/main/docs/12-the-machine.md#what-the-machine-must-be>.
+- **A Mac cannot be a farm yet**
+  ([#8](https://github.com/magik-ai/murmur/issues/8)). A Mac can rent a
+  DigitalOcean farm and drive it.
 
 Tell your user that farm agents run without permission prompts, so they can run
 any command the farm's user can. The farm should hold only what the agents
 need.
+
+## Updating murmur later
+
+```bash
+git -C ~/work/murmur pull --ff-only
+```
+
+Then, in Claude Code, `claude plugin marketplace update murmur` and
+`claude plugin update murmur@murmur`. In Codex, the linked skills update with
+the pull. On a farm, run the same `git pull` there.
