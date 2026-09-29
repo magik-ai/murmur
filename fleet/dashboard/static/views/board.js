@@ -167,10 +167,10 @@ function severity(percent) {
 function accountCard(account, context) {
   const rows = windows(account);
   const state = fmt.room(account);
-  const soonest = windows(account)
-    .map((row) => row.resets)
-    .filter((value) => value != null)
-    .sort((one, other) => one - other)[0];
+  /* The session and the weekly window each say when they reset: the soonest alone was always
+     the session, and hid how long a spent week keeps the account out. */
+  const resets = [["session", account.session_resets], ["weekly", account.weekly_resets]]
+    .filter(([, value]) => fmt.until(value));
   return h("button", {
     key: account.name,
     type: "button",
@@ -196,7 +196,8 @@ function accountCard(account, context) {
           fmt.percent(row.percent)))))
       : h("p", { class: "muted" }, "No numbers yet"),
     h("div", { class: "foot" },
-      soonest ? h("span", null, `resets ${fmt.until(soonest)}`) : null,
+      resets.map(([name, value]) => h("span", { key: name, "data-resets": name },
+        `${name} resets ${fmt.until(value)}`)),
       account.stale_error ? h("span", null, "not refreshing") : null));
 }
 

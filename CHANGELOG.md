@@ -6,7 +6,11 @@ follow [Semantic Versioning](https://semver.org/) from the first tagged release.
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
+
+- A subscription card on the Board says when its session and its weekly limit
+  reset, each on its own line. It used to name only the soonest reset, which
+  was always the session's.
 
 ## 0.2.0 - 2026-09-25
 
