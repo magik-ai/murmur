@@ -876,6 +876,7 @@ button.account-chip {
 }
 button.account-chip:hover { border-color: var(--line-strong); }
 .account-chip.out { border-color: var(--tone-fail); }
+.account-chip .foot { row-gap: 2px; align-content: end; }
 .account-chip .label { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
 /* A subscription card holds three bars with their numbers; half a phone squeezed each bar to a
    dot, so on a phone every card has the whole width. It sits after the row rule so it wins. */
