@@ -90,6 +90,70 @@ class InstalledCopy(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return {entry["path"]: entry for entry in json.loads(result.stdout)["files"]}
 
+    def test_the_farm_block_comes_with_a_farm_and_only_once(self):
+        # Every agent must check the farm before it spawns. With farm = yes, init puts that check
+        # into CLAUDE.md and AGENTS.md, with this repository's farm project filled in.
+        subprocess.run(["git", "remote", "add", "origin", "https://github.com/acme/my.shop.git"],
+                       cwd=self.project, check=True)
+        self.apply_report("--agents-md")
+        self.assertNotIn("murmur:farm", (self.project / "CLAUDE.md").read_text())
+        self.run_script("murmur_init.py", "answer", "--id", "farm", "--value", "yes")
+        result = self.run_script("murmur_init.py", "apply")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["farm_project"], "my.shop")
+        added = [e["path"] for e in report["files"] if e["note"] == "farm block added"]
+        self.assertEqual(added, ["CLAUDE.md", "AGENTS.md"])
+        for name in ("CLAUDE.md", "AGENTS.md"):
+            text = (self.project / name).read_text()
+            self.assertEqual(text.count("<!-- murmur:farm -->"), 1, name)
+            self.assertIn("This repository is the farm\nproject `my.shop`.", text)
+            self.assertIn("fleet add-project --name my.shop --repo acme/my.shop", text)
+            self.assertNotIn("<PROJECT>", text)
+        again = json.loads(self.run_script("murmur_init.py", "apply").stdout)["files"]
+        self.assertEqual([e["path"] for e in again if e["note"] == "farm block there"],
+                         ["CLAUDE.md", "AGENTS.md"])
+
+    def doctor_farm_rows(self, fleet_script):
+        """{check: (state, detail)} of the doctor's farm rows, with `fleet` as given, or none."""
+        self.run_script("murmur_init.py", "answer", "--id", "farm", "--value", "yes")
+        self.apply_report()
+        bin_dir = self.tmp / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        if fleet_script:
+            (bin_dir / "fleet").write_text("#!/bin/sh\n" + fleet_script)
+            (bin_dir / "fleet").chmod(0o755)
+        env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(self.tmp)}
+        result = subprocess.run(
+            [sys.executable, str(self.plugin / "scripts" / "murmur_doctor.py")],
+            cwd=self.project, env=env, capture_output=True, text=True, timeout=60)
+        rows = {}
+        for line in result.stdout.splitlines():
+            parts = re.split(r"\s{2,}", line.strip(), maxsplit=2)
+            if len(parts) == 3 and parts[0] in {"farm block", "agent machine", "farm project"}:
+                rows[parts[0]] = (parts[1], parts[2])
+        return rows
+
+    def test_the_doctor_runs_the_farm_check(self):
+        project = self.project.name
+        rows = self.doctor_farm_rows(
+            f'case "$1" in capacity) echo "OK [ok] ";; projects) echo {project};; esac\n')
+        self.assertEqual(rows["farm block"][0], "ok")
+        self.assertEqual(rows["agent machine"], ("ok", "the farm answers: OK [ok]"))
+        self.assertEqual(rows["farm project"][0], "ok")
+
+    def test_the_doctor_says_why_the_farm_check_fails(self):
+        rows = self.doctor_farm_rows(None)
+        self.assertEqual(rows["agent machine"][0], "warning")
+        self.assertIn("no fleet command here", rows["agent machine"][1])
+        rows = self.doctor_farm_rows('echo "ssh: Could not resolve hostname farm" >&2; exit 255\n')
+        self.assertEqual(rows["agent machine"][0], "warning")
+        self.assertIn("Could not resolve hostname farm", rows["agent machine"][1])
+        self.assertNotIn("farm project", rows)
+        rows = self.doctor_farm_rows('case "$1" in capacity) echo "OK [ok]";; esac\n')
+        self.assertEqual(rows["farm project"][0], "warning")
+        self.assertIn("fleet add-project --name", rows["farm project"][1])
+
     def test_agents_md_is_written_only_when_asked(self):
         # Codex reads AGENTS.md and never CLAUDE.md, so --agents-md gives a repository without one
         # an AGENTS.md that points to the contract. Without the flag there is still none.

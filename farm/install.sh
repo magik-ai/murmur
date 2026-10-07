@@ -434,6 +434,11 @@ cat <<EOF
              --task "Add a line to README.md saying this repository is run by agents as a team. Open a pull request."
        fleet status
 
+  To drive the farm from your laptop, open Claude Code or Codex in your repository there, and paste:
+       Connect this repo to my murmur farm (ssh host: $farm_alias): https://github.com/magik-ai/murmur/blob/main/INSTALL.md
+     Steps 9 to 13 of that file connect the laptop, write the farm block into CLAUDE.md and AGENTS.md,
+     run the farm check, and start a first lane and a first head office message.
+
   Dashboard:  fleet dashboard start     then   fleet dashboard token
   Check:      fleet capacity   hq who   gh auth status
   Upgrade:    git -C ~/work/murmur pull    (both tools run from that clone)

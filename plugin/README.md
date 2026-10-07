@@ -196,6 +196,7 @@ line, and the session starts normally.
 | `.claude/generated-files.txt` | The list of generated files, for the guard hook | Left alone |
 | `CLAUDE.md` | Written from a template when you have none, with the contract's four sections left to the contract; it has placeholders to fill in | Four lines are added at the end, once, pointing to the contract |
 | `AGENTS.md` | Not created | Four lines are added at the end, once, pointing to the contract |
+| The farm block, in `CLAUDE.md` and `AGENTS.md` | Only when a farm runs your agents: the farm project's name, and the check every agent runs before it starts a lane | Added at the end, once |
 
 Apart from `.murmur/config.toml`, which holds your answers, init never
 overwrites a file you have. If `.murmur/config.toml` exists but cannot be read,

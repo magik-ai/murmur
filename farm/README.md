@@ -12,6 +12,14 @@ It installs what the farm needs: git, tmux, curl, GitHub's `gh`, uv and Claude C
 
 Agents on a farm run with Claude Code's permission prompts switched off and Codex's sandbox switched off, so they can run any command your user can. Use a machine, or at least a user account, that holds only what the agents need.
 
+**After the install, drive it from your laptop.** Open Claude Code or Codex in your repository on the laptop and paste:
+
+```text
+Connect this repo to my murmur farm (ssh host: farm): https://github.com/magik-ai/murmur/blob/main/INSTALL.md
+```
+
+The agent follows steps 9 to 13 of [INSTALL.md](../INSTALL.md). It puts a small `fleet` script on the laptop that runs every command on the farm over ssh, joins the farm's head office, writes a farm block into the repository's `CLAUDE.md` and `AGENTS.md`, registers the repository on the farm and runs the farm check. It ends with a first lane running on the farm and a first message in the head office. The farm block makes every later agent run the same check before it starts a lane.
+
 To get a farm on DigitalOcean from your laptop instead, use `/murmur:farm` from the [murmur plugin](../plugin/README.md). It creates the server and runs this installer there for you.
 
 Flags:

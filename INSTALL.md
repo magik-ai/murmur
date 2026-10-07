@@ -291,13 +291,20 @@ In a few lines:
 - `update murmur` updates everything later, and `murmur doctor` checks a
   repository at any time.
 - A farm is optional: an always-on Linux machine that runs agents while their
-  computer is off. Offer it. If they want one, go on to step 8.
+  computer is off. Offer it. If they want one, go on to step 8. Steps 8 to 13
+  end with a first lane running on the farm and a first message in the head
+  office. Do them in order, and do not stop between them unless a step says so.
 - The handbook explains the method:
   <https://github.com/magik-ai/murmur/tree/main/docs>
 
 ## 8. A farm, only if your user wants one
 
-Ask which way they prefer.
+If your user says they already have a farm (for example, they ran
+`farm/install.sh` on it, or asked you to connect this repository to their
+farm), do not offer a new one: check that its Claude Code is logged in, as the
+end of this step says, and go on to step 9.
+
+Otherwise, ask which way they prefer.
 
 - **Rent a DigitalOcean server.** Follow the `farm` skill
   (`~/work/murmur/plugin/skills/farm/SKILL.md`). In Claude Code, your user can
@@ -331,6 +338,198 @@ Ask which way they prefer.
 Tell your user that farm agents run without permission prompts, so they can run
 any command the farm's user can. The farm should hold only what the agents
 need.
+
+The installer ends by asking your user to log the farm's Claude Code into
+their subscription (`claude`, then `/login`; over ssh, `ssh -t <host> claude`).
+Ask them to do that now, in their own terminal. A farm with no login runs no
+lane. The DigitalOcean flow does this in its `logins` step.
+
+If you yourself run on the farm, `fleet` is already there: skip step 9.
+
+## 9. Connect this computer to the farm
+
+On this computer, `fleet` is a small script that runs each `fleet` command on
+the farm over ssh. Do not install fleet itself here.
+
+- **After the DigitalOcean flow**, the script is there already: the flow's
+  `shim` step wrote it. Go on to the check below.
+- **For a machine your user already has**, set up ssh first. Ask your user for
+  the farm's address and their user name on it. If `~/.ssh/config` has no
+  `Host farm` block, show them this block and, with their yes, add it to the
+  end of that file:
+
+  ```text
+  Host farm
+    HostName <the farm's address>
+    User <their user on the farm>
+  ```
+
+  Then `ssh -o BatchMode=yes farm true` must exit 0 and print nothing. If it
+  asks for a password or fails on the key, ask your user to run
+  `ssh-copy-id farm` in their own terminal (it asks for their password once),
+  then try again. Then write the script:
+
+  ```bash
+  mkdir -p ~/.local/bin
+  cat > ~/.local/bin/fleet <<'EOF'
+  #!/usr/bin/env bash
+  # Run fleet on the farm over ssh, with every argument quoted for the remote shell.
+  args=(); for a in "$@"; do args+=("$(printf %q "$a")"); done
+  exec ssh farm "\$HOME/.local/bin/fleet ${args[*]}"
+  EOF
+  chmod +x ~/.local/bin/fleet
+  ```
+
+  If a `~/.local/bin/fleet` that is not this script is there already, leave
+  it, and ask your user.
+
+The check: `~/.local/bin/fleet capacity` must print a line that starts with
+`OK` or `BLOCK`. If it prints anything else, show it to your user and stop.
+
+The ssh host the script uses is the farm's host in the steps below: `farm`
+here, or the farm's name after the DigitalOcean flow
+(`grep -o 'ssh [^ ]*' ~/.local/bin/fleet` prints it).
+
+## 10. The head office on this computer
+
+The farm already has a head office: a private GitHub repository the agents
+use for names, branch claims and messages. This computer joins the same one.
+
+1. Ask the farm which repository it is:
+
+   ```bash
+   ssh <host> 'grep -E "^(repo|owner) " ~/.config/hq/config.toml'
+   ```
+
+   If that file is missing, the farm has no head office. Suggest
+   `<their GitHub login>/agent-hq-office`, and with your user's yes create it
+   with `gh repo create <owner>/agent-hq-office --private`. Then run the same
+   `hq init` on the farm (`ssh <host> '~/.local/bin/hq init --repo ... --owner ...'`).
+2. Install `hq` here, from the clone of step 4. uv brings the Python it needs:
+
+   ```bash
+   uv tool install --from ~/work/murmur/hq hq-cli
+   ```
+
+   It lands in `~/.local/bin/hq`. If it is already installed, add
+   `--reinstall` to update it.
+3. Point it at the same repository, with the same owner:
+
+   ```bash
+   ~/.local/bin/hq init --repo <repo from the farm> --owner <owner from the farm>
+   ```
+
+   If it says the config exists, compare its `repo` line with the farm's and
+   ask your user before you pass `--force`.
+
+## 11. Tell the repository about the farm
+
+Run these from the repository's top folder:
+
+```bash
+uv run ~/work/murmur/plugin/scripts/murmur_init.py answer --id farm --value yes
+uv run ~/work/murmur/plugin/scripts/murmur_init.py answer --id coordination --value private-github-repo
+uv run ~/work/murmur/plugin/scripts/murmur_init.py apply
+```
+
+Add `--agents-md` to `apply` as in step 6. The report shows `farm_project`:
+the name this repository gets on the farm. It also shows `farm block added`
+for `CLAUDE.md` and `AGENTS.md`. The farm block tells every agent to check
+the farm before it starts any lane, and what to do when the check fails.
+
+The contract now differs from the one step 6 wrote, so `apply` writes
+`.murmur/contract.md.murmur-new` next to it. If your user never edited the
+contract by hand, replace it with the new one, with their yes:
+`mv .murmur/contract.md.murmur-new .murmur/contract.md`. Otherwise show them
+both and let them choose.
+
+Save the changes on GitHub as in step 6.3: on the open `murmur-setup` pull
+request if there is one, or on a new branch and pull request.
+
+## 12. Register the project, and check the farm
+
+Register this repository on the farm, under the `farm_project` name from
+step 11, if `fleet projects` does not list it yet:
+
+```bash
+~/.local/bin/fleet add-project --name <farm_project> --repo <owner>/<repo>
+```
+
+Then run the farm check. It is the same check the farm block makes every
+agent run before it starts lanes. All four must pass:
+
+```bash
+command -v fleet
+fleet capacity      # a line that starts with OK
+fleet projects      # lists <farm_project>
+fleet accounts      # at least one account with room
+```
+
+Use `~/.local/bin/fleet` if `fleet` is not found by name yet. On `BLOCK`, a
+missing project or no account with room, tell your user what the output says
+and stop. No account at all means the farm's Claude Code is not logged in
+(step 8).
+
+Then run the doctor. Its farm rows must say `ok`:
+
+```bash
+uv run ~/work/murmur/plugin/scripts/murmur_doctor.py
+```
+
+## 13. The first lane, and the first message
+
+This step starts one small agent on the farm, and sends one message through
+the head office, so your user sees that everything works.
+
+1. **A code name.** Ask your user for a code name for you, for this session.
+   Never make one up. Pick an emoji and a colour that fit it, and confirm both.
+2. **Register in the head office:**
+
+   ```bash
+   ~/.local/bin/hq hello <code name> --task "first lane on the farm"
+   ~/.local/bin/hq whoami
+   ```
+
+   If `hq whoami` says this session has no key, put `HQ_SESSION_ID=<code name>`
+   in front of every `hq` command in this step.
+3. **The first lane.** Tell your user what it does: it adds one line to the
+   README and opens a pull request in their repository, which they may close
+   or merge. Wait for their go. Then:
+
+   ```bash
+   fleet spawn --project <farm_project> --lane hello --model haiku \
+       --by <code name> --icon <emoji> --color <hex> \
+       --task "Add one line to README.md saying that agents work on this repository as a team, with murmur. Open a pull request."
+   ```
+
+   It prints the lane's id, the slug.
+4. **Watch it start.** `fleet tail <slug>` prints the lane's status. Run it
+   again every minute or so. It starts as `starting`, is up when the status is
+   `running`, and is done when it is `pr_open`; then the line shows the pull
+   request. If the status is `failed`, `ended` or `done_no_pr`, show your user
+   what `fleet tail` prints and stop.
+   Do not wait longer than 15 minutes: tell your user where the lane stands,
+   and that the dashboard shows the rest.
+5. **The first message.** Once the lane is `running`, write to the owner from
+   step 10 through the head office:
+
+   ```bash
+   ~/.local/bin/hq msg <owner> "<code name>: the farm runs <owner>/<repo>. The first lane, <slug>, is working on the README line."
+   ~/.local/bin/hq feed
+   ```
+
+   `hq feed` must show the message. It is also on the dashboard, in the Mail
+   tab.
+6. **The dashboard.** After the DigitalOcean flow, the farm skill's `open`
+   step opens it. For any other farm, your user runs
+   `ssh -N -L 7878:127.0.0.1:7878 <host>` in their own terminal, opens
+   <http://127.0.0.1:7878>, and pastes the token that `fleet dashboard token`
+   prints.
+
+Then tell your user, in a few lines: the lane's status and pull request, that
+the message is in the head office, that they decide what merges, and that
+`fan this out: <goal>` now starts lanes on the farm. Finally, end your head
+office session: `~/.local/bin/hq bye`.
 
 ## Update, repair or uninstall
 

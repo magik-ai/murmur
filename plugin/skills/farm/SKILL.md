@@ -267,7 +267,10 @@ Tell the person, in plain words:
   It needs Python 3.11 or newer, which uv provides; a Mac's own `python3` is
   older. Run it only when the person asks for it by name;
 - that `fleet` on this laptop now runs on the farm;
-- the next steps: register a project on the farm
-  (`fleet add-project --name myproj --repo owner/name`, or without the laptop
-  script `ssh <name> /home/farm/.local/bin/fleet add-project ...`), then ask
-  for a team: "fan this out: ...". The lanes run on the farm.
+- the next steps, which you take now, without waiting to be asked: steps 10
+  to 13 of murmur's `INSTALL.md` (`~/work/murmur/INSTALL.md`). They join this
+  laptop to the farm's head office, write the farm block into the
+  repository's `CLAUDE.md` and `AGENTS.md`, register the repository on the
+  farm, run the farm check, and end with a first lane running on the farm
+  and a first message in the head office. If the person is not inside the
+  repository they want to run, ask which one, as step 5 of `INSTALL.md` does.

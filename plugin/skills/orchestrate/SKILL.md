@@ -51,7 +51,43 @@ before you spawn. If `hq whoami` says this session has no key (a plain
 terminal or ssh shell), put the same `HQ_SESSION_ID=<name>` in front of every
 `hq` command you run, for example `HQ_SESSION_ID=<name> hq hello <name>`.
 
-## 2. Accounts and capacity, before anything is spawned
+## 2. The farm check, accounts and capacity, before anything is spawned
+
+**The farm check is mandatory.** Run it in every session, before the first
+spawn, whatever the repository's setup says. Run the four commands in order,
+and stop at the first one that fails:
+
+1. `command -v fleet`: the command is there. On a laptop it is a small script
+   that runs each `fleet` command on the farm over ssh.
+2. `fleet capacity`: the farm answers `OK` or `BLOCK`. Any other answer, or an
+   ssh error, means this computer cannot reach the farm.
+3. `fleet projects`: this repository is registered. Its project name is in the
+   farm block of `CLAUDE.md` or `AGENTS.md`; without that block, it is the
+   repository's own name.
+4. `fleet accounts`: at least one account has room.
+
+What the result means:
+
+| The repository says (`<FARM>`) | The check | What you do |
+| --- | --- | --- |
+| a farm | all four pass | Spawn on the farm. |
+| a farm | one fails | Spawn nothing. Tell <OWNER> which check failed, its output and the fix below. Run lanes on this machine only on <OWNER>'s word. |
+| no farm | step 1 or 2 fails | No farm: run the lanes on this machine, as below. |
+| no farm | steps 1 and 2 pass | Tell <OWNER> a farm answers and ask which to use. Suggest `farm = "yes"` in `.murmur/config.toml` and running init again. |
+
+The fixes:
+
+- **No `fleet`**: steps 8 and 9 of murmur's `INSTALL.md` set up the farm and
+  the script on this computer.
+- **No answer**: ssh to the farm must work with no prompt. The `fleet` script
+  names the ssh host: `ssh <host> true` must print nothing and exit 0.
+- **No project**: `fleet add-project --name <project> --repo <owner>/<repo>`,
+  with <OWNER>'s yes.
+- **No account with room**: wait. A lane on a full account dies on its first
+  step.
+
+Never fall back to local subagents in silence when the repository says it has
+a farm: <OWNER> believes the work runs there.
 
 - **Accounts.** Workers use the same subscription allowance that <OWNER> works
   in. Check the usage of each account first (`fleet accounts`), prefer the

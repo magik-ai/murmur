@@ -6,6 +6,21 @@ follow [Semantic Versioning](https://semver.org/) from the first tagged release.
 
 ## Unreleased
 
+### Added
+
+- Agents check the farm before they start any lane, in every session: the
+  `fleet` command is there, the farm answers, the repository is registered on
+  it, and an account has room. If a check fails, the agent starts nothing and
+  says which check failed and how to fix it. It no longer falls back to
+  running lanes on the laptop without saying so.
+- When a farm runs a repository's agents, init writes a farm block into its
+  `CLAUDE.md` and `AGENTS.md`: the repository's name on the farm and that
+  check. The doctor runs the same check.
+- [INSTALL.md](INSTALL.md) now goes past the farm: steps 9 to 13 connect the
+  laptop to the farm and its head office, register the repository, and end
+  with a first lane running on the farm and a first message in the head
+  office. `farm/install.sh` and `/murmur:farm` end by sending the agent there.
+
 ### Fixed
 
 - A subscription card on the Board says when its session and its weekly limit

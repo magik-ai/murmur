@@ -55,6 +55,9 @@ Never spawn without an explicit go from the user.
    first step without doing anything. Pass `--account <name>` only when a
    lane must use that one account (Claude lanes only; Codex lanes refuse it).
    When a lane died on a usage limit, spawn it again once an account has room.
+   Then run `fleet projects`: the project you spawn into must be listed. If it
+   is not, ask the user and register it with
+   `fleet add-project --name <name> --repo <owner>/<repo>`.
 1. **Split into lanes.** Divide the batch into self-contained lanes: disjoint
    files, no shared state. One coherent slice of work is one lane. If the
    project describes how it splits work into lanes (for example in its

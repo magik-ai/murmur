@@ -108,10 +108,15 @@ else:
                  " posting evidence and the three resting states: `.claude/tracker.md`.")
 if farm == "yes":
     lines.append("- <FARM>: yes, a separate machine runs agents. Heavy work goes there,"
-                 " never on the machine hosting this session.")
+                 " never on the machine hosting this session. Before the first spawn of"
+                 " this session, run the farm check (the farm block in CLAUDE.md or"
+                 " AGENTS.md, or section 2 of the orchestrate skill): `command -v fleet`,"
+                 " `fleet capacity`, `fleet projects`, `fleet accounts`. If one fails,"
+                 " spawn nothing and tell <OWNER> which one and why.")
 else:
     lines.append("- <FARM>: none yet. Every worker runs on this machine, so keep the"
-                 " number of parallel lanes small.")
+                 " number of parallel lanes small. Before the first spawn, still run"
+                 " `command -v fleet && fleet capacity`: if a farm answers, tell <OWNER>.")
 if coord == "private-github-repo":
     lines.append("- Branch claims live in a private GitHub repository through the `hq`"
                  " command. Claim before you push; a refused claim is someone else's branch.")
