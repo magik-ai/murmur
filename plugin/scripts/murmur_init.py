@@ -13,7 +13,10 @@ Rerunning is safe. An answered question does not come back. Apart from
 .murmur/config.toml, which holds the answers, no file that exists is
 overwritten: the contract and the tracker rules get a <name>.murmur-new beside
 them when they differ, the other files are left as they are, and an existing
-CLAUDE.md or AGENTS.md gets a four-line pointer to the contract, once.
+CLAUDE.md or AGENTS.md gets a four-line pointer to the contract, once. When a
+farm runs this repository's agents (`farm = "yes"`), both also get the farm
+block from templates/FARM.md, once: the farm check every agent runs before it
+spawns anything. When the answer changes back, init takes that block out again.
 
 Codex reads AGENTS.md and never CLAUDE.md. `apply --agents-md` writes an
 AGENTS.md that holds only a title and the pointer when the repository has none.
@@ -36,6 +39,8 @@ CONFIG = Path(".murmur/config.toml")
 CONTRACT = Path(".murmur/contract.md")
 GENERATED = Path(".claude/generated-files.txt")
 MARKER = "<!-- murmur:contract -->"
+FARM_MARKER = "<!-- murmur:farm -->"
+FARM_END = "<!-- /murmur:farm -->"
 TRACKERS = ["github-issues", "linear", "jira", "notion", "none"]
 NEVER = ["merge", "force-push", "production-writes", "paid-provisioning"]
 
@@ -373,17 +378,58 @@ def pointer_block(base: str) -> str:
     ])
 
 
-def add_pointer(root: Path, rel: Path, base: str, report: list[dict]) -> None:
+def farm_project(config: dict) -> str:
+    """The name this repository is registered under on the farm: the repository's own name,
+    made into a name `fleet` accepts (letters, digits, `.`, `_` and `-`, starting with a letter
+    or a digit)."""
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", config["repo"].split("/")[-1]).lstrip("._-")
+    return name or "project"
+
+
+def farm_block(config: dict) -> str:
+    text = (templates_dir() / "FARM.md").read_text(encoding="utf-8")
+    text = text.replace("<PROJECT>", farm_project(config))
+    text = text.replace("<ORG>/<REPO>", config["repo"]).replace("<BASE>", config["base_branch"])
+    return text.rstrip("\n")
+
+
+def remove_farm_block(root: Path, rel: Path, report: list[dict]) -> None:
+    """Take out the farm block init wrote, once the answer is no longer a farm: left in place, it
+    would tell agents to spawn nothing while the session hook says every lane runs here."""
     target = root / rel
     if not target.is_file():
         return
     text = target.read_text(encoding="utf-8")
-    if MARKER in text:
-        report.append({"path": str(rel), "action": "skipped", "note": "pointer there"})
+    start = text.find(FARM_MARKER)
+    end = text.find(FARM_END, start)
+    if start < 0 or end < 0:
+        return
+    before = text[:start].rstrip("\n")
+    after = text[end + len(FARM_END):].lstrip("\n")
+    if before and after:
+        rest = before + "\n\n" + after
+    else:
+        rest = (before + "\n") if before else after
+    target.write_text(rest, encoding="utf-8")
+    report.append({"path": str(rel), "action": "removed", "note": "farm block removed"})
+
+
+def append_block(root: Path, rel: Path, marker: str, block: str, what: str,
+                 report: list[dict]) -> None:
+    target = root / rel
+    if not target.is_file():
+        return
+    text = target.read_text(encoding="utf-8")
+    if marker in text:
+        report.append({"path": str(rel), "action": "skipped", "note": f"{what} there"})
         return
     joiner = "" if text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
-    target.write_text(text + joiner + pointer_block(base) + "\n", encoding="utf-8")
-    report.append({"path": str(rel), "action": "appended", "note": "pointer added"})
+    target.write_text(text + joiner + block + "\n", encoding="utf-8")
+    report.append({"path": str(rel), "action": "appended", "note": f"{what} added"})
+
+
+def add_pointer(root: Path, rel: Path, base: str, report: list[dict]) -> None:
+    append_block(root, rel, MARKER, pointer_block(base), "pointer", report)
 
 
 def cmd_apply(root: Path, use_defaults: bool = False, agents_md: bool = False) -> int:
@@ -442,11 +488,17 @@ def cmd_apply(root: Path, use_defaults: bool = False, agents_md: bool = False) -
         place(root, Path("AGENTS.md"), "# AGENTS.md\n\n" + pointer_block(base) + "\n", "once",
               report)
         report[-1]["note"] = "a title and the pointer to the contract, for Codex"
+    for rel in (Path("CLAUDE.md"), Path("AGENTS.md")):
+        if config["farm"] == "yes":
+            append_block(root, rel, FARM_MARKER, farm_block(config), "farm block", report)
+        else:
+            remove_farm_block(root, rel, report)
     summary = {
         "status": "applied",
         "repo": config["repo"],
         "base_branch": base,
         "tracker": config["tracker"],
+        **({"farm_project": farm_project(config)} if config["farm"] == "yes" else {}),
         "files": report,
     }
     print(json.dumps(summary, indent=2))

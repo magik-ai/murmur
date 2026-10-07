@@ -53,6 +53,10 @@ ENGINES = ("claude", "codex")
 # What init writes. The pointer is the block it puts in CLAUDE.md and AGENTS.md, which Claude
 # Code and Codex read, and which send an agent to the contract.
 MARKER = "<!-- murmur:contract -->"
+# The farm block init adds to CLAUDE.md and AGENTS.md when a farm runs the agents. It names the
+# project the repository is registered under on the farm.
+FARM_MARKER = "<!-- murmur:farm -->"
+FARM_PROJECT = re.compile(r"the farm\s+project\s+`([^`]+)`")
 PR_TEMPLATE = Path(".github/PULL_REQUEST_TEMPLATE.md")
 INIT_FILES = [PR_TEMPLATE, Path("docs/GOTCHAS.md")]
 GENERATED = Path(".claude/generated-files.txt")
@@ -405,15 +409,73 @@ def check_stale_branches(root: Path, report: Report) -> None:
     report.add("stale branches", WARN, f"{len(stale)} unpushed and idle: {shown}")
 
 
-def check_optional(report: Report, config: dict) -> None:
+def check_optional(root: Path, report: Report, config: dict) -> None:
     if config.get("coordination") == "private-github-repo":
         report.add("head office", OK, "claims are shared through a private repository")
     else:
         report.add("head office", OPTIONAL, "not set up, claims stay on this machine")
-    if config.get("farm") == "yes":
-        report.add("agent machine", OK, "a separate machine runs agents")
+    if config.get("farm") != "yes":
+        stale = [name for name in ("CLAUDE.md", "AGENTS.md")
+                 if (root / name).is_file() and FARM_MARKER in read_text(root / name)]
+        if stale:
+            report.add("farm block", WARN, f"{' and '.join(stale)} still tell agents to use a "
+                       f"farm, but the config says there is none; {AGAIN}")
+        if shutil.which("fleet"):
+            report.add("agent machine", OPTIONAL, "a fleet command is here, but the config "
+                       "says there is no farm; if it is yours, answer farm = yes and "
+                       f"{AGAIN}")
+        else:
+            report.add("agent machine", OPTIONAL, "not set up, everything runs here")
+
+
+def farm_project(root: Path, config: dict) -> str:
+    for name in ("CLAUDE.md", "AGENTS.md"):
+        path = root / name
+        found = FARM_PROJECT.search(read_text(path)) if path.is_file() else None
+        if found:
+            return found.group(1)
+    name = str(config.get("repo") or root.name).split("/")[-1]
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", name).lstrip("._-") or "project"
+
+
+def check_farm(root: Path, report: Report, config: dict) -> None:
+    """The farm check every agent runs before it spawns, when the config says a farm runs the
+    agents: the command is here, the farm answers, and this repository is registered there."""
+    if config.get("farm") != "yes":
+        return
+    names = [name for name in ("CLAUDE.md", "AGENTS.md") if (root / name).is_file()]
+    missing = [name for name in names if FARM_MARKER not in read_text(root / name)]
+    if not names or missing:
+        where = " and ".join(missing) if missing else "no CLAUDE.md or AGENTS.md"
+        report.add("farm block", WARN, f"{where}: no farm block, so agents are not told to "
+                   f"check the farm before they spawn; {AGAIN}")
     else:
-        report.add("agent machine", OPTIONAL, "not set up, everything runs here")
+        report.add("farm block", OK, f"{' and '.join(names)} tell agents to check the farm")
+    if not shutil.which("fleet"):
+        report.add("agent machine", WARN, "the config says a farm runs the agents, but there "
+                   "is no fleet command here: follow steps 8 and 9 of murmur's INSTALL.md")
+        return
+    result = run(["fleet", "capacity"], timeout=30)
+    answer = (result.stdout or "").strip() if result is not None else ""
+    if result is None or result.returncode != 0 or not answer.startswith(("OK", "BLOCK")):
+        said = "no answer in 30 seconds" if result is None else (
+            (result.stderr or result.stdout or "").strip().splitlines() or ["nothing"])[-1]
+        report.add("agent machine", WARN, f"fleet capacity did not answer ({said}); ssh to "
+                   "the farm must work with no prompt")
+        return
+    report.add("agent machine", OK, f"the farm answers: {answer.splitlines()[0]}")
+    project = farm_project(root, config)
+    listed = run(["fleet", "projects"], timeout=30)
+    if listed is None or listed.returncode != 0:
+        report.add("farm project", WARN, "fleet projects did not answer, so it is not known "
+                   "whether this repository is registered on the farm")
+        return
+    if project in [line.strip() for line in listed.stdout.splitlines()]:
+        report.add("farm project", OK, f"{project} is registered on the farm")
+    else:
+        report.add("farm project", WARN, f"{project} is not registered on the farm: fleet "
+                   f"add-project --name {project} --repo {config.get('repo', '<owner>/<repo>')} "
+                   f"--branch {config.get('base_branch') or 'main'}")
 
 
 def final_status(report: Report) -> str:
@@ -458,7 +520,8 @@ def main() -> int:
     check_tracker(root, report, config)
     check_engines(report)
     check_stale_branches(root, report)
-    check_optional(report, config)
+    check_optional(root, report, config)
+    check_farm(root, report, config)
     status = final_status(report)
     print(report.render())
     print(f"\nstatus: {status}")
