@@ -15,7 +15,8 @@ follow [Semantic Versioning](https://semver.org/) from the first tagged release.
   running lanes on the laptop without saying so.
 - When a farm runs a repository's agents, init writes a farm block into its
   `CLAUDE.md` and `AGENTS.md`: the repository's name on the farm and that
-  check. The doctor runs the same check.
+  check. The doctor checks the block, the farm's answer and the project, and
+  init takes the block out again if the farm answer changes back.
 - [INSTALL.md](INSTALL.md) now goes past the farm: steps 9 to 13 connect the
   laptop to the farm and its head office, register the repository, and end
   with a first lane running on the farm and a first message in the head

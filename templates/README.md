@@ -42,6 +42,7 @@ file you already have: the last column says what it does instead.
 | `PULL_REQUEST_TEMPLATE.md` | `.github/PULL_REQUEST_TEMPLATE.md` | Left as it is |
 | `GOTCHAS.md` | `docs/GOTCHAS.md` | Left as it is |
 | The plugin's copy of `hooks/generated-files.example.txt` | `.claude/generated-files.txt` | Left as it is |
+| `FARM.md`, with the farm project, repository and base branch filled in, only when a farm runs your agents | The end of `CLAUDE.md` and `AGENTS.md` | Added once; taken out again if the farm answer changes back |
 
 If you have an `AGENTS.md`, the same four lines are added to it. The other
 templates are for you to copy by hand when you need them.

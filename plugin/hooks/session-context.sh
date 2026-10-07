@@ -111,7 +111,7 @@ if farm == "yes":
                  " never on the machine hosting this session. Before the first spawn of"
                  " this session, run the farm check (the farm block in CLAUDE.md or"
                  " AGENTS.md, or section 2 of the orchestrate skill): `command -v fleet`,"
-                 " `fleet capacity`, `fleet projects`, `fleet accounts`. If one fails,"
+                 " `fleet capacity`, `fleet projects`, `fleet accounts pick`. If one fails,"
                  " spawn nothing and tell <OWNER> which one and why.")
 else:
     lines.append("- <FARM>: none yet. Every worker runs on this machine, so keep the"

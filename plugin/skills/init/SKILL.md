@@ -112,6 +112,8 @@ Each entry has an action:
   there and left alone).
 - `appended`: the four pointer lines, or the farm block, were added to the end
   of `CLAUDE.md` or `AGENTS.md`. Each is added once, never twice.
+- `removed`: the farm block came out of `CLAUDE.md` or `AGENTS.md`, because
+  the farm answer is no longer `yes`.
 - `alongside`: the file exists and differs, so the new version was written next
   to it as `<name>.murmur-new`. Nothing of the person's was touched.
 

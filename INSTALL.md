@@ -344,7 +344,9 @@ their subscription (`claude`, then `/login`; over ssh, `ssh -t <host> claude`).
 Ask them to do that now, in their own terminal. A farm with no login runs no
 lane. The DigitalOcean flow does this in its `logins` step.
 
-If you yourself run on the farm, `fleet` is already there: skip step 9.
+If you yourself run on the farm, `fleet` and `hq` are already there and set
+up: skip step 9 and step 10, and wherever a step below says `ssh <host> '…'`,
+run the command inside the quotes directly.
 
 ## 9. Connect this computer to the farm
 
@@ -386,9 +388,18 @@ the farm over ssh. Do not install fleet itself here.
 The check: `~/.local/bin/fleet capacity` must print a line that starts with
 `OK` or `BLOCK`. If it prints anything else, show it to your user and stop.
 
-The ssh host the script uses is the farm's host in the steps below: `farm`
-here, or the farm's name after the DigitalOcean flow
-(`grep -o 'ssh [^ ]*' ~/.local/bin/fleet` prints it).
+`<host>` in the steps below is the ssh host the script uses: `farm` here, or
+the farm's name after the DigitalOcean flow. This prints it:
+
+```bash
+sed -n 's/^exec ssh \(.* \)*\([^ ]*\) ".*"$/\2/p' ~/.local/bin/fleet
+```
+
+Every later agent finds the script by its name, `fleet`, so `~/.local/bin`
+must be on the `PATH` of new shells. If `bash -lc 'command -v fleet'` (or
+`zsh -lc` on a Mac) prints nothing, show your user this line and, with their
+yes, add it to `~/.zshrc` on a Mac or `~/.bashrc` on Linux:
+`export PATH="$HOME/.local/bin:$PATH"`.
 
 ## 10. The head office on this computer
 
@@ -401,10 +412,16 @@ use for names, branch claims and messages. This computer joins the same one.
    ssh <host> 'grep -E "^(repo|owner) " ~/.config/hq/config.toml'
    ```
 
+   It prints two lines such as `repo = "alice/agent-hq-office"` and
+   `owner = "alice"`, perhaps with a comment after the value. The values
+   inside the quotes are `<hq repo>` and `<hq owner>` below. `<hq owner>` is
+   the owner's code name in the head office, not a GitHub organisation.
+
    If that file is missing, the farm has no head office. Suggest
    `<their GitHub login>/agent-hq-office`, and with your user's yes create it
-   with `gh repo create <owner>/agent-hq-office --private`. Then run the same
-   `hq init` on the farm (`ssh <host> '~/.local/bin/hq init --repo ... --owner ...'`).
+   with `gh repo create <their GitHub login>/agent-hq-office --private`. Ask
+   them for their code name as the owner. Then run the same `hq init` on the
+   farm (`ssh <host> '~/.local/bin/hq init --repo <hq repo> --owner <hq owner>'`).
 2. Install `hq` here, from the clone of step 4. uv brings the Python it needs:
 
    ```bash
@@ -416,7 +433,7 @@ use for names, branch claims and messages. This computer joins the same one.
 3. Point it at the same repository, with the same owner:
 
    ```bash
-   ~/.local/bin/hq init --repo <repo from the farm> --owner <owner from the farm>
+   ~/.local/bin/hq init --repo <hq repo> --owner <hq owner>
    ```
 
    If it says the config exists, compare its `repo` line with the farm's and
@@ -437,11 +454,11 @@ the name this repository gets on the farm. It also shows `farm block added`
 for `CLAUDE.md` and `AGENTS.md`. The farm block tells every agent to check
 the farm before it starts any lane, and what to do when the check fails.
 
-The contract now differs from the one step 6 wrote, so `apply` writes
-`.murmur/contract.md.murmur-new` next to it. If your user never edited the
-contract by hand, replace it with the new one, with their yes:
-`mv .murmur/contract.md.murmur-new .murmur/contract.md`. Otherwise show them
-both and let them choose.
+If these answers changed, the contract now differs from the one step 6 wrote,
+so `apply` writes `.murmur/contract.md.murmur-new` next to it. If your user
+never edited the contract by hand, replace it with the new one, with their
+yes: `mv .murmur/contract.md.murmur-new .murmur/contract.md`. Otherwise show
+them both and let them choose.
 
 Save the changes on GitHub as in step 6.3: on the open `murmur-setup` pull
 request if there is one, or on a new branch and pull request.
@@ -449,11 +466,16 @@ request if there is one, or on a new branch and pull request.
 ## 12. Register the project, and check the farm
 
 Register this repository on the farm, under the `farm_project` name from
-step 11, if `fleet projects` does not list it yet:
+step 11, with the base branch from step 6:
 
 ```bash
-~/.local/bin/fleet add-project --name <farm_project> --repo <owner>/<repo>
+~/.local/bin/fleet add-project --name <farm_project> --repo <owner>/<repo> --branch <base>
 ```
+
+Run it even when `fleet projects` already lists the name. It says
+`already registered` when the farm has the same repository and branch under
+that name. If it says the name is registered with different settings, another
+repository has it: show your user and stop.
 
 Then run the farm check. It is the same check the farm block makes every
 agent run before it starts lanes. All four must pass:
@@ -462,7 +484,7 @@ agent run before it starts lanes. All four must pass:
 command -v fleet
 fleet capacity      # a line that starts with OK
 fleet projects      # lists <farm_project>
-fleet accounts      # at least one account with room
+fleet accounts pick # prints an account name; exits 1 when none has room
 ```
 
 Use `~/.local/bin/fleet` if `fleet` is not found by name yet. On `BLOCK`, a
@@ -479,7 +501,9 @@ uv run ~/work/murmur/plugin/scripts/murmur_doctor.py
 ## 13. The first lane, and the first message
 
 This step starts one small agent on the farm, and sends one message through
-the head office, so your user sees that everything works.
+the head office, so your user sees that everything works. As in step 12, call
+`~/.local/bin/fleet` and `~/.local/bin/hq` by their full paths if a shell does
+not find them by name.
 
 1. **A code name.** Ask your user for a code name for you, for this session.
    Never make one up. Pick an emoji and a colour that fit it, and confirm both.
@@ -492,9 +516,12 @@ the head office, so your user sees that everything works.
 
    If `hq whoami` says this session has no key, put `HQ_SESSION_ID=<code name>`
    in front of every `hq` command in this step.
-3. **The first lane.** Tell your user what it does: it adds one line to the
-   README and opens a pull request in their repository, which they may close
-   or merge. Wait for their go. Then:
+3. **The first lane.** If this step ran before, there may be one already:
+   if `fleet status --project <farm_project>` lists a `hello` lane, do not
+   spawn another. Go on to part 4 with its slug, or, if it has opened its
+   pull request, to part 5. Otherwise, tell your user what it does: it adds
+   one line to the README and opens a pull request in their repository, which
+   they may close or merge. Wait for their go. Then:
 
    ```bash
    fleet spawn --project <farm_project> --lane hello --model haiku \
@@ -510,11 +537,11 @@ the head office, so your user sees that everything works.
    what `fleet tail` prints and stop.
    Do not wait longer than 15 minutes: tell your user where the lane stands,
    and that the dashboard shows the rest.
-5. **The first message.** Once the lane is `running`, write to the owner from
-   step 10 through the head office:
+5. **The first message.** Once the lane is `running`, write to `<hq owner>`
+   from step 10 through the head office. hq signs it with your code name:
 
    ```bash
-   ~/.local/bin/hq msg <owner> "<code name>: the farm runs <owner>/<repo>. The first lane, <slug>, is working on the README line."
+   ~/.local/bin/hq msg <hq owner> "The farm runs <owner>/<repo>. The first lane, <slug>, is adding the README line."
    ~/.local/bin/hq feed
    ```
 

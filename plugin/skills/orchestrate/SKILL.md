@@ -64,7 +64,8 @@ and stop at the first one that fails:
 3. `fleet projects`: this repository is registered. Its project name is in the
    farm block of `CLAUDE.md` or `AGENTS.md`; without that block, it is the
    repository's own name.
-4. `fleet accounts`: at least one account has room.
+4. `fleet accounts pick`: prints the account with the most room, and exits 1
+   when no account has room.
 
 What the result means:
 
@@ -80,9 +81,11 @@ The fixes:
 - **No `fleet`**: steps 8 and 9 of murmur's `INSTALL.md` set up the farm and
   the script on this computer.
 - **No answer**: ssh to the farm must work with no prompt. The `fleet` script
-  names the ssh host: `ssh <host> true` must print nothing and exit 0.
-- **No project**: `fleet add-project --name <project> --repo <owner>/<repo>`,
-  with <OWNER>'s yes.
+  names the ssh host, which
+  `sed -n 's/^exec ssh \(.* \)*\([^ ]*\) ".*"$/\2/p' ~/.local/bin/fleet`
+  prints; `ssh <host> true` must print nothing and exit 0.
+- **No project**: with <OWNER>'s yes,
+  `fleet add-project --name <project> --repo <owner>/<repo> --branch <base>`.
 - **No account with room**: wait. A lane on a full account dies on its first
   step.
 

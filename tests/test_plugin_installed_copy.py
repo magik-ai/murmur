@@ -108,11 +108,22 @@ class InstalledCopy(unittest.TestCase):
             text = (self.project / name).read_text()
             self.assertEqual(text.count("<!-- murmur:farm -->"), 1, name)
             self.assertIn("This repository is the farm\nproject `my.shop`.", text)
-            self.assertIn("fleet add-project --name my.shop --repo acme/my.shop", text)
+            self.assertIn("fleet add-project --name my.shop --repo acme/my.shop --branch main",
+                          text)
             self.assertNotIn("<PROJECT>", text)
         again = json.loads(self.run_script("murmur_init.py", "apply").stdout)["files"]
         self.assertEqual([e["path"] for e in again if e["note"] == "farm block there"],
                          ["CLAUDE.md", "AGENTS.md"])
+        # Back to no farm: the block comes out, and everything around it stays.
+        self.run_script("murmur_init.py", "answer", "--id", "farm", "--value", "not-yet")
+        gone = json.loads(self.run_script("murmur_init.py", "apply").stdout)["files"]
+        self.assertEqual([e["path"] for e in gone if e["action"] == "removed"],
+                         ["CLAUDE.md", "AGENTS.md"])
+        agents = (self.project / "AGENTS.md").read_text()
+        self.assertNotIn("murmur:farm", agents)
+        self.assertTrue(agents.startswith("# AGENTS.md\n\n<!-- murmur:contract -->\n"), agents)
+        self.assertTrue(agents.endswith("doctor command when anything about the setup looks "
+                                        "wrong.\n"), agents)
 
     def doctor_farm_rows(self, fleet_script):
         """{check: (state, detail)} of the doctor's farm rows, with `fleet` as given, or none."""
